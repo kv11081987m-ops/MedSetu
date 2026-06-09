@@ -137,7 +137,7 @@ export default function CustomerHome() {
 
         {/* ── Header ── */}
         <div style={s.header}>
-          <span style={s.logo}>MedSetu</span>
+          <img src="/logo.png" alt="MedSetu Logo" style={{ height: '36px', width: 'auto' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {/* DEV: Seller View shortcut */}
             <button

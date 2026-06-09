@@ -17,46 +17,11 @@ export default function SplashScreen() {
   return (
     <div style={styles.container}>
       <div style={{ ...styles.content, opacity: visible ? 1 : 0 }}>
-        {/* Pill / Capsule Icon */}
-        <svg
-          width="80"
-          height="80"
-          viewBox="0 0 80 80"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          style={styles.icon}
-        >
-          <rect
-            x="6"
-            y="26"
-            width="68"
-            height="28"
-            rx="14"
-            stroke="white"
-            strokeWidth="4"
-            fill="none"
-          />
-          <line
-            x1="40"
-            y1="26"
-            x2="40"
-            y2="54"
-            stroke="white"
-            strokeWidth="4"
-          />
-          <rect
-            x="6"
-            y="26"
-            width="34"
-            height="28"
-            rx="14"
-            fill="white"
-            fillOpacity="0.25"
-          />
-        </svg>
-
-        <h1 style={styles.title}>MedSetu</h1>
-        <p style={styles.tagline}>Aapki Dawai, Aapke Dwar</p>
+        <img
+          src="/logo.png"
+          alt="MedSetu Logo"
+          style={{ width: '180px', height: 'auto', marginBottom: '16px' }}
+        />
       </div>
     </div>
   );

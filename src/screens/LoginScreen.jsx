@@ -78,17 +78,11 @@ export default function LoginScreen() {
 
         {/* ── Brand header ── */}
         <div style={s.header}>
-          <div style={s.iconCircle}>
-            <svg width="40" height="40" viewBox="0 0 80 80" fill="none">
-              <rect x="6" y="26" width="68" height="28" rx="14"
-                stroke="white" strokeWidth="4" fill="none" />
-              <line x1="40" y1="26" x2="40" y2="54" stroke="white" strokeWidth="4" />
-              <rect x="6" y="26" width="34" height="28" rx="14"
-                fill="white" fillOpacity="0.3" />
-            </svg>
-          </div>
-          <h1 style={s.appName}>MedSetu</h1>
-          <p style={s.tagline}>Aapki Dawai, Aapke Dwar</p>
+          <img
+            src="/logo.png"
+            alt="MedSetu Logo"
+            style={{ width: '200px', height: 'auto', marginBottom: '8px' }}
+          />
         </div>
 
         {/* ── Login card ── */}
