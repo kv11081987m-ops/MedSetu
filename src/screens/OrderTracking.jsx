@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { fetchOrderById, updateOrderStatus } from '../lib/orders';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
   MapPin, Package, IndianRupee, CreditCard, Store,
@@ -38,7 +39,24 @@ const STEPS = [
   },
 ];
 
-const ACTIVE_STEP = 3; // current step index (1-based)
+const ACTIVE_STEP = 3; // fallback when no real order
+
+function getActiveStep(status) {
+  const map = { pending: 1, confirmed: 2, preparing: 2, out_for_delivery: 3, delivered: 4, cancelled: 4 };
+  return map[status] || 1;
+}
+
+function buildSteps(order) {
+  const storeName  = order?.sellers?.store_name || 'Store';
+  const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;
+  const fmt        = (d) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '- -';
+  return [
+    { id: 1, title: 'Order Confirm Hua',    sub: `${storeName} ne accept kiya`,           time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
+    { id: 2, title: 'Taiyari Ho Rahi Hai',  sub: 'Store aapki medicine pack kar raha hai', time: '- -',                   state: activeStep > 2 ? 'done' : activeStep === 2 ? 'active' : 'pending' },
+    { id: 3, title: 'Delivery Pe Hai',      sub: 'Delivery boy aapke paas aa raha hai',    time: 'Expected soon',         state: activeStep > 3 ? 'done' : activeStep === 3 ? 'active' : 'pending' },
+    { id: 4, title: 'Deliver Ho Gaya',      sub: 'Order aapko mil gaya',                   time: '- -',                   state: activeStep >= 4 ? 'done' : 'pending' },
+  ];
+}
 
 const NAV_TABS = [
   { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
@@ -103,10 +121,32 @@ function CancelDialog({ onConfirm, onClose }) {
 // ─── Main Screen ──────────────────────────────────────────────
 export default function OrderTracking() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const orderId  = location.state?.orderId;
+
+  const [order,      setOrder]      = useState(null);
+  const [loading,    setLoading]    = useState(true);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
   const [bikeX, setBikeX]           = useState(0);
   const [activeTab]                 = useState('orders');
+
+  useEffect(() => {
+    if (!orderId) { setLoading(false); return; }
+    fetchOrderById(orderId).then(({ data, error }) => {
+      if (!error && data) setOrder(data);
+      setLoading(false);
+    });
+  }, [orderId]);
+
+  const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;
+  const steps      = buildSteps(order);
+
+  const handleCancelConfirm = async () => {
+    setShowCancel(false);
+    if (orderId) await updateOrderStatus(orderId, 'cancelled');
+    setCancelled(true);
+  };
 
   // Subtle bike oscillation
   useEffect(() => {
@@ -121,6 +161,19 @@ export default function OrderTracking() {
     return () => clearInterval(id);
   }, []);
 
+  if (!loading && !orderId) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', backgroundColor: '#F5F5F5' }}>
+        <Package size={52} color="#CCCCCC" />
+        <p style={{ fontSize: '16px', fontWeight: '700', color: '#333333', margin: 0 }}>Order nahi mila</p>
+        <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Orders page se kisi order ko track karo</p>
+        <button style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => navigate('/orders')}>
+          Orders Dekho
+        </button>
+      </div>
+    );
+  }
+
   if (cancelled) {
     return (
       <div style={s.wrapper}>
@@ -131,7 +184,7 @@ export default function OrderTracking() {
             </button>
             <div>
               <p style={s.headerTitle}>Order Track Karo</p>
-              <p style={s.headerSub}>#MED-2024-017</p>
+              <p style={s.headerSub}>#{order?.order_number || orderId || 'MED-XXXX'}</p>
             </div>
             <div style={{ width: 34 }} />
           </div>
@@ -180,8 +233,8 @@ export default function OrderTracking() {
 
           {/* Stepper */}
           <div style={s.card}>
-            {STEPS.map((step, i) => {
-              const isLast = i === STEPS.length - 1;
+            {steps.map((step, i) => {
+              const isLast = i === steps.length - 1;
               return (
                 <div key={step.id} style={s.stepRow}>
                   {/* Left: circle + line */}
@@ -307,11 +360,11 @@ export default function OrderTracking() {
               <button style={s.detailLink}>Order Details Dekho</button>
             </div>
             {[
-              { Icon: Store,        text: 'Shri Ram Medical Store' },
-              { Icon: Package,      text: '3 items' },
-              { Icon: IndianRupee,  text: '₹1,329.15' },
-              { Icon: CreditCard,   text: 'Cash on Delivery' },
-              { Icon: MapPin,       text: '123, Gandhi Nagar, Deoria' },
+              { Icon: Store,       text: order?.sellers?.store_name || 'Medical Store' },
+              { Icon: Package,     text: `${(order?.order_items || []).length || '—'} items` },
+              { Icon: IndianRupee, text: order ? `₹${parseFloat(order.final_amount || 0).toLocaleString('en-IN')}` : '—' },
+              { Icon: CreditCard,  text: order?.payment_method === 'cod' ? 'Cash on Delivery' : (order?.payment_method || 'COD') },
+              { Icon: MapPin,      text: order?.delivery_address || order?.sellers?.address || 'Delivery address' },
             ].map(({ Icon, text }) => (
               <div key={text} style={s.summaryRow}>
                 <div style={s.summaryIconBox}>
@@ -338,8 +391,8 @@ export default function OrderTracking() {
             </div>
           </div>
 
-          {/* Cancel — only before step 3 active */}
-          {ACTIVE_STEP < 3 && (
+          {/* Cancel — only before out_for_delivery */}
+          {activeStep < 3 && (
             <button style={s.cancelBtn} onClick={() => setShowCancel(true)}>
               Order Cancel Karo
             </button>
@@ -370,7 +423,7 @@ export default function OrderTracking() {
         {/* Cancel Dialog */}
         {showCancel && (
           <CancelDialog
-            onConfirm={() => { setShowCancel(false); setCancelled(true); }}
+            onConfirm={handleCancelConfirm}
             onClose={() => setShowCancel(false)}
           />
         )}

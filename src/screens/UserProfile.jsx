@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import {
   ArrowLeft, Pencil, Camera, User, Phone, Mail, Calendar,
   Users, Home, Briefcase, Heart, AlertCircle, Activity,
@@ -39,14 +40,85 @@ const SETTINGS_ROWS = [
 
 // ─── Main Screen ──────────────────────────────────────────────
 export default function UserProfile() {
-  const navigate = useNavigate();
-  const { handleLogout } = useAuth();
-  const [addresses, setAddresses] = useState(INITIAL_ADDRESSES);
-  const [editMode, setEditMode]   = useState(false);
-  const [showLogout, setShowLogout] = useState(false);
+  const navigate  = useNavigate();
+  const { handleLogout: authLogout } = useAuth();
 
-  const deleteAddress = (id) =>
-    setAddresses((a) => a.filter((x) => x.id !== id));
+  const [userData,    setUserData]    = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [editMode,    setEditMode]    = useState(false);
+  const [showLogout,  setShowLogout]  = useState(false);
+  const [addresses,   setAddresses]   = useState(INITIAL_ADDRESSES);
+
+  // ── Fetch user ───────────────────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const stored = localStorage.getItem('medsetu_user');
+        if (!stored) { navigate('/login'); return; }
+        const localUser = JSON.parse(stored);
+        const { data, error } = await supabase
+          .from('users').select('*').eq('id', localUser.id).single();
+        if (!error && data) setUserData(data);
+        else setUserData(localUser);
+      } catch {
+        navigate('/login');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // ── Profile update ───────────────────────────────────────────
+  const updateProfile = async () => {
+    if (!userData) return;
+    const { error } = await supabase
+      .from('users')
+      .update({ name: userData.name, email: userData.email, blood_group: userData.blood_group })
+      .eq('id', userData.id);
+    if (!error) {
+      localStorage.setItem('medsetu_user', JSON.stringify(userData));
+      setEditMode(false);
+      alert('Profile update ho gaya!');
+    } else {
+      alert('Update nahi hua — dobara try karo');
+    }
+  };
+
+  const setField = (field) => (e) =>
+    setUserData((prev) => ({ ...prev, [field]: e.target.value }));
+
+  // ── Logout ───────────────────────────────────────────────────
+  const handleLogout = async () => {
+    setShowLogout(false);
+    localStorage.removeItem('medsetu_user');
+    localStorage.removeItem('medsetu_role');
+    await authLogout();
+    navigate('/login', { replace: true });
+  };
+
+  const deleteAddress = (id) => setAddresses((a) => a.filter((x) => x.id !== id));
+
+  // ── Loading / null states ────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' }}>
+        <p style={{ color: '#888888', fontSize: '14px' }}>Profile load ho rahi hai...</p>
+      </div>
+    );
+  }
+  if (!userData) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', backgroundColor: '#F5F5F5' }}>
+        <p style={{ fontSize: '15px', color: '#888888' }}>User data nahi mila</p>
+        <button onClick={() => navigate('/login')} style={{ padding: '12px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>
+          Login Karo
+        </button>
+      </div>
+    );
+  }
+
+  const initials = (userData.name || 'U').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
     <div style={s.wrapper}>
@@ -70,17 +142,21 @@ export default function UserProfile() {
             {/* Avatar */}
             <div style={s.avatarWrap}>
               <div style={s.avatarCircle}>
-                <span style={s.avatarInitials}>RK</span>
+                <span style={s.avatarInitials}>{initials}</span>
               </div>
               <button style={s.cameraBtn}>
                 <Camera size={13} color="#FFFFFF" />
               </button>
             </div>
 
-            <p style={s.heroName}>Rahul Kumar</p>
-            <p style={s.heroPhone}>+91 98765XXXXX</p>
-            <p style={s.heroCity}>Deoria, Uttar Pradesh</p>
-            <p style={s.heroMember}>Member since Jan 2025</p>
+            <p style={s.heroName}>{userData.name || 'User'}</p>
+            <p style={s.heroPhone}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
+            <p style={s.heroCity}>{userData.city || 'Deoria, Uttar Pradesh'}</p>
+            <p style={s.heroMember}>
+              {userData.created_at
+                ? `Member since ${new Date(userData.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+                : 'Member since —'}
+            </p>
 
             {/* Quick Stats */}
             <div style={s.statsRow}>
@@ -101,27 +177,59 @@ export default function UserProfile() {
           <div style={s.card}>
             <div style={s.cardHead}>
               <p style={s.cardTitle}>Personal Jankari</p>
-              <button style={s.editLink} onClick={() => setEditMode((v) => !v)}>
+              <button style={s.editLink} onClick={() => editMode ? updateProfile() : setEditMode(true)}>
                 {editMode ? 'Save Karo' : 'Edit Karo'}
               </button>
             </div>
-            {[
-              { Icon: User,     label: 'Naam',          val: 'Rahul Kumar'       },
-              { Icon: Phone,    label: 'Mobile',         val: '+91 98765XXXXX'   },
-              { Icon: Mail,     label: 'Email',          val: 'rahul@gmail.com'  },
-              { Icon: Calendar, label: 'Date of Birth',  val: '15 Jan 1990'      },
-              { Icon: Users,    label: 'Gender',         val: 'Male'             },
-            ].map(({ Icon, label, val }) => (
-              <div key={label} style={s.infoRow}>
-                <div style={s.infoIconBox}><Icon size={15} color="#1A6B3C" /></div>
-                <div style={s.infoText}>
-                  <p style={s.infoLabel}>{label}</p>
-                  {editMode
-                    ? <input defaultValue={val} style={s.infoInput} />
-                    : <p style={s.infoVal}>{val}</p>}
-                </div>
+
+            {/* Naam */}
+            <div style={s.infoRow}>
+              <div style={s.infoIconBox}><User size={15} color="#1A6B3C" /></div>
+              <div style={s.infoText}>
+                <p style={s.infoLabel}>Naam</p>
+                {editMode
+                  ? <input value={userData.name || ''} onChange={setField('name')} style={s.infoInput} placeholder="Apna naam daalo" />
+                  : <p style={s.infoVal}>{userData.name || '—'}</p>}
               </div>
-            ))}
+            </div>
+
+            {/* Mobile (read-only) */}
+            <div style={s.infoRow}>
+              <div style={s.infoIconBox}><Phone size={15} color="#1A6B3C" /></div>
+              <div style={s.infoText}>
+                <p style={s.infoLabel}>Mobile</p>
+                <p style={s.infoVal}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
+              </div>
+            </div>
+
+            {/* Email */}
+            <div style={s.infoRow}>
+              <div style={s.infoIconBox}><Mail size={15} color="#1A6B3C" /></div>
+              <div style={s.infoText}>
+                <p style={s.infoLabel}>Email</p>
+                {editMode
+                  ? <input value={userData.email || ''} onChange={setField('email')} style={s.infoInput} placeholder="Email daalo" type="email" />
+                  : <p style={s.infoVal}>{userData.email || '—'}</p>}
+              </div>
+            </div>
+
+            {/* Blood Group */}
+            <div style={s.infoRow}>
+              <div style={s.infoIconBox}><Heart size={15} color="#1A6B3C" /></div>
+              <div style={s.infoText}>
+                <p style={s.infoLabel}>Blood Group</p>
+                {editMode
+                  ? <input value={userData.blood_group || ''} onChange={setField('blood_group')} style={s.infoInput} placeholder="e.g. B+" />
+                  : <p style={s.infoVal}>{userData.blood_group || '—'}</p>}
+              </div>
+            </div>
+
+            {editMode && (
+              <button style={{ padding: '10px', backgroundColor: '#F5F5F5', color: '#555555', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
+                onClick={() => setEditMode(false)}>
+                Cancel
+              </button>
+            )}
           </div>
 
           {/* ── Saved Addresses ── */}
@@ -254,7 +362,7 @@ export default function UserProfile() {
               <p style={s.modalSub}>Aapko dobara login karna padega.</p>
               <button
                 style={s.modalPrimary}
-                onClick={() => { setShowLogout(false); handleLogout().then(() => navigate('/login')); }}
+                onClick={handleLogout}
               >
                 <LogOut size={16} color="#FFFFFF" />
                 Haan, Logout Karo

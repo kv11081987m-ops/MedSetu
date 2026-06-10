@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, FileText, Home } from 'lucide-react';
 
@@ -24,11 +24,16 @@ export default function OnboardingScreen() {
   const navigate = useNavigate();
   const [current, setCurrent] = useState(0);
   const [animating, setAnimating] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
 
   const goTo = (index) => {
     if (animating || index === current) return;
     setAnimating(true);
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setCurrent(index);
       setAnimating(false);
     }, 250);

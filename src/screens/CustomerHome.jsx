@@ -107,20 +107,27 @@ export default function CustomerHome() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchSellers('Deoria').then(({ data }) => {
-      if (cancelled || !data || data.length === 0) return;
-      // Map to the simple shape StoreCard expects
-      setNearbyStores(data.map((s, i) => ({
-        id:       s.id,
-        name:     s.store_name,
-        address:  s.address || s.district || '',
-        distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
-        rating:   parseFloat(s.rating) || 4.0,
-        reviews:  s.total_reviews      || 0,
-        open:     s.is_open,
-      })));
-      setStoresLoading(false);
-    });
+    const load = async () => {
+      try {
+        const { data } = await fetchSellers('Deoria');
+        if (!cancelled && data && data.length > 0) {
+          setNearbyStores(data.map((s, i) => ({
+            id:       s.id,
+            name:     s.store_name,
+            address:  s.address || s.district || '',
+            distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
+            rating:   parseFloat(s.rating) || 4.0,
+            reviews:  s.total_reviews      || 0,
+            open:     s.is_open,
+          })));
+        }
+      } catch (err) {
+        console.error('Sellers fetch error:', err);
+      } finally {
+        if (!cancelled) setStoresLoading(false);
+      }
+    };
+    load();
     return () => { cancelled = true; };
   }, []);
 
@@ -139,13 +146,6 @@ export default function CustomerHome() {
         <div style={s.header}>
           <img src="/logo.png" alt="MedSetu Logo" style={{ height: '36px', width: 'auto' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {/* DEV: Seller View shortcut */}
-            <button
-              style={s.sellerDevBtn}
-              onClick={() => navigate('/seller-dashboard')}
-            >
-              Seller View
-            </button>
             <button style={s.iconBtn} aria-label="Notifications">
               <div style={{ position: 'relative' }}>
                 <Bell size={22} color="#1A1A1A" />
@@ -270,7 +270,7 @@ export default function CustomerHome() {
                     color={isActive ? '#1A6B3C' : '#AAAAAA'}
                     strokeWidth={isActive ? 2.5 : 1.8}
                   />
-                  {id === 'search' && cartCount > 0 && (
+                  {id === 'orders' && cartCount > 0 && (
                     <span style={{
                       position: 'absolute', top: '-5px', right: '-7px',
                       minWidth: '16px', height: '16px', borderRadius: '8px',
@@ -331,17 +331,6 @@ const s = {
     fontWeight: '800',
     color: '#1A6B3C',
     letterSpacing: '-0.4px',
-  },
-  sellerDevBtn: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: '#666666',
-    backgroundColor: '#F0F0F0',
-    border: '1px solid #DDDDDD',
-    borderRadius: '8px',
-    padding: '4px 10px',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
   },
   iconBtn: {
     background: 'none',

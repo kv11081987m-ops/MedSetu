@@ -9,9 +9,9 @@ import { fetchSellers, mapSeller } from '../lib/api';
 
 // ─── Dummy fallback (shown while loading or on error) ─────────
 const FALLBACK_STORES = [
-  { id: 'f1', initials: 'SR', name: 'Shri Ram Medical Store',  address: 'Civil Lines, Deoria',    distance: '0.8 km', rating: 4.5, reviews: 128, open: true,  timing: '8AM – 9PM', phone: '9876543210', pin: { top: '38%', left: '52%' } },
-  { id: 'f2', initials: 'AM', name: 'Arogya Medical Hall',     address: 'Station Road, Deoria',   distance: '1.2 km', rating: 4.2, reviews: 86,  open: true,  timing: '9AM – 8PM', phone: '9812345678', pin: { top: '55%', left: '30%' } },
-  { id: 'f3', initials: 'GM', name: 'Gupta Medical Agency',    address: 'Collector Ganj, Deoria', distance: '2.1 km', rating: 4.8, reviews: 214, open: false, timing: '8AM – 6PM', phone: '9800112233', pin: { top: '25%', left: '72%' } },
+  { id: 'f1', initials: 'SR', name: 'Shri Ram Medical Store',  address: 'Civil Lines, Deoria',    distance: '0.8 km', rating: 4.5, reviews: 128, open: true,  verified: true, timing: '8AM – 9PM', phone: '9876543210', pin: { top: '38%', left: '52%' } },
+  { id: 'f2', initials: 'AM', name: 'Arogya Medical Hall',     address: 'Station Road, Deoria',   distance: '1.2 km', rating: 4.2, reviews: 86,  open: true,  verified: true, timing: '9AM – 8PM', phone: '9812345678', pin: { top: '55%', left: '30%' } },
+  { id: 'f3', initials: 'GM', name: 'Gupta Medical Agency',    address: 'Collector Ganj, Deoria', distance: '2.1 km', rating: 4.8, reviews: 214, open: false, verified: true, timing: '8AM – 6PM', phone: '9800112233', pin: { top: '25%', left: '72%' } },
 ];
 
 const FILTERS = ['Sab', 'Abhi Khule', '5km ke andar', 'Highest Rated', 'Verified Only'];
@@ -113,6 +113,7 @@ export default function StoreLocator() {
   const [activeFilter, setActiveFilter] = useState('Sab');
   const [activePin, setActivePin] = useState(null);
   const [searchVal, setSearchVal] = useState('');
+  const [sortBy, setSortBy]       = useState('distance');
   const [stores, setStores]     = useState(FALLBACK_STORES);
   const [loadState, setLoadState] = useState('loading'); // 'loading' | 'ok' | 'error'
 
@@ -135,15 +136,22 @@ export default function StoreLocator() {
   const handlePinTap = (id) => setActivePin(activePin === id ? null : id);
 
   const filteredStores = stores.filter((st) => {
-    if (activeFilter === 'Abhi Khule') return st.open;
+    if (activeFilter === 'Abhi Khule')    return st.open;
     if (activeFilter === 'Highest Rated') return st.rating >= 4.5;
-    if (activeFilter === '5km ke andar') return parseFloat(st.distance) <= 5;
+    if (activeFilter === '5km ke andar')  return parseFloat(st.distance) <= 5;
+    if (activeFilter === 'Verified Only') return st.verified !== false;
     return true;
   }).filter((st) =>
     searchVal === '' ||
     st.name.toLowerCase().includes(searchVal.toLowerCase()) ||
     st.address.toLowerCase().includes(searchVal.toLowerCase())
   );
+
+  const sortedStores = [...filteredStores].sort((a, b) => {
+    if (sortBy === 'rating') return b.rating - a.rating;
+    if (sortBy === 'name')   return a.name.localeCompare(b.name);
+    return parseFloat(a.distance) - parseFloat(b.distance);
+  });
 
   return (
     <div style={s.wrapper}>
@@ -240,11 +248,11 @@ export default function StoreLocator() {
           {/* Count + Sort */}
           <div style={s.listHeader}>
             <span style={s.storeCount}>
-              {filteredStores.length} Store{filteredStores.length !== 1 ? 's' : ''} Mile Aapke Paas
+              {sortedStores.length} Store{sortedStores.length !== 1 ? 's' : ''} Mile Aapke Paas
             </span>
             <div style={s.sortBox}>
               <span style={s.sortLabel}>Sort:</span>
-              <select style={s.sortSelect} defaultValue="distance">
+              <select style={s.sortSelect} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="distance">Distance</option>
                 <option value="rating">Rating</option>
                 <option value="name">Name</option>
@@ -267,13 +275,13 @@ export default function StoreLocator() {
 
           {/* Cards */}
           <div style={s.cardsList}>
-            {filteredStores.length === 0 ? (
+            {sortedStores.length === 0 ? (
               <div style={s.emptyState}>
                 <MapPin size={36} color="#CCCCCC" />
                 <p style={s.emptyText}>Koi store nahi mila</p>
               </div>
             ) : (
-              filteredStores.map((store) => (
+              sortedStores.map((store) => (
                 <StoreCard
                   key={store.id}
                   store={store}

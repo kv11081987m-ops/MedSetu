@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Phone, CheckCircle } from 'lucide-react';
-import { sendOTP, sendEmailOTP } from '../lib/auth';
+import { sendEmailOTP, generateOTP, storeOTP } from '../lib/auth';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginScreen() {
@@ -33,19 +33,12 @@ export default function LoginScreen() {
     if (error) setError('');
   };
 
-  const handleSendOTP = async () => {
+  const handleSendOTP = () => {
     if (phone.length !== 10) { setError('Sahi 10-digit number daalo'); return; }
-
-    setLoading(true); setError('');
-    const { error: otpErr } = await sendOTP(phone);
-    setLoading(false);
-
-    if (otpErr) {
-      // Phone provider not set up → fall through to dev OTP mode
-      navigate('/otp', { state: { phone, dev: true } });
-      return;
-    }
-    navigate('/otp', { state: { phone, dev: false } });
+    const otp = generateOTP();
+    storeOTP(phone, otp);
+    console.log('Dev OTP:', otp);
+    navigate('/otp', { state: { phone } });
   };
 
   // ── Email handler ──────────────────────────────────────────
@@ -125,20 +118,12 @@ export default function LoginScreen() {
                   onBlur={() => setPhoneFocus(false)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendOTP()}
                   style={s.textInput}
-                  disabled={loading}
                 />
               </div>
               {error && <p style={s.errorText}>{error}</p>}
-              <button
-                style={{ ...s.primaryBtn, opacity: loading ? 0.7 : 1 }}
-                onClick={handleSendOTP}
-                disabled={loading}
-              >
-                {loading ? 'OTP Bheja Ja Raha Hai...' : 'OTP Bhejo'}
+              <button style={s.primaryBtn} onClick={handleSendOTP}>
+                OTP Bhejo
               </button>
-              <p style={s.hintText}>
-                💡 Dev: OTP screen pe <strong>123456</strong> enter karo
-              </p>
             </div>
           )}
 
@@ -227,6 +212,13 @@ export default function LoginScreen() {
             {' '}se agree karte hain
           </p>
         </div>
+      </div>
+
+      {/* ── Staff Login link ── */}
+      <div style={{ position: 'fixed', bottom: '16px', right: '16px' }}>
+        <span onClick={() => navigate('/staff-login')} style={s.staffLink}>
+          Staff Login
+        </span>
       </div>
 
       {/* ── Demo Role Modal ── */}
@@ -344,7 +336,8 @@ const s = {
 
   // Terms
   terms:    { fontSize: '12px', color: '#999999', textAlign: 'center', lineHeight: '1.6', margin: 0 },
-  termLink: { color: '#1A6B3C', fontWeight: '600', cursor: 'pointer' },
+  termLink:  { color: '#1A6B3C', fontWeight: '600', cursor: 'pointer' },
+  staffLink: { fontSize: '11px', color: '#999999', cursor: 'pointer', textDecoration: 'underline' },
 
   // Demo modal
   overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 },

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchOrders, mapOrder } from '../lib/orders';
+import { fetchOrders, mapOrder, updateOrderStatus } from '../lib/orders';
 import {
   ArrowLeft, SlidersHorizontal, Search, CheckCircle,
   Clock, XCircle, RefreshCw, Star, ChevronRight,
@@ -73,7 +73,7 @@ const FILTER_STATUS = {
 };
 
 // ─── Order Card ───────────────────────────────────────────────
-function OrderCard({ order, onTrack, onReorder, onDetail }) {
+function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
   const [expanded, setExpanded] = useState(false);
   const st = STATUS_MAP[order.status];
   const displayItems = order.items.slice(0, 2);
@@ -136,7 +136,7 @@ function OrderCard({ order, onTrack, onReorder, onDetail }) {
               <MapPin size={13} color="#FFFFFF" />
               Track Karo
             </button>
-            <button style={s.btnRedOutlined}>
+            <button style={s.btnRedOutlined} onClick={() => onCancel(order)}>
               <XCircle size={13} color="#DC3545" />
               Cancel Karo
             </button>
@@ -191,6 +191,17 @@ export default function OrderHistory() {
       setDbLoading(false);
     });
   }, []);
+
+  const handleCancel = async (order) => {
+    if (!order.dbId) return;
+    if (!window.confirm('Kya aap ye order cancel karna chahte hain?')) return;
+    const { error } = await updateOrderStatus(order.dbId, 'cancelled');
+    if (!error) {
+      setDbOrders((prev) =>
+        prev.map((o) => o.dbId === order.dbId ? { ...o, status: 'cancelled', refund: o.amount } : o)
+      );
+    }
+  };
 
   // Show DB orders if fetched, else dummy data
   const allOrders = dbLoading ? ORDERS : (dbOrders.length > 0 ? dbOrders : ORDERS);
@@ -317,9 +328,10 @@ export default function OrderHistory() {
                 <div key={order.id}>
                   <OrderCard
                     order={order}
-                    onTrack={() => navigate('/order-tracking')}
+                    onTrack={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
                     onReorder={() => navigate('/medicine-search')}
-                    onDetail={() => navigate('/order-tracking')}
+                    onCancel={handleCancel}
+                    onDetail={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
                   />
                   {i < filtered.length - 1 && <div style={s.divider} />}
                 </div>

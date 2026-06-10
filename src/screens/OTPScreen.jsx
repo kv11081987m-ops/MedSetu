@@ -1,28 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { verifyOTP, sendOTP } from '../lib/auth';
+import { createOrLoginUser, verifyStoredOTP } from '../lib/auth';
 import { useAuth } from '../context/AuthContext';
-
 const OTP_LENGTH  = 6;
-const TIMER_START = 4 * 60 + 59;
-const DEV_OTP     = '123456';
+const TIMER_START = 30;
 
 export default function OTPScreen() {
-  const navigate    = useNavigate();
-  const location    = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { applyDevSession } = useAuth();
 
-  const phone     = location.state?.phone || '0000000000';
-  const isDev     = location.state?.dev   ?? true;
-  const masked    = phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4);
+  const phone  = location.state?.phone || '0000000000';
+  const masked = phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4);
 
-  const [otp,           setOtp]           = useState(Array(OTP_LENGTH).fill(''));
-  const [timeLeft,      setTimeLeft]      = useState(TIMER_START);
-  const [canResend,     setCanResend]     = useState(false);
-  const [showRoleModal, setShowRoleModal] = useState(false);
-  const [error,         setError]         = useState('');
-  const [loading,       setLoading]       = useState(false);
+  const [otp,       setOtp]       = useState(Array(OTP_LENGTH).fill(''));
+  const [timeLeft,  setTimeLeft]  = useState(TIMER_START);
+  const [canResend, setCanResend] = useState(false);
+  const [error,     setError]     = useState('');
+  const [loading,   setLoading]   = useState(false);
   const inputRefs = useRef([]);
 
   // Countdown timer
@@ -68,36 +64,29 @@ export default function OTPScreen() {
     const code = otp.join('');
     if (code.length < OTP_LENGTH) { setError('Pura 6-digit OTP daalo'); return; }
 
-    // Dev bypass — always works
-    if (code === DEV_OTP || isDev) {
-      if (code !== DEV_OTP && !isDev) {
-        setError('Wrong OTP. Dev mode mein 123456 use karo.');
-        return;
-      }
-      applyDevSession(phone, 'customer');
-      setShowRoleModal(true);
+    if (!location.state?.phone) {
+      setError('Phone number nahi mila');
+      navigate('/login');
       return;
     }
 
-    // Real Supabase verification
+    const result = verifyStoredOTP(phone, code);
+    if (!result.valid) {
+      setError(result.message);
+      setOtp(Array(OTP_LENGTH).fill(''));
+      inputRefs.current[0]?.focus();
+      return;
+    }
+
     setLoading(true);
-    setError('');
-    const { data, error: verifyError } = await verifyOTP(phone, code);
-    setLoading(false);
-
-    if (verifyError) {
-      // Fallback: if provider still not enabled, accept dev OTP
-      if (code === DEV_OTP) {
-        applyDevSession(phone, 'customer');
-        setShowRoleModal(true);
-        return;
-      }
-      setError('Galat OTP hai. Dobara try karo.');
-      return;
-    }
-
-    if (data?.session) {
-      setShowRoleModal(true);
+    try {
+      applyDevSession(phone, 'customer');
+      await createOrLoginUser(phone);
+      navigate('/home', { replace: true });
+    } catch (err) {
+      setError('Login mein dikkat: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -108,13 +97,6 @@ export default function OTPScreen() {
     setCanResend(false);
     setError('');
     inputRefs.current[0]?.focus();
-    if (!isDev) await sendOTP(phone);
-  };
-
-  const handleRoleSelect = (role) => {
-    applyDevSession(phone, role);
-    setShowRoleModal(false);
-    navigate(role === 'seller' ? '/seller-dashboard' : '/home');
   };
 
   return (
@@ -130,18 +112,17 @@ export default function OTPScreen() {
         <div style={styles.headingBlock}>
           <h2 style={styles.title}>OTP Verify Karo</h2>
           <p style={styles.subtitle}>
-            6-digit OTP bheja gaya hai <strong>+91 {masked}</strong> pe
+            <strong>+91 {masked}</strong> ke liye OTP screen
           </p>
           <button style={styles.changeLink} onClick={() => navigate('/login')}>
             Number change karein?
           </button>
         </div>
 
-        {isDev && (
-          <div style={styles.devBanner}>
-            💡 Dev mode — <strong>{DEV_OTP}</strong> enter karo ya koi bhi 6 digits (dev bypass ON)
-          </div>
-        )}
+        {/* SMS delivery note */}
+        <div style={styles.devBanner}>
+          📱 OTP aapke number pe SMS se aayega — kuch seconds wait karo
+        </div>
 
         {/* OTP Boxes */}
         <div style={styles.otpRow} onPaste={handlePaste}>
@@ -169,8 +150,8 @@ export default function OTPScreen() {
         {/* Timer */}
         <p style={styles.timerText}>
           {timeLeft > 0
-            ? `OTP expire hoga: ${formatTime(timeLeft)}`
-            : 'OTP expire ho gaya'}
+            ? `Resend ${formatTime(timeLeft)} mein available hoga`
+            : 'Resend available hai'}
         </p>
 
         {/* Verify Button */}
@@ -192,31 +173,6 @@ export default function OTPScreen() {
         </button>
       </div>
 
-      {/* Role Modal */}
-      {showRoleModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalSheet}>
-            <div style={styles.modalHandle} />
-            <h3 style={styles.modalTitle}>Aap kaun hain?</h3>
-            <p style={styles.modalSubtitle}>Apna role chunein</p>
-
-            <button style={styles.roleBtn} onClick={() => handleRoleSelect('customer')}>
-              Customer
-              <span style={styles.roleBtnHint}>Dawai khareedna chahta hoon</span>
-            </button>
-
-            <button
-              style={{ ...styles.roleBtn, ...styles.roleBtnOutlined }}
-              onClick={() => handleRoleSelect('seller')}
-            >
-              Seller / Dukandaar
-              <span style={{ ...styles.roleBtnHint, color: '#1A6B3C' }}>
-                Apni dukaan manage karna chahta hoon
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -238,7 +194,7 @@ const styles = {
   title:        { fontSize: '22px', fontWeight: '700', color: '#1A1A1A', margin: 0 },
   subtitle:     { fontSize: '14px', color: '#666666', margin: 0, lineHeight: '1.5' },
   changeLink: { background: 'none', border: 'none', padding: 0, fontSize: '14px', color: '#1A6B3C', fontWeight: '600', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: 'fit-content' },
-  devBanner: { fontSize: '12px', color: '#92400E', backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', padding: '10px 12px', borderRadius: '8px', lineHeight: '1.5' },
+  devBanner: { fontSize: '13px', color: '#92400E', backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', padding: '10px 14px', borderRadius: '10px', lineHeight: '1.6' },
   otpRow: { display: 'flex', gap: '10px', justifyContent: 'center' },
   otpBox: {
     width: '48px', height: '56px', borderRadius: '10px', border: '2px solid',
@@ -251,13 +207,5 @@ const styles = {
     width: '100%', padding: '15px', backgroundColor: '#1A6B3C', color: '#FFFFFF',
     border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: '600', fontFamily: 'inherit',
   },
-  resendBtn:  { background: 'none', border: 'none', fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', textAlign: 'center', padding: 0 },
-  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 },
-  modalSheet: { width: '100%', maxWidth: '480px', backgroundColor: '#FFFFFF', borderRadius: '24px 24px 0 0', padding: '16px 24px 40px', display: 'flex', flexDirection: 'column', gap: '14px' },
-  modalHandle:   { width: '40px', height: '4px', backgroundColor: '#E0E0E0', borderRadius: '2px', alignSelf: 'center', marginBottom: '8px' },
-  modalTitle:    { fontSize: '22px', fontWeight: '700', color: '#1A1A1A', margin: 0, textAlign: 'center' },
-  modalSubtitle: { fontSize: '14px', color: '#888888', margin: 0, textAlign: 'center' },
-  roleBtn: { width: '100%', padding: '16px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '14px', fontSize: '17px', fontWeight: '600', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', fontFamily: 'inherit' },
-  roleBtnOutlined: { backgroundColor: '#FFFFFF', border: '2px solid #1A6B3C', color: '#1A6B3C' },
-  roleBtnHint:     { fontSize: '12px', fontWeight: '400', color: 'rgba(255,255,255,0.8)', opacity: 0.85 },
+  resendBtn: { background: 'none', border: 'none', fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', textAlign: 'center', padding: 0 },
 };

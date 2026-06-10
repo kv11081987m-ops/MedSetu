@@ -6,6 +6,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { searchMedicines, mapMedicine } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 // ─── Dummy Data ───────────────────────────────────────────────
 const INITIAL_RECENT = [
@@ -106,7 +107,30 @@ export default function MedicineSearch() {
   const [dbResults, setDbResults]   = useState([]);
   const [searching, setSearching]   = useState(false);
   const [searchError, setSearchError] = useState(false);
+  const [popularMeds, setPopularMeds] = useState(POPULAR);
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    supabase
+      .from('medicines')
+      .select('id, name, salt_name, selling_price, stock, category, is_available')
+      .eq('is_available', true)
+      .order('stock', { ascending: false })
+      .limit(6)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setPopularMeds(data.map((m) => {
+            const cat  = (m.category || '').toLowerCase();
+            const type = cat.includes('tablet')   ? 'tablet'
+                       : cat.includes('syrup')    ? 'syrup'
+                       : cat.includes('equip')    ? 'equipment'
+                       : cat.includes('inject')   ? 'injection'
+                       : 'tablet';
+            return { id: m.id, name: m.name, salt: m.salt_name || '', price: parseFloat(m.selling_price) || 0, stores: 1, type };
+          }));
+        }
+      });
+  }, []);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -252,7 +276,7 @@ export default function MedicineSearch() {
                   <span style={s.sectionTitle}>Popular Medicines</span>
                 </div>
                 <div style={s.popGrid}>
-                  {POPULAR.map((item) => (
+                  {popularMeds.map((item) => (
                     <PopularCard
                       key={item.id}
                       item={item}

@@ -23,6 +23,7 @@ import InventoryManagement from './screens/InventoryManagement';
 import PharmacistPanel     from './screens/PharmacistPanel';
 import AdminPanel          from './screens/AdminPanel';
 import UserProfile         from './screens/UserProfile';
+import StaffLogin          from './screens/StaffLogin';
 
 // Fire connection test once on module load
 testSupabaseConnection();
@@ -50,23 +51,30 @@ const ls = {
   text:     { fontSize: '14px', color: '#888888', margin: 0 },
 };
 
+// ── Role → home page mapping ──────────────────────────────────
+function roleHome(role) {
+  if (role === 'seller')      return '/seller-dashboard';
+  if (role === 'admin')       return '/admin';
+  if (role === 'pharmacist')  return '/pharmacist';
+  return '/home';
+}
+
 // ── Protected Route ───────────────────────────────────────────
-// Blocks unauthenticated access; redirects to /login.
-function ProtectedRoute({ children }) {
-  const { isAuthenticated, loading } = useAuth();
+function ProtectedRoute({ children, allowedRoles }) {
+  const { isAuthenticated, loading, userRole } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (allowedRoles && !allowedRoles.includes(userRole)) {
+    return <Navigate to={roleHome(userRole)} replace />;
+  }
   return children;
 }
 
 // ── Redirect if already logged in ────────────────────────────
-// Used on /login and /otp so a logged-in user goes straight to /home.
 function PublicOnlyRoute({ children }) {
   const { isAuthenticated, loading, userRole } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (isAuthenticated) {
-    return <Navigate to={userRole === 'seller' ? '/seller-dashboard' : '/home'} replace />;
-  }
+  if (isAuthenticated) return <Navigate to={roleHome(userRole)} replace />;
   return children;
 }
 
@@ -111,25 +119,26 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingScreen />} />
 
         {/* ── Public only (redirect if logged in) ── */}
-        <Route path="/login" element={<PublicOnlyRoute><LoginScreen /></PublicOnlyRoute>} />
-        <Route path="/otp"   element={<PublicOnlyRoute><OTPScreen /></PublicOnlyRoute>} />
+        <Route path="/login"       element={<PublicOnlyRoute><LoginScreen /></PublicOnlyRoute>} />
+        <Route path="/otp"         element={<PublicOnlyRoute><OTPScreen /></PublicOnlyRoute>} />
+        <Route path="/staff-login" element={<PublicOnlyRoute><StaffLogin /></PublicOnlyRoute>} />
 
         {/* ── Customer (protected) ── */}
-        <Route path="/home"            element={<ProtectedRoute><CustomerHome /></ProtectedRoute>} />
-        <Route path="/store-locator"   element={<ProtectedRoute><StoreLocator /></ProtectedRoute>} />
-        <Route path="/medicine-search" element={<ProtectedRoute><MedicineSearch /></ProtectedRoute>} />
-        <Route path="/medicine-detail" element={<ProtectedRoute><MedicineDetail /></ProtectedRoute>} />
-        <Route path="/prescription"    element={<ProtectedRoute><PrescriptionUpload /></ProtectedRoute>} />
-        <Route path="/checkout"        element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
-        <Route path="/order-tracking"  element={<ProtectedRoute><OrderTracking /></ProtectedRoute>} />
-        <Route path="/orders"          element={<ProtectedRoute><OrderHistory /></ProtectedRoute>} />
-        <Route path="/profile"         element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
+        <Route path="/home"            element={<ProtectedRoute allowedRoles={['customer']}><CustomerHome /></ProtectedRoute>} />
+        <Route path="/store-locator"   element={<ProtectedRoute allowedRoles={['customer']}><StoreLocator /></ProtectedRoute>} />
+        <Route path="/medicine-search" element={<ProtectedRoute allowedRoles={['customer']}><MedicineSearch /></ProtectedRoute>} />
+        <Route path="/medicine-detail" element={<ProtectedRoute allowedRoles={['customer']}><MedicineDetail /></ProtectedRoute>} />
+        <Route path="/prescription"    element={<ProtectedRoute allowedRoles={['customer']}><PrescriptionUpload /></ProtectedRoute>} />
+        <Route path="/checkout"        element={<ProtectedRoute allowedRoles={['customer']}><Checkout /></ProtectedRoute>} />
+        <Route path="/order-tracking"  element={<ProtectedRoute allowedRoles={['customer']}><OrderTracking /></ProtectedRoute>} />
+        <Route path="/orders"          element={<ProtectedRoute allowedRoles={['customer']}><OrderHistory /></ProtectedRoute>} />
+        <Route path="/profile"         element={<ProtectedRoute allowedRoles={['customer']}><UserProfile /></ProtectedRoute>} />
 
         {/* ── Seller / Staff (protected) ── */}
-        <Route path="/seller-dashboard" element={<ProtectedRoute><SellerDashboard /></ProtectedRoute>} />
-        <Route path="/inventory"        element={<ProtectedRoute><InventoryManagement /></ProtectedRoute>} />
-        <Route path="/pharmacist"       element={<ProtectedRoute><PharmacistPanel /></ProtectedRoute>} />
-        <Route path="/admin"            element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
+        <Route path="/seller-dashboard" element={<ProtectedRoute allowedRoles={['seller']}><SellerDashboard /></ProtectedRoute>} />
+        <Route path="/inventory"        element={<ProtectedRoute allowedRoles={['seller']}><InventoryManagement /></ProtectedRoute>} />
+        <Route path="/pharmacist"       element={<ProtectedRoute allowedRoles={['pharmacist']}><PharmacistPanel /></ProtectedRoute>} />
+        <Route path="/admin"            element={<ProtectedRoute allowedRoles={['admin']}><AdminPanel /></ProtectedRoute>} />
 
         {/* ── 404 ── */}
         <Route path="*" element={<NotFound />} />

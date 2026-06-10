@@ -17,11 +17,14 @@ export default function SplashScreen() {
   return (
     <div style={styles.container}>
       <div style={{ ...styles.content, opacity: visible ? 1 : 0 }}>
-        <img
-          src="/logo.png"
-          alt="MedSetu Logo"
-          style={{ width: '180px', height: 'auto', marginBottom: '16px' }}
-        />
+        <div style={{
+          backgroundColor: '#FFFFFF',
+          borderRadius: '20px',
+          padding: '20px 28px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+        }}>
+          <img src="/logo.png" alt="MedSetu Logo" style={{ width: '180px', height: 'auto', display: 'block' }} />
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ShoppingCart, Store, MapPin, Pill,
@@ -76,6 +76,13 @@ function CartItem({ item, onQtyChange, onRemove }) {
 
 // ─── Success Overlay ──────────────────────────────────────────
 function SuccessOverlay({ onTrack, onHome, orderId }) {
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `@keyframes confettiFall { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }`;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
   return (
     <div style={s.overlay}>
       {/* Confetti */}
@@ -156,7 +163,8 @@ export default function Checkout() {
   const delivFee   = delivery === 'home' ? DELIVERY_FEE : 0;
   const discount   = promoApplied ? cartTotal * (PROMO_PCT / 100) : 0;
   const grandTotal = cartTotal + delivFee - discount;
-  const totalItems = items.reduce((sum, it) => sum + it.qty, 0);
+  const totalItems  = items.reduce((sum, it) => sum + it.qty, 0);
+  const hasRxItems  = items.some((it) => it.rx);
 
   const handleQty = (id, delta) => {
     setItems((prev) => prev.map((it) =>
@@ -233,7 +241,7 @@ export default function Checkout() {
     return (
       <SuccessOverlay
         orderId={orderId}
-        onTrack={() => navigate('/order-tracking')}
+        onTrack={() => navigate('/order-tracking', { state: { orderId } })}
         onHome={() => navigate('/home')}
       />
     );
@@ -265,8 +273,8 @@ export default function Checkout() {
                 <Store size={18} color="#1A6B3C" />
               </div>
               <div>
-                <p style={s.storeName}>Shri Ram Medical Store se order</p>
-                <p style={s.storeAddr}>Civil Lines, Deoria</p>
+                <p style={s.storeName}>{cartSellerName ? `${cartSellerName} se order` : 'Store se order'}</p>
+                <p style={s.storeAddr}>Deoria, UP</p>
               </div>
             </div>
             <button style={s.changeLink} onClick={() => navigate('/store-locator')}>
@@ -351,7 +359,7 @@ export default function Checkout() {
           </div>
 
           {/* Prescription Status */}
-          <div style={rxVerified ? s.rxVerifiedCard : s.rxPendingCard}>
+          {hasRxItems && <div style={rxVerified ? s.rxVerifiedCard : s.rxPendingCard}>
             {rxVerified ? (
               <>
                 <CheckCircle size={18} color="#1A6B3C" />
@@ -372,7 +380,7 @@ export default function Checkout() {
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
           {/* Promo Code */}
           <div style={s.card}>

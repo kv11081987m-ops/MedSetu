@@ -8,17 +8,6 @@ import {
 } from 'lucide-react';
 
 // ─── Dummy Data ───────────────────────────────────────────────
-const MEDICINE = {
-  name: 'Paracetamol 500mg',
-  brand: 'Crocin — GSK Pharmaceuticals',
-  tags: ['Fever & Pain', 'Rx Required'],
-  mrp: 35.0,
-  price: 29.75,
-  off: 15,
-  perStrip: '10 tablets',
-  inStock: true,
-};
-
 const STORES = [
   { id: 1, initials: 'SR', name: 'Shri Ram Medical Store', distance: '0.8 km', price: 29.75, inStock: true,  color: '#1A6B3C', bg: '#E8F5EE' },
   { id: 2, initials: 'AM', name: 'Arogya Medical Hall',    distance: '1.2 km', price: 30.0,  inStock: true,  color: '#2563EB', bg: '#EAF2FF' },
@@ -116,7 +105,7 @@ function StoreCard({ store, onOrder }) {
 export default function MedicineDetail() {
   const navigate = useNavigate();
   const location = useLocation();
-  const med = location.state?.medicine || MEDICINE;
+  const med = location.state?.medicine;
 
   const { addToCart, cartCount } = useCart();
   const [qty, setQty]         = useState(1);
@@ -126,7 +115,41 @@ export default function MedicineDetail() {
 
   const toggleAcc = (id) => setOpenAcc((prev) => (prev === id ? null : id));
 
-  const totalPrice = ((med.price || MEDICINE.price) * qty).toFixed(2);
+  if (!med) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', backgroundColor: '#F5F5F5' }}>
+        <Pill size={52} color="#CCCCCC" />
+        <p style={{ fontSize: '16px', fontWeight: '700', color: '#333333', margin: 0 }}>Medicine nahi mili</p>
+        <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Search se medicine select karke detail dekho</p>
+        <button
+          style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
+          onClick={() => navigate('/medicine-search')}
+        >
+          Wapas Jaao
+        </button>
+      </div>
+    );
+  }
+
+  const price    = med.price ?? med.selling_price ?? 0;
+  const mrp      = med.mrp ?? 0;
+  const discount = mrp > 0 ? Math.round(((mrp - price) / mrp) * 100) : (med.off || 0);
+  const totalPrice = (price * qty).toFixed(2);
+
+  const handleShare = async () => {
+    const url  = window.location.href;
+    const text = `${med.name} - ₹${price.toFixed(2)} | MedSetu`;
+    if (navigator.share) {
+      try { await navigator.share({ title: med.name, text, url }); } catch {}
+    } else {
+      try {
+        await navigator.clipboard.writeText(url);
+        alert('Link copy ho gaya! 📋');
+      } catch {
+        alert(`Share karo: ${url}`);
+      }
+    }
+  };
 
   const handleAddToCart = (store = null) => {
     const medicine = {
@@ -154,7 +177,7 @@ export default function MedicineDetail() {
           </button>
           <span style={s.headerTitle}>Medicine Detail</span>
           <div style={s.headerRight}>
-            <button style={s.iconBtn}>
+            <button style={s.iconBtn} onClick={handleShare}>
               <Share2 size={20} color="#1A1A1A" />
             </button>
             <button style={s.iconBtn} onClick={() => setSaved((v) => !v)}>
@@ -179,11 +202,12 @@ export default function MedicineDetail() {
 
           {/* Medicine Info */}
           <div style={s.infoBlock}>
-            <h1 style={s.medName}>{MEDICINE.name}</h1>
-            <p style={s.medBrand}>{MEDICINE.brand}</p>
+            <h1 style={s.medName}>{med.name}</h1>
+            <p style={s.medBrand}>{med.brand || med.salt || ''}</p>
             <div style={s.tagRow}>
-              <span style={s.tagGreen}>Fever &amp; Pain</span>
-              <span style={s.tagOrange}>Rx Required</span>
+              {med.category && <span style={s.tagGreen}>{med.category}</span>}
+              {!med.category && med.salt && <span style={s.tagGreen}>{med.salt}</span>}
+              {med.rxRequired && <span style={s.tagOrange}>Rx Required</span>}
             </div>
           </div>
 
@@ -191,17 +215,19 @@ export default function MedicineDetail() {
           <div style={s.card}>
             <div style={s.priceRow}>
               <div>
-                <span style={s.mrpText}>MRP ₹{MEDICINE.mrp.toFixed(2)}</span>
+                {mrp > 0 && <span style={s.mrpText}>MRP ₹{mrp.toFixed(2)}</span>}
                 <div style={s.priceMain}>
-                  <span style={s.priceText}>₹{MEDICINE.price.toFixed(2)}</span>
-                  <span style={s.offBadge}>{MEDICINE.off}% OFF</span>
+                  <span style={s.priceText}>₹{price.toFixed(2)}</span>
+                  {discount > 0 && <span style={s.offBadge}>{discount}% OFF</span>}
                 </div>
-                <span style={s.perStrip}>Per strip: {MEDICINE.perStrip}</span>
+                <span style={s.perStrip}>Per strip: {med.perStrip || med.per_strip || '10 tablets'}</span>
               </div>
+              {med.stock !== 0 && (
               <div style={s.stockPill}>
                 <CheckCircle size={14} color="#1A6B3C" />
                 <span style={s.stockText}>In Stock</span>
               </div>
+            )}
             </div>
 
             <div style={s.divider} />
@@ -226,7 +252,7 @@ export default function MedicineDetail() {
           <div style={s.section}>
             <div style={s.sectionHead}>
               <p style={s.sectionTitle}>Kahan Milegi?</p>
-              <p style={s.sectionSub}>{STORES.length} stores mein available</p>
+              <p style={s.sectionSub}>{med.stores || STORES.length} stores mein available</p>
             </div>
             <div style={s.hScroll}>
               {STORES.map((store) => (
@@ -269,7 +295,7 @@ export default function MedicineDetail() {
                   <p style={s.simName}>{sim.name}</p>
                   <div style={s.simFooter}>
                     <span style={s.simPrice}>₹{sim.price}</span>
-                    <button style={s.simAddBtn}>Add</button>
+                    <button style={s.simAddBtn} onClick={() => addToCart({ id: sim.id, name: sim.name, price: sim.price, quantity: 1 }, null)}>Add</button>
                   </div>
                 </div>
               ))}
