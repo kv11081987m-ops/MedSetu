@@ -29,6 +29,13 @@ const ORDER_FILTERS = [
   { label: 'Delivered', value: 'delivered' },
 ];
 
+const SELLER_NOTIFS = [
+  { id: 1, icon: '🛒', title: 'Naya Order Aaya!',        sub: 'Ramesh Kumar ne 3 items order kiye — ₹459',      time: '2 min pehle',  read: false },
+  { id: 2, icon: '💰', title: 'Payment Received',        sub: 'UPI payment ₹892 confirm ho gaya',               time: '15 min pehle', read: false },
+  { id: 3, icon: '⚠️', title: 'Low Stock Alert',         sub: 'Paracetamol 500mg — sirf 5 strips bacha hai',    time: '1 ghanta pehle', read: true },
+  { id: 4, icon: '✅', title: 'Order Delivered',         sub: 'MED-2024-013 successfully deliver ho gaya',      time: '2 ghante pehle', read: true },
+];
+
 const getTimeAgo = (dateStr) => {
   const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
   if (diff < 60)   return `${diff} sec pehle`;
@@ -112,6 +119,9 @@ export default function SellerDashboard() {
   const [storeOpen,   setStoreOpen]   = useState(false);
   const [activeTab,   setActiveTab]   = useState('home');
   const [orderFilter, setOrderFilter] = useState('sab');
+  const [showNotif,   setShowNotif]   = useState(false);
+  const [notifs,      setNotifs]      = useState(SELLER_NOTIFS);
+  const unreadCount = notifs.filter((n) => !n.read).length;
 
   const [sellerData,    setSellerData]    = useState(null);
   const [pendingOrders, setPendingOrders] = useState([]);
@@ -264,10 +274,10 @@ export default function SellerDashboard() {
             <p style={s.storeCity}>{sellerData?.district || sellerData?.address || 'Deoria, UP'}</p>
           </div>
           <div style={s.headerRight}>
-            <button style={s.iconBtn}>
+            <button style={s.iconBtn} onClick={() => setShowNotif(true)}>
               <div style={{ position: 'relative' }}>
                 <Bell size={22} color="#1A1A1A" />
-                <span style={s.notifDot} />
+                {unreadCount > 0 && <span style={s.notifDot} />}
               </div>
             </button>
             <div style={s.avatar}>
@@ -528,6 +538,40 @@ export default function SellerDashboard() {
             );
           })}
         </nav>
+
+        {/* ── Notification Sheet ── */}
+        {showNotif && (
+          <div style={s.notifOverlay} onClick={() => setShowNotif(false)}>
+            <div style={s.notifSheet} onClick={(e) => e.stopPropagation()}>
+              <div style={s.notifHandle} />
+              <div style={s.notifHeader}>
+                <span style={s.notifTitle}>Notifications</span>
+                {unreadCount > 0 && (
+                  <button style={s.markAllBtn} onClick={() => setNotifs((p) => p.map((n) => ({ ...n, read: true })))}>
+                    Sab Read Karo
+                  </button>
+                )}
+              </div>
+              <div style={s.notifList}>
+                {notifs.map((n) => (
+                  <div
+                    key={n.id}
+                    style={{ ...s.notifRow, backgroundColor: n.read ? '#FFFFFF' : '#F0FBF4' }}
+                    onClick={() => setNotifs((p) => p.map((x) => x.id === n.id ? { ...x, read: true } : x))}
+                  >
+                    <span style={s.notifIcon}>{n.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ ...s.notifRowTitle, fontWeight: n.read ? '500' : '700' }}>{n.title}</p>
+                      <p style={s.notifRowSub}>{n.sub}</p>
+                      <p style={s.notifRowTime}>{n.time}</p>
+                    </div>
+                    {!n.read && <span style={s.unreadDot} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -546,6 +590,19 @@ const s = {
   headerRight: { display: 'flex', alignItems: 'center', gap: '10px' },
   iconBtn:     { background: 'none', border: 'none', padding: '6px', cursor: 'pointer', borderRadius: '8px', display: 'flex', alignItems: 'center' },
   notifDot:    { position: 'absolute', top: '-2px', right: '-2px', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#EF4444', border: '1.5px solid #FFFFFF' },
+  notifOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 },
+  notifSheet:   { width: '100%', maxWidth: '480px', backgroundColor: '#FFFFFF', borderRadius: '20px 20px 0 0', padding: '12px 0 40px', maxHeight: '75vh', display: 'flex', flexDirection: 'column' },
+  notifHandle:  { width: '40px', height: '4px', backgroundColor: '#E0E0E0', borderRadius: '2px', margin: '0 auto 12px' },
+  notifHeader:  { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px 12px', borderBottom: '1px solid #F0F0F0' },
+  notifTitle:   { fontSize: '17px', fontWeight: '700', color: '#1A1A1A' },
+  markAllBtn:   { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', padding: 0 },
+  notifList:    { overflowY: 'auto', flex: 1 },
+  notifRow:     { display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 20px', borderBottom: '1px solid #F5F5F5', cursor: 'pointer' },
+  notifIcon:    { fontSize: '22px', flexShrink: 0, lineHeight: 1, marginTop: '2px' },
+  notifRowTitle:{ fontSize: '14px', color: '#1A1A1A', margin: '0 0 3px' },
+  notifRowSub:  { fontSize: '12px', color: '#666666', margin: '0 0 4px', lineHeight: '1.4' },
+  notifRowTime: { fontSize: '11px', color: '#AAAAAA', margin: 0 },
+  unreadDot:    { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#1A6B3C', flexShrink: 0, marginTop: '6px' },
   avatar:      { width: '38px', height: '38px', borderRadius: '19px', backgroundColor: '#1A6B3C', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   avatarLetter:{ fontSize: '16px', fontWeight: '800', color: '#FFFFFF' },
 
