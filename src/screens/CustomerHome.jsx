@@ -145,48 +145,41 @@ export default function CustomerHome() {
 
     const initPage = async () => {
       try {
-        // 1. Check Supabase session + localStorage + devSession
-        const [{ data: { session } }] = await Promise.all([
-          supabase.auth.getSession(),
-        ]);
+        // Auth check — any of these means logged in
+        const { data: { session } } = await supabase.auth.getSession();
         const storedUser = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || 'null'); } catch { return null; } })();
         const devSession = (() => { try { return JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null'); } catch { return null; } })();
-
-        const isLoggedIn = session || storedUser?.id || storedUser?.phone || storedUser?.email || devSession;
+        const isLoggedIn = !!(session || storedUser?.id || storedUser?.phone || storedUser?.email || devSession);
 
         if (!isLoggedIn) {
-          navigate('/login', { replace: true });
+          if (!cancelled) navigate('/login', { replace: true });
           return;
         }
 
-        // 2. Supabase session exists but localStorage user missing → upsert
-        if (session && !storedUser) {
-          const { data: existing } = await supabase
-            .from('users')
-            .select('*')
-            .eq('email', session.user.email)
-            .maybeSingle();
-
-          if (existing) {
-            localStorage.setItem('medsetu_user', JSON.stringify(existing));
-          } else {
-            const { data: newUser } = await supabase
-              .from('users')
-              .insert({ email: session.user.email, role: 'customer' })
-              .select()
-              .single();
-            if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+        // Fetch sellers (primary page content)
+        try {
+          const { data } = await fetchSellers('Deoria');
+          if (!cancelled && data && data.length > 0) {
+            setNearbyStores(data.map((s, i) => ({
+              id:       s.id,
+              name:     s.store_name,
+              address:  s.address || s.district || '',
+              distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
+              rating:   parseFloat(s.rating) || 4.0,
+              reviews:  s.total_reviews      || 0,
+              open:     s.is_open,
+            })));
           }
-        }
+        } catch {}
 
-        // 3. Fetch notifications
-        const currentUser = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || 'null'); } catch { return null; } })();
-        if (currentUser?.id) {
+        // Fetch order notifications (only if user has a DB id)
+        const userId = storedUser?.id;
+        if (userId) {
           try {
             const { data } = await supabase
               .from('orders')
               .select('id, order_number, status, created_at, sellers(store_name)')
-              .eq('customer_id', currentUser.id)
+              .eq('customer_id', userId)
               .order('created_at', { ascending: false })
               .limit(10);
             if (!cancelled && data) {
@@ -202,24 +195,6 @@ export default function CustomerHome() {
               setUnreadCount(mapped.length);
             }
           } catch {}
-        }
-
-        // 4. Fetch sellers
-        try {
-          const { data } = await fetchSellers('Deoria');
-          if (!cancelled && data && data.length > 0) {
-            setNearbyStores(data.map((s, i) => ({
-              id:       s.id,
-              name:     s.store_name,
-              address:  s.address || s.district || '',
-              distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
-              rating:   parseFloat(s.rating) || 4.0,
-              reviews:  s.total_reviews      || 0,
-              open:     s.is_open,
-            })));
-          }
-        } catch (err) {
-          console.error('Sellers fetch error:', err);
         }
 
       } catch (err) {

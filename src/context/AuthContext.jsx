@@ -82,23 +82,18 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('staff_pending_role');
             setUserRole(pendingRole);
 
-            // Upsert user record with staff role
-            const { data: existing } = await supabase
-              .from('users')
-              .select('*')
-              .eq('email', emailUser.email)
-              .maybeSingle();
-
-            if (!existing) {
-              const { data: newUser } = await supabase
-                .from('users')
-                .insert({ email: emailUser.email, role: pendingRole })
-                .select()
-                .single();
-              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-            } else {
-              localStorage.setItem('medsetu_user', JSON.stringify(existing));
-            }
+            // Try to upsert user record — gracefully skip if users table missing/fails
+            try {
+              const { data: existing } = await supabase
+                .from('users').select('*').eq('email', emailUser.email).maybeSingle();
+              if (existing) {
+                localStorage.setItem('medsetu_user', JSON.stringify(existing));
+              } else {
+                const { data: newUser } = await supabase
+                  .from('users').insert({ email: emailUser.email, role: pendingRole }).select().single();
+                if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+              }
+            } catch {}
 
             // Redirect to role dashboard
             const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard' };
@@ -112,24 +107,20 @@ export function AuthProvider({ children }) {
               setUserRole('customer');
             }
 
-            const { data: existing } = await supabase
-              .from('users')
-              .select('*')
-              .eq('email', emailUser.email)
-              .maybeSingle();
+            // Try to upsert user record — gracefully skip if users table missing/fails
+            try {
+              const { data: existing } = await supabase
+                .from('users').select('*').eq('email', emailUser.email).maybeSingle();
+              if (existing) {
+                localStorage.setItem('medsetu_user', JSON.stringify(existing));
+              } else {
+                const { data: newUser } = await supabase
+                  .from('users').insert({ email: emailUser.email, role: 'customer' }).select().single();
+                if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+              }
+            } catch {}
 
-            if (!existing) {
-              const { data: newUser } = await supabase
-                .from('users')
-                .insert({ email: emailUser.email, role: 'customer' })
-                .select()
-                .single();
-              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-            } else {
-              localStorage.setItem('medsetu_user', JSON.stringify(existing));
-            }
-
-            // Redirect to home only if on login/splash/otp — not if already on home
+            // Redirect to home only if on login/splash/otp page
             const currentPath = window.location.pathname;
             const onAuthPage = ['/login', '/', '/otp', '/onboarding'].includes(currentPath);
             if (onAuthPage) window.location.href = '/home';
