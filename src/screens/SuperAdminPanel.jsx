@@ -167,7 +167,9 @@ export default function SuperAdminPanel() {
 
       {/* ── Top bar ── */}
       <div style={s.topBar}>
-        <img src="/logo.png" alt="MedSetu" style={{ height: '32px' }} />
+        <div style={{ background: '#FFFFFF', borderRadius: '8px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center' }}>
+          <img src="/logo.png" alt="MedSetu" style={{ height: '26px', width: 'auto', display: 'block' }} />
+        </div>
         <div style={{ flex: 1, textAlign: 'center' }}>
           <span style={s.topTitle}>Super Admin Panel</span>
         </div>

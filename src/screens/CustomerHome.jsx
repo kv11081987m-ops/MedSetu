@@ -221,7 +221,9 @@ export default function CustomerHome() {
 
         {/* ── Header ── */}
         <div style={s.header}>
-          <img src="/logo.png" alt="MedSetu Logo" style={{ height: '36px', width: 'auto' }} />
+          <div style={{ background: '#FFFFFF', borderRadius: '8px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center' }}>
+            <img src="/logo.png" alt="MedSetu Logo" style={{ height: '30px', width: 'auto', display: 'block' }} />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button style={s.iconBtn} aria-label="Notifications" onClick={() => { setShowNotif(true); }}>
               <div style={{ position: 'relative' }}>

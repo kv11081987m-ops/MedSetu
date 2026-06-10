@@ -95,7 +95,9 @@ export default function StaffLogin() {
       <div style={s.container}>
 
         {/* ── Logo ── */}
-        <img src="/logo.png" alt="MedSetu" style={{ width: '140px', height: 'auto', display: 'block', margin: '0 auto 4px' }} />
+        <div style={{ background: '#FFFFFF', borderRadius: '14px', padding: '10px 18px', display: 'block', margin: '0 auto 8px', boxShadow: '0 2px 10px rgba(0,0,0,0.08)', textAlign: 'center', width: 'fit-content' }}>
+          <img src="/logo.png" alt="MedSetu" style={{ width: '130px', height: 'auto', display: 'block' }} />
+        </div>
 
         {/* ── Header ── */}
         <div style={s.header}>

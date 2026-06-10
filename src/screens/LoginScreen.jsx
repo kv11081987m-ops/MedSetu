@@ -58,11 +58,13 @@ export default function LoginScreen() {
 
         {/* ── Brand header ── */}
         <div style={s.header}>
-          <img
-            src="/logo.png"
-            alt="MedSetu Logo"
-            style={{ width: '200px', height: 'auto', marginBottom: '8px' }}
-          />
+          <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: '12px 20px', display: 'inline-block', marginBottom: '8px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+            <img
+              src="/logo.png"
+              alt="MedSetu Logo"
+              style={{ width: '180px', height: 'auto', display: 'block' }}
+            />
+          </div>
         </div>
 
         {/* ── Login card ── */}
