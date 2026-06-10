@@ -10,11 +10,10 @@ export async function testSupabaseConnection() {
       return false;
     }
 
-    console.log(
-      '%c✅ Supabase Connected!',
-      'color: #1A6B3C; font-weight: bold; font-size: 14px;'
-    );
-    console.log('   URL:', import.meta.env.VITE_SUPABASE_URL);
+    if (import.meta.env.DEV) {
+      console.log('%c✅ Supabase Connected!', 'color: #1A6B3C; font-weight: bold; font-size: 14px;');
+      console.log('   URL:', import.meta.env.VITE_SUPABASE_URL);
+    }
     return true;
   } catch (err) {
     console.error('❌ Supabase connection error:', err.message);

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
-  ArrowLeft, Pencil, Camera, User, Phone, Mail, Calendar,
-  Users, Home, Briefcase, Heart, AlertCircle, Activity,
+  ArrowLeft, Pencil, Camera, User, Phone, Mail,
+  Home, Briefcase, Heart, AlertCircle, Activity,
   FileText, ChevronRight, Trash2, LogOut, Bell, Shield,
   HelpCircle, Star, Plus, Pill, MapPin,
 } from 'lucide-react';
