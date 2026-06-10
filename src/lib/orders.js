@@ -68,9 +68,11 @@ export const fetchOrders = async (customerId = null) => {
   return { data: data || [], error };
 };
 
-// ── Fetch single order ─────────────────────────────────────────
-export const fetchOrderById = async (orderId) => {
-  const { data, error } = await supabase
+// ── Fetch single order (UUID or order_number) ─────────────────
+export const fetchOrderById = async (orderIdentifier) => {
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderIdentifier);
+
+  let query = supabase
     .from('orders')
     .select(`
       *,
@@ -81,10 +83,13 @@ export const fetchOrderById = async (orderId) => {
         phone,
         district
       )
-    `)
-    .eq('id', orderId)
-    .single();
+    `);
 
+  query = isUUID
+    ? query.eq('id', orderIdentifier)
+    : query.eq('order_number', orderIdentifier);
+
+  const { data, error } = await query.single();
   return { data, error };
 };
 

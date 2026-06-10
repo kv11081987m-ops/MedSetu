@@ -88,18 +88,26 @@ export const onAuthStateChange = (callback) => {
 export const getCurrentSeller = async () => {
   try {
     const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-    const phone = user?.phone || null;
 
-    if (phone) {
+    if (user?.phone) {
       const { data } = await supabase
         .from('sellers')
         .select('*')
-        .eq('phone', phone)
+        .eq('phone', user.phone)
         .maybeSingle();
       if (data) return data;
     }
 
-    // Fallback — first seller (no boolean filter to avoid 400)
+    if (user?.email) {
+      const { data } = await supabase
+        .from('sellers')
+        .select('*')
+        .eq('email', user.email)
+        .maybeSingle();
+      if (data) return data;
+    }
+
+    // Dev fallback — first seller in DB
     const { data: fallback } = await supabase
       .from('sellers')
       .select('*')

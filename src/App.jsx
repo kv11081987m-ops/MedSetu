@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { testSupabaseConnection } from './lib/testConnection';
 // import { insertSeedData } from './lib/seedData';
-// ↑ Comment hatao, ek baar chalao, phir wapas comment karo
 
 import SplashScreen        from './screens/SplashScreen';
 import OnboardingScreen    from './screens/OnboardingScreen';

@@ -10,12 +10,6 @@ import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
 import { supabase } from '../lib/supabase';
 
-// ─── Dummy cart items ─────────────────────────────────────────
-const INITIAL_ITEMS = [
-  { id: 1, name: 'Paracetamol 500mg', sub: 'Crocin — 10 tablets/strip', price: 29.75, qty: 2, rx: true,  iconBg: '#E8F5EE', iconColor: '#1A6B3C', IconComp: Pill    },
-  { id: 2, name: 'Azithromycin 500mg', sub: 'Azee — 6 tablets/strip',   price: 85.0,  qty: 1, rx: true,  iconBg: '#EAF2FF', iconColor: '#2563EB', IconComp: Pill    },
-  { id: 3, name: 'Digital BP Machine', sub: 'Omron HEM-7120',            price: 1299.0,qty: 1, rx: false, iconBg: '#FFF3E8', iconColor: '#EA6C00', IconComp: Monitor },
-];
 
 const PAYMENT_OPTS = [
   { id: 'cod',    Icon: Banknote,    label: 'Cash on Delivery', hint: 'Delivery pe cash dein' },
@@ -132,21 +126,17 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { cartItems, cartSellerId, cartSellerName, clearCart } = useCart();
 
-  // Initialize from CartContext if available, else fall back to demo data
-  const [items, setItems] = useState(() => {
-    if (cartItems.length > 0) {
-      return cartItems.map((i) => ({
-        ...i,
-        qty: i.quantity,
-        iconBg: i.iconBg || '#E8F5EE',
-        iconColor: i.iconColor || '#1A6B3C',
-        IconComp: i.IconComp || Pill,
-        sub: i.sub || `${i.type || 'Tablet'} — per strip`,
-        rx: i.rx || false,
-      }));
-    }
-    return INITIAL_ITEMS;
-  });
+  const [items, setItems] = useState(() =>
+    cartItems.map((i) => ({
+      ...i,
+      qty: i.quantity,
+      iconBg: i.iconBg || '#E8F5EE',
+      iconColor: i.iconColor || '#1A6B3C',
+      IconComp: i.IconComp || Pill,
+      sub: i.sub || `${i.type || 'Tablet'} — per strip`,
+      rx: i.rx || false,
+    }))
+  );
 
   const [selectedAddress, setSelectedAddress] = useState('Address load ho raha hai...');
   const [delivery, setDelivery]         = useState('home');
@@ -159,6 +149,7 @@ export default function Checkout() {
   const [orderId, setOrderId]           = useState('');
   const [ordering, setOrdering]         = useState(false);
   const [orderError, setOrderError]     = useState('');
+  const [orderDbId, setOrderDbId]       = useState('');
 
   // ── Fetch default address ──────────────────────────────────
   useEffect(() => {
@@ -241,6 +232,7 @@ export default function Checkout() {
       }
 
       const newOrder = orderRows[0];
+      setOrderDbId(newOrder.id);
 
       const orderItems = items.map((it) => ({
         id:       it.id,
@@ -267,7 +259,7 @@ export default function Checkout() {
     return (
       <SuccessOverlay
         orderId={orderId}
-        onTrack={() => navigate('/order-tracking', { state: { orderId } })}
+        onTrack={() => navigate('/order-tracking', { state: { orderId: orderDbId || orderId } })}
         onHome={() => navigate('/home')}
       />
     );

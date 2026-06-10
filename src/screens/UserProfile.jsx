@@ -10,20 +10,6 @@ import {
 } from 'lucide-react';
 
 // ─── Data ─────────────────────────────────────────────────────
-const INITIAL_ADDRESSES = [
-  {
-    id: 1, type: 'Ghar', Icon: Home, color: '#1A6B3C', bg: '#E8F5EE',
-    isDefault: true,
-    line1: '123, Gandhi Nagar',
-    line2: 'Deoria — 274001, UP',
-  },
-  {
-    id: 2, type: 'Office', Icon: Briefcase, color: '#2563EB', bg: '#EAF2FF',
-    isDefault: false,
-    line1: 'Civil Lines, Near Collectorate',
-    line2: 'Deoria — 274001, UP',
-  },
-];
 
 const PRESCRIPTIONS = [
   { id: 1, doctor: 'Dr. R.K. Singh, MBBS', hospital: 'City Hospital, Deoria',    date: '15 Jan 2025', meds: 3 },
@@ -53,6 +39,7 @@ export default function UserProfile() {
     label: 'Ghar', address_line: '', city: 'Deoria',
     district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
   });
+  const [orderStats, setOrderStats] = useState({ totalOrders: 0, totalSpent: 0 });
 
   // ── Fetch user ───────────────────────────────────────────────
   useEffect(() => {
@@ -89,8 +76,26 @@ export default function UserProfile() {
         if (data) setAddresses(data);
       } catch {}
     };
+    const fetchOrderStats = async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+        if (!user?.id) return;
+        const { data } = await supabase
+          .from('orders')
+          .select('final_amount, status')
+          .eq('customer_id', user.id);
+        if (data) {
+          const notCancelled = data.filter((o) => o.status !== 'cancelled');
+          setOrderStats({
+            totalOrders: data.length,
+            totalSpent: notCancelled.reduce((sum, o) => sum + (parseFloat(o.final_amount) || 0), 0),
+          });
+        }
+      } catch {}
+    };
     fetchUserProfile();
     fetchAddresses();
+    fetchOrderStats();
   }, []);
 
   // ── Profile update ───────────────────────────────────────────
@@ -205,9 +210,9 @@ export default function UserProfile() {
             {/* Quick Stats */}
             <div style={s.statsRow}>
               {[
-                { val: '12', label: 'Orders' },
-                { val: '₹8,450', label: 'Spent' },
-                { val: '2', label: 'Addresses' },
+                { val: String(orderStats.totalOrders), label: 'Orders' },
+                { val: '₹' + orderStats.totalSpent.toLocaleString('en-IN', { maximumFractionDigits: 0 }), label: 'Spent' },
+                { val: String(addresses.length), label: 'Addresses' },
               ].map(({ val, label }) => (
                 <div key={label} style={s.statPill}>
                   <span style={s.statVal}>{val}</span>
@@ -328,28 +333,19 @@ export default function UserProfile() {
           </div>
 
           {/* ── Health Profile ── */}
-          <div style={s.card}>
+          <div style={{ ...s.card, backgroundColor: '#F9F9F9' }}>
             <div style={s.cardHead}>
               <div>
                 <p style={s.cardTitle}>Health Profile</p>
                 <p style={s.cardTitleSub}>(Optional)</p>
               </div>
-              <button style={s.editLink}>Edit Health Profile</button>
+              <button style={s.editLink} onClick={() => alert('Yeh feature jald aayega!')}>Edit</button>
             </div>
-            {[
-              { Icon: Heart,        label: 'Blood Group',         val: 'B+'                },
-              { Icon: AlertCircle,  label: 'Allergies',           val: 'None'              },
-              { Icon: Pill,         label: 'Regular Medicines',   val: 'Metformin 500mg'   },
-              { Icon: Activity,     label: 'Chronic Conditions',  val: 'Type 2 Diabetes'   },
-            ].map(({ Icon, label, val }) => (
-              <div key={label} style={s.infoRow}>
-                <div style={s.infoIconBox}><Icon size={15} color="#1A6B3C" /></div>
-                <div style={s.infoText}>
-                  <p style={s.infoLabel}>{label}</p>
-                  <p style={s.infoVal}>{val}</p>
-                </div>
-              </div>
-            ))}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '16px 0' }}>
+              <Activity size={32} color="#CCCCCC" />
+              <p style={{ fontSize: '14px', fontWeight: '600', color: '#888888', margin: 0 }}>Health Profile — Coming Soon</p>
+              <p style={{ fontSize: '12px', color: '#AAAAAA', margin: 0, textAlign: 'center' }}>Apni allergies, blood group aur regular medicines yahan save kar sakenge</p>
+            </div>
           </div>
 
           {/* ── Saved Prescriptions ── */}

@@ -301,18 +301,17 @@ export default function SellerDashboard() {
                 <span style={{ fontSize: '12px', fontWeight: '700', color: storeOpen ? '#1A6B3C' : '#DC3545' }}>
                   {storeOpen ? 'Khuli Hai' : 'Band Hai'}
                 </span>
-                <div
-                  style={{ ...s.toggle, backgroundColor: storeOpen ? '#1A6B3C' : '#DC3545' }}
+                <button
+                  style={{ ...s.toggle, backgroundColor: storeOpen ? '#1A6B3C' : '#DC3545', border: 'none', cursor: 'pointer', padding: 0 }}
                   onClick={toggleStoreStatus}
-                  role="button"
-                  aria-label="Toggle store"
+                  aria-label={storeOpen ? 'Store band karo' : 'Store kholo'}
                 >
                   <div style={{ ...s.toggleThumb, left: storeOpen ? '28px' : '3px' }}>
                     <span style={{ fontSize: '7px', fontWeight: '800', color: storeOpen ? '#1A6B3C' : '#DC3545', userSelect: 'none', lineHeight: 1 }}>
                       {storeOpen ? 'ON' : 'OFF'}
                     </span>
                   </div>
-                </div>
+                </button>
               </div>
             </div>
 

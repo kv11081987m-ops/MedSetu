@@ -450,6 +450,9 @@ export default function AdminPanel() {
   // ─── Tab renderers ────────────────────────────────────────
   const renderDashboard = () => (
     <>
+      <div style={{ backgroundColor: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: '10px', padding: '8px 14px', margin: '0 0 4px', fontSize: '12px', color: '#E65100', textAlign: 'center', fontWeight: '600' }}>
+        ⚠️ Kuch data abhi demo hai — real data jald aayega
+      </div>
       <div style={s.hScroll}>
         {[
           { Icon: Users,         val: stats.totalUsers.toLocaleString('en-IN'), label: 'Total Users',    sub: 'Registered users',                        subColor: '#1A6B3C', color: '#1A6B3C', bg: '#E8F5EE' },

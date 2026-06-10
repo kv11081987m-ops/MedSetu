@@ -7,6 +7,18 @@ import {
 } from 'lucide-react';
 import { fetchSellers, mapSeller } from '../lib/api';
 
+// ─── Districts ────────────────────────────────────────────────
+const DISTRICTS = ['Deoria', 'Gorakhpur', 'Kushinagar', 'Maharajganj', 'Sant Kabir Nagar', 'Basti', 'Azamgarh', 'Mau'];
+
+function getUserDistrict() {
+  try {
+    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    return user?.district || 'Deoria';
+  } catch {
+    return 'Deoria';
+  }
+}
+
 // ─── Dummy fallback (shown while loading or on error) ─────────
 const FALLBACK_STORES = [
   { id: 'f1', initials: 'SR', name: 'Shri Ram Medical Store',  address: 'Civil Lines, Deoria',    distance: '0.8 km', rating: 4.5, reviews: 128, open: true,  verified: true, timing: '8AM – 9PM', phone: '9876543210', pin: { top: '38%', left: '52%' } },
@@ -114,13 +126,14 @@ export default function StoreLocator() {
   const [activePin, setActivePin] = useState(null);
   const [searchVal, setSearchVal] = useState('');
   const [sortBy, setSortBy]       = useState('distance');
-  const [stores, setStores]     = useState(FALLBACK_STORES);
-  const [loadState, setLoadState] = useState('loading'); // 'loading' | 'ok' | 'error'
+  const [stores, setStores]           = useState(FALLBACK_STORES);
+  const [loadState, setLoadState]     = useState('loading'); // 'loading' | 'ok' | 'error'
+  const [selectedDistrict, setSelectedDistrict] = useState(getUserDistrict);
 
-  useEffect(() => {
+  const loadStores = (district) => {
     let cancelled = false;
     setLoadState('loading');
-    fetchSellers('Deoria').then(({ data, error }) => {
+    fetchSellers(district).then(({ data, error }) => {
       if (cancelled) return;
       if (error || data.length === 0) {
         setStores(FALLBACK_STORES);
@@ -131,7 +144,11 @@ export default function StoreLocator() {
       }
     });
     return () => { cancelled = true; };
-  }, []);
+  };
+
+  useEffect(() => {
+    return loadStores(selectedDistrict);
+  }, [selectedDistrict]);
 
   const handlePinTap = (id) => setActivePin(activePin === id ? null : id);
 
@@ -179,6 +196,24 @@ export default function StoreLocator() {
               onChange={(e) => setSearchVal(e.target.value)}
             />
           </div>
+        </div>
+
+        {/* ── District Picker ── */}
+        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '8px 14px 4px', scrollbarWidth: 'none', borderBottom: '1px solid #F0F0F0' }}>
+          {DISTRICTS.map((d) => (
+            <button
+              key={d}
+              onClick={() => setSelectedDistrict(d)}
+              style={{
+                flexShrink: 0, padding: '5px 12px', borderRadius: '20px', fontSize: '12px',
+                fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                border: '1.5px solid',
+                borderColor: selectedDistrict === d ? '#1A6B3C' : '#E0E0E0',
+                backgroundColor: selectedDistrict === d ? '#1A6B3C' : '#FFFFFF',
+                color: selectedDistrict === d ? '#FFFFFF' : '#555555',
+              }}
+            >{d}</button>
+          ))}
         </div>
 
         {/* ── Mock Map ── */}

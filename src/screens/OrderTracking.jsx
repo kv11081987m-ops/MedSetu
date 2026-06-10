@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { fetchOrderById, updateOrderStatus } from '../lib/orders';
+import { fetchOrderById } from '../lib/orders';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
   MapPin, Package, IndianRupee, CreditCard, Store,

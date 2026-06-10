@@ -214,7 +214,7 @@ export default function MedicineSearch() {
               onKeyDown={(e) => e.key === 'Enter' && addToRecent(query)}
             />
             {query.length > 0 && (
-              <button style={s.clearBtn} onClick={() => setQuery('')}>
+              <button style={s.clearBtn} onClick={() => { setQuery(''); setDbResults([]); setSearchError(false); }}>
                 <X size={15} color="#888888" />
               </button>
             )}
@@ -296,7 +296,7 @@ export default function MedicineSearch() {
               <button style={s.prescBtn} onClick={() => navigate('/prescription')}>
                 Prescription Upload Karo
               </button>
-              <button style={s.pharmacistBtn}>
+              <button style={s.pharmacistBtn} onClick={() => navigate('/pharmacist')}>
                 Pharmacist Se Poochho
               </button>
             </div>

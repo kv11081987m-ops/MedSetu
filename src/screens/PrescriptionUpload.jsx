@@ -72,6 +72,15 @@ export default function PrescriptionUpload() {
   // ── File handling ──────────────────────────────────────────
   const processFile = (f) => {
     if (!f) return;
+    if (f.size > 5 * 1024 * 1024) {
+      alert('File 5MB se badi hai — chhoti file upload karo');
+      return;
+    }
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    if (!allowed.includes(f.type)) {
+      alert('Sirf JPG, PNG, PDF allowed hai');
+      return;
+    }
     setFile(f);
     if (f.type.startsWith('image/')) {
       const reader = new FileReader();
@@ -103,6 +112,25 @@ export default function PrescriptionUpload() {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
       const storeId = realStores.find((st) => st.store_name === selectedStore)?.id || null;
 
+      // Upload file to Supabase Storage
+      let imageUrl = file.name;
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user?.id || 'anonymous'}/rx_${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('prescriptions')
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+      if (uploadError) {
+        console.warn('Storage upload failed:', uploadError.message);
+        // Storage bucket not set up yet — save filename only
+      } else {
+        const { data: urlData } = supabase.storage
+          .from('prescriptions')
+          .getPublicUrl(filePath);
+        imageUrl = urlData.publicUrl;
+      }
+
       const { data, error } = await supabase
         .from('prescriptions')
         .insert({
@@ -112,7 +140,7 @@ export default function PrescriptionUpload() {
           prescription_date: form.date           || null,
           notes:             form.medicines      || null,
           status:            'pending',
-          image_url:         file.name,
+          image_url:         imageUrl,
           delivery_type:     delivery,
         })
         .select()
