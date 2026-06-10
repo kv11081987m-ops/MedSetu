@@ -5,8 +5,6 @@ import { getCurrentUser } from '../lib/auth';
 const AuthContext = createContext({});
 
 // ── Dev session helpers (sessionStorage) ──────────────────────
-// Used when Supabase phone provider is not yet enabled.
-// Cleared on tab close; cleared on real logout.
 const DEV_KEY = 'medsetu_dev';
 
 export function setDevSession(phone, role) {
@@ -25,11 +23,15 @@ function getDevSession() {
   }
 }
 
+function getSavedRole() {
+  return localStorage.getItem('medsetu_role') || getDevSession()?.role || 'customer';
+}
+
 // ── Provider ───────────────────────────────────────────────────
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
   const [devSession, setDevSessionState] = useState(getDevSession);
-  const [userRole, setUserRole] = useState(() => getDevSession()?.role || 'customer');
+  const [userRole, setUserRole] = useState(getSavedRole);
   const [loading, setLoading]  = useState(true);
 
   useEffect(() => {
@@ -39,11 +41,76 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
-    // Listen for auth state changes (login / logout)
+    // Listen for auth state changes (login / logout / magic link callback)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      async (event, session) => {
         setUser(session?.user ?? null);
         setLoading(false);
+
+        if (event === 'SIGNED_IN' && session) {
+          const emailUser = session.user;
+          const pendingRole = localStorage.getItem('staff_pending_role');
+
+          if (pendingRole) {
+            // ── Staff magic link login ──
+            localStorage.setItem('medsetu_role', pendingRole);
+            localStorage.removeItem('staff_pending_role');
+            setUserRole(pendingRole);
+
+            // Upsert user record with staff role
+            const { data: existing } = await supabase
+              .from('users')
+              .select('*')
+              .eq('email', emailUser.email)
+              .maybeSingle();
+
+            if (!existing) {
+              const { data: newUser } = await supabase
+                .from('users')
+                .insert({ email: emailUser.email, role: pendingRole })
+                .select()
+                .single();
+              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+            } else {
+              localStorage.setItem('medsetu_user', JSON.stringify(existing));
+            }
+
+            // Redirect to role dashboard
+            const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard' };
+            if (routes[pendingRole]) window.location.href = routes[pendingRole];
+
+          } else {
+            // ── Customer magic link login ──
+            const savedRole = localStorage.getItem('medsetu_role');
+            if (!savedRole) {
+              localStorage.setItem('medsetu_role', 'customer');
+              setUserRole('customer');
+            }
+
+            const { data: existing } = await supabase
+              .from('users')
+              .select('*')
+              .eq('email', emailUser.email)
+              .maybeSingle();
+
+            if (!existing) {
+              const { data: newUser } = await supabase
+                .from('users')
+                .insert({ email: emailUser.email, role: 'customer' })
+                .select()
+                .single();
+              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+            } else {
+              localStorage.setItem('medsetu_user', JSON.stringify(existing));
+            }
+
+            // Redirect to home only if on login/splash page
+            const currentPath = window.location.pathname;
+            if (currentPath === '/login' || currentPath === '/' || currentPath === '/otp') {
+              window.location.href = '/home';
+            }
+          }
+        }
       }
     );
 
@@ -62,8 +129,12 @@ export function AuthProvider({ children }) {
   const handleLogout = async () => {
     clearDevSession();
     setDevSessionState(null);
+    localStorage.removeItem('medsetu_role');
+    localStorage.removeItem('medsetu_user');
+    localStorage.removeItem('staff_pending_role');
     await supabase.auth.signOut().catch(() => {});
     setUser(null);
+    setUserRole('customer');
   };
 
   return (

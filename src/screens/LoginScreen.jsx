@@ -2,11 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Phone, CheckCircle } from 'lucide-react';
 import { sendEmailOTP, generateOTP, storeOTP } from '../lib/auth';
-import { useAuth } from '../context/AuthContext';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
-  const { applyDevSession } = useAuth();
 
   // Tab: 'phone' | 'email'
   const [tab, setTab]       = useState('phone');
@@ -23,9 +21,6 @@ export default function LoginScreen() {
   // Shared state
   const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
-
-  // Demo mode modal
-  const [showDemo, setShowDemo] = useState(false);
 
   // ── Phone handler ──────────────────────────────────────────
   const handlePhoneChange = (e) => {
@@ -55,13 +50,6 @@ export default function LoginScreen() {
       return;
     }
     setEmailSent(true);
-  };
-
-  // ── Demo mode ──────────────────────────────────────────────
-  const handleDemoRole = (role) => {
-    applyDevSession('9999999999', role);
-    setShowDemo(false);
-    navigate(role === 'seller' ? '/seller-dashboard' : '/home');
   };
 
   return (
@@ -186,22 +174,6 @@ export default function LoginScreen() {
             </div>
           )}
 
-          {/* ── Divider ── */}
-          <div style={s.divRow}>
-            <div style={s.divLine} />
-            <span style={s.divText}>ya</span>
-            <div style={s.divLine} />
-          </div>
-
-          {/* ── Demo Mode button ── */}
-          <button style={s.demoBtn} onClick={() => setShowDemo(true)}>
-            <span style={s.demoBtnIcon}>🚀</span>
-            <div style={s.demoBtnText}>
-              <span style={s.demoBtnLabel}>Demo Mode mein Enter Karo</span>
-              <span style={s.demoBtnSub}>Real auth ke bina testing</span>
-            </div>
-          </button>
-
           {/* Terms */}
           <p style={s.terms}>
             Login karke aap hamare{' '}
@@ -220,41 +192,6 @@ export default function LoginScreen() {
         </span>
       </div>
 
-      {/* ── Demo Role Modal ── */}
-      {showDemo && (
-        <div style={s.overlay} onClick={() => setShowDemo(false)}>
-          <div style={s.sheet} onClick={(e) => e.stopPropagation()}>
-            <div style={s.sheetHandle} />
-            <p style={s.sheetTitle}>Demo Mode</p>
-            <p style={s.sheetSub}>
-              Kaun si view test karni hai?
-            </p>
-
-            <button style={s.roleBtn} onClick={() => handleDemoRole('customer')}>
-              <span style={s.roleIcon}>🛒</span>
-              <div>
-                <p style={s.roleName}>Customer View</p>
-                <p style={s.roleHint}>Medicines order karo, prescriptions upload karo</p>
-              </div>
-            </button>
-
-            <button
-              style={{ ...s.roleBtn, ...s.roleBtnOutline }}
-              onClick={() => handleDemoRole('seller')}
-            >
-              <span style={s.roleIcon}>🏪</span>
-              <div>
-                <p style={{ ...s.roleName, color: '#1A6B3C' }}>Seller View</p>
-                <p style={s.roleHint}>Dashboard, inventory, orders manage karo</p>
-              </div>
-            </button>
-
-            <button style={s.cancelBtn} onClick={() => setShowDemo(false)}>
-              Wapas Jao
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -316,48 +253,8 @@ const s = {
   emailSuccessNote:  { fontSize: '12px', color: '#888888', margin: 0 },
   resendLink: { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', padding: 0 },
 
-  // Divider
-  divRow: { display: 'flex', alignItems: 'center', gap: '12px' },
-  divLine: { flex: 1, height: '1px', backgroundColor: '#E0E0E0' },
-  divText: { fontSize: '13px', color: '#999999', flexShrink: 0 },
-
-  // Demo button
-  demoBtn: {
-    display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '14px 16px', backgroundColor: '#F0FDF4',
-    border: '1.5px dashed #1A6B3C', borderRadius: '14px',
-    cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-  },
-  demoBtnIcon:  { fontSize: '24px', flexShrink: 0 },
-  demoBtnText:  { display: 'flex', flexDirection: 'column', gap: '2px' },
-  demoBtnLabel: { fontSize: '14px', fontWeight: '700', color: '#1A6B3C' },
-  demoBtnSub:   { fontSize: '12px', color: '#4B9E6F' },
-
   // Terms
   terms:    { fontSize: '12px', color: '#999999', textAlign: 'center', lineHeight: '1.6', margin: 0 },
   termLink:  { color: '#1A6B3C', fontWeight: '600', cursor: 'pointer' },
   staffLink: { fontSize: '11px', color: '#999999', cursor: 'pointer', textDecoration: 'underline' },
-
-  // Demo modal
-  overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 },
-  sheet: { width: '100%', maxWidth: '480px', backgroundColor: '#FFFFFF', borderRadius: '24px 24px 0 0', padding: '16px 20px 40px', display: 'flex', flexDirection: 'column', gap: '12px' },
-  sheetHandle: { width: '40px', height: '4px', backgroundColor: '#E0E0E0', borderRadius: '2px', alignSelf: 'center', marginBottom: '4px' },
-  sheetTitle:  { fontSize: '20px', fontWeight: '800', color: '#1A1A1A', margin: 0, textAlign: 'center' },
-  sheetSub:    { fontSize: '14px', color: '#888888', margin: 0, textAlign: 'center' },
-
-  roleBtn: {
-    display: 'flex', alignItems: 'center', gap: '14px', padding: '16px',
-    backgroundColor: '#1A6B3C', border: 'none', borderRadius: '16px',
-    cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-  },
-  roleBtnOutline: { backgroundColor: '#FFFFFF', border: '2px solid #1A6B3C' },
-  roleIcon: { fontSize: '28px', flexShrink: 0 },
-  roleName: { fontSize: '16px', fontWeight: '700', color: '#FFFFFF', margin: '0 0 3px' },
-  roleHint: { fontSize: '12px', color: 'rgba(255,255,255,0.75)', margin: 0 },
-
-  cancelBtn: {
-    padding: '14px', backgroundColor: '#F5F5F5', border: 'none',
-    borderRadius: '14px', fontSize: '14px', fontWeight: '600',
-    color: '#555555', cursor: 'pointer', fontFamily: 'inherit',
-  },
 };

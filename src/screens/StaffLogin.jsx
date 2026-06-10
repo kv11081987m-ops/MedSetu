@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mail, Lock, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { ArrowLeft, Mail } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 const ROLES = [
   { id: 'admin',      label: 'Admin' },
@@ -9,41 +9,50 @@ const ROLES = [
   { id: 'seller',     label: 'Seller' },
 ];
 
-const DEMO_CREDS = {
-  admin:      { email: import.meta.env.VITE_ADMIN_EMAIL,  password: import.meta.env.VITE_ADMIN_PASS,  route: '/admin'            },
-  pharmacist: { email: import.meta.env.VITE_PHARMA_EMAIL, password: import.meta.env.VITE_PHARMA_PASS, route: '/pharmacist'       },
-  seller:     { email: import.meta.env.VITE_SELLER_EMAIL, password: import.meta.env.VITE_SELLER_PASS, route: '/seller-dashboard' },
+const PLACEHOLDER = {
+  admin:      'admin@medsetu.in',
+  pharmacist: 'pharma@medsetu.in',
+  seller:     'seller@medsetu.in',
+};
+
+const REDIRECT_ROUTE = {
+  admin:      '/admin',
+  pharmacist: '/pharmacist',
+  seller:     '/seller-dashboard',
 };
 
 export default function StaffLogin() {
   const navigate = useNavigate();
-  const { applyDevSession } = useAuth();
 
   const [selectedRole, setSelectedRole] = useState('');
   const [email,        setEmail]        = useState('');
-  const [password,     setPassword]     = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [emailFocus,   setEmailFocus]   = useState(false);
   const [error,        setError]        = useState('');
   const [loading,      setLoading]      = useState(false);
-  const [emailFocus,   setEmailFocus]   = useState(false);
-  const [passFocus,    setPassFocus]    = useState(false);
+  const [emailSent,    setEmailSent]    = useState(false);
 
   const handleLogin = async () => {
-    if (!selectedRole)  { setError('Pehle role select karo'); return; }
-    if (!email.trim())  { setError('Email daalo'); return; }
-    if (!password)      { setError('Password daalo'); return; }
+    if (!selectedRole) { setError('Pehle role select karo'); return; }
+    if (!email.trim() || !email.includes('@')) { setError('Valid email daalo'); return; }
 
     setLoading(true); setError('');
-    await new Promise((r) => setTimeout(r, 600));
 
-    const creds = DEMO_CREDS[selectedRole];
-    if (email.trim() === creds.email && password === creds.password) {
-      applyDevSession(email.trim(), selectedRole);
-      navigate(creds.route);
-    } else {
-      setError('Email ya password galat hai');
-    }
+    const redirectTo = window.location.origin + REDIRECT_ROUTE[selectedRole];
+
+    const { error: authErr } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: redirectTo },
+    });
+
     setLoading(false);
+
+    if (authErr) {
+      setError('Email nahi bheja: ' + authErr.message);
+      return;
+    }
+
+    localStorage.setItem('staff_pending_role', selectedRole);
+    setEmailSent(true);
   };
 
   return (
@@ -72,7 +81,7 @@ export default function StaffLogin() {
               <button
                 key={id}
                 style={{ ...s.roleBtn, ...(active ? s.roleBtnActive : {}) }}
-                onClick={() => { setSelectedRole(id); setError(''); }}
+                onClick={() => { setSelectedRole(id); setError(''); setEmailSent(false); }}
               >
                 {label}
               </button>
@@ -82,64 +91,60 @@ export default function StaffLogin() {
 
         {/* ── Form Card ── */}
         <div style={s.card}>
-
-          {/* Email */}
-          <div>
-            <p style={s.label}>Email ID</p>
-            <div style={{ ...s.inputRow, borderColor: emailFocus ? '#1A6B3C' : error && !email ? '#e53935' : '#E0E0E0' }}>
-              <div style={s.iconBox}>
-                <Mail size={16} color="#888888" />
-              </div>
-              <input
-                type="email"
-                placeholder="staff@medsetu.in"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                onFocus={() => setEmailFocus(true)}
-                onBlur={() => setEmailFocus(false)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                style={s.textInput}
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div>
-            <p style={s.label}>Password</p>
-            <div style={{ ...s.inputRow, borderColor: passFocus ? '#1A6B3C' : error && !password ? '#e53935' : '#E0E0E0' }}>
-              <div style={s.iconBox}>
-                <Lock size={16} color="#888888" />
-              </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(''); }}
-                onFocus={() => setPassFocus(true)}
-                onBlur={() => setPassFocus(false)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                style={s.textInput}
-                disabled={loading}
-              />
-              <button style={s.eyeBtn} onClick={() => setShowPassword((v) => !v)} tabIndex={-1}>
-                {showPassword ? <EyeOff size={16} color="#888888" /> : <Eye size={16} color="#888888" />}
+          {emailSent ? (
+            /* Success state */
+            <div style={s.successBox}>
+              <p style={s.successIcon}>📧</p>
+              <p style={s.successTitle}>Magic Link Bhej Diya!</p>
+              <p style={s.successSub}>
+                <strong>{email}</strong> pe link bheja gaya hai.
+                Email check karo aur link pe click karo.
+              </p>
+              <button
+                style={s.retryBtn}
+                onClick={() => { setEmailSent(false); setEmail(''); }}
+              >
+                Dobara Try Karo
               </button>
             </div>
-          </div>
+          ) : (
+            <>
+              <div>
+                <p style={s.label}>Email ID</p>
+                <div style={{ ...s.inputRow, borderColor: emailFocus ? '#1A6B3C' : error ? '#e53935' : '#E0E0E0' }}>
+                  <div style={s.iconBox}>
+                    <Mail size={16} color="#888888" />
+                  </div>
+                  <input
+                    type="email"
+                    placeholder={selectedRole ? PLACEHOLDER[selectedRole] : 'staff@medsetu.in'}
+                    value={email}
+                    onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                    onFocus={() => setEmailFocus(true)}
+                    onBlur={() => setEmailFocus(false)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                    style={s.textInput}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
 
-          {error && <p style={s.errorText}>{error}</p>}
+              {error && <p style={s.errorText}>{error}</p>}
 
-          {/* Login Button */}
-          <button
-            style={{ ...s.loginBtn, opacity: (!selectedRole || loading) ? 0.6 : 1 }}
-            onClick={handleLogin}
-            disabled={!selectedRole || loading}
-          >
-            {loading ? 'Login Ho Raha Hai...' : 'Login Karo'}
-          </button>
+              <button
+                style={{ ...s.loginBtn, opacity: (!selectedRole || loading) ? 0.6 : 1 }}
+                onClick={handleLogin}
+                disabled={!selectedRole || loading}
+              >
+                {loading ? 'Link Bheja Ja Raha Hai...' : '🔗 Magic Link Bhejo'}
+              </button>
+
+              <p style={s.hintText}>
+                Email mein link aayega — click karo aur login ho jaao
+              </p>
+            </>
+          )}
         </div>
-
 
       </div>
     </div>
@@ -164,9 +169,9 @@ const s = {
   inputRow: { display: 'flex', alignItems: 'center', border: '1.5px solid', borderRadius: '10px', overflow: 'hidden', transition: 'border-color 0.2s' },
   iconBox:  { padding: '0 12px', display: 'flex', alignItems: 'center', backgroundColor: '#F5F5F5', alignSelf: 'stretch' },
   textInput: { flex: 1, border: 'none', outline: 'none', padding: '13px 12px', fontSize: '15px', color: '#1A1A1A', backgroundColor: 'transparent', fontFamily: 'inherit' },
-  eyeBtn:   { background: 'none', border: 'none', padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', alignSelf: 'stretch' },
 
   errorText: { fontSize: '13px', color: '#e53935', margin: '-4px 0 0' },
+  hintText:  { fontSize: '12px', color: '#888888', textAlign: 'center', backgroundColor: '#FFFBEB', padding: '8px 12px', borderRadius: '8px', margin: 0 },
 
   loginBtn: {
     width: '100%', padding: '15px', backgroundColor: '#1A6B3C', color: '#FFFFFF',
@@ -174,4 +179,15 @@ const s = {
     cursor: 'pointer', fontFamily: 'inherit', transition: 'opacity 0.2s',
   },
 
+  // Success state
+  successBox:   { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '8px 0', textAlign: 'center' },
+  successIcon:  { fontSize: '40px', margin: 0 },
+  successTitle: { fontSize: '18px', fontWeight: '700', color: '#1A6B3C', margin: 0 },
+  successSub:   { fontSize: '13px', color: '#555555', margin: 0, lineHeight: '1.6' },
+  retryBtn: {
+    marginTop: '4px', padding: '8px 20px',
+    background: 'transparent', border: '1.5px solid #1A6B3C',
+    borderRadius: '8px', color: '#1A6B3C', fontSize: '13px',
+    fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
+  },
 };
