@@ -19,6 +19,13 @@ const CATEGORIES = [
   'Sab', 'Medicines', 'Equipment', 'Surgical', 'Ayurvedic', 'Baby Care',
 ];
 
+const NOTIFICATIONS = [
+  { id: 1, icon: '🛵', title: 'Order Out for Delivery', sub: 'Aapka order deliver ho raha hai — 15 min mein!', time: '5 min pehle', read: false },
+  { id: 2, icon: '✅', title: 'Order Delivered',         sub: 'MED-2024-014 successfully deliver ho gaya', time: '2 ghante pehle', read: false },
+  { id: 3, icon: '💊', title: 'Reminder: Refill Karo',  sub: 'Paracetamol 500mg ka stock khatam ho raha hai', time: 'Kal',           read: true  },
+  { id: 4, icon: '🎁', title: 'Offer: FIRST10',         sub: 'Aaj FIRST10 use karo — 10% off milega',       time: '2 din pehle',  read: true  },
+];
+
 const QUICK_ACTIONS = [
   { label: 'Store Dhundho',       Icon: MapPin,    bg: '#E8F5EE', color: '#1A6B3C', route: '/store-locator' },
   { label: 'Prescription Upload', Icon: FileText,  bg: '#EAF2FF', color: '#2563EB', route: '/prescription' },
@@ -104,6 +111,9 @@ export default function CustomerHome() {
   const [activeTab, setActiveTab]           = useState('home');
   const [nearbyStores, setNearbyStores]     = useState(FALLBACK_STORES);
   const [storesLoading, setStoresLoading]   = useState(true);
+  const [showNotif, setShowNotif]           = useState(false);
+  const [notifs, setNotifs]                 = useState(NOTIFICATIONS);
+  const unreadCount = notifs.filter((n) => !n.read).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -146,10 +156,10 @@ export default function CustomerHome() {
         <div style={s.header}>
           <img src="/logo.png" alt="MedSetu Logo" style={{ height: '36px', width: 'auto' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button style={s.iconBtn} aria-label="Notifications">
+            <button style={s.iconBtn} aria-label="Notifications" onClick={() => { setShowNotif(true); }}>
               <div style={{ position: 'relative' }}>
                 <Bell size={22} color="#1A1A1A" />
-                <span style={s.notifDot} />
+                {unreadCount > 0 && <span style={s.notifDot} />}
               </div>
             </button>
           </div>
@@ -295,6 +305,47 @@ export default function CustomerHome() {
             );
           })}
         </nav>
+
+        {/* ── Notification Sheet ── */}
+        {showNotif && (
+          <div style={s.notifOverlay} onClick={() => setShowNotif(false)}>
+            <div style={s.notifSheet} onClick={(e) => e.stopPropagation()}>
+              <div style={s.notifHandle} />
+              <div style={s.notifHeader}>
+                <span style={s.notifTitle}>Notifications</span>
+                {unreadCount > 0 && (
+                  <button style={s.markAllBtn} onClick={() => setNotifs((prev) => prev.map((n) => ({ ...n, read: true })))}>
+                    Sab Read Karo
+                  </button>
+                )}
+              </div>
+              {notifs.length === 0 ? (
+                <div style={s.notifEmpty}>
+                  <Bell size={36} color="#CCCCCC" />
+                  <p style={{ fontSize: '14px', color: '#AAAAAA', margin: 0 }}>Koi notification nahi</p>
+                </div>
+              ) : (
+                <div style={s.notifList}>
+                  {notifs.map((n) => (
+                    <div
+                      key={n.id}
+                      style={{ ...s.notifRow, backgroundColor: n.read ? '#FFFFFF' : '#F0FBF4' }}
+                      onClick={() => setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))}
+                    >
+                      <span style={s.notifIcon}>{n.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ ...s.notifRowTitle, fontWeight: n.read ? '500' : '700' }}>{n.title}</p>
+                        <p style={s.notifRowSub}>{n.sub}</p>
+                        <p style={s.notifRowTime}>{n.time}</p>
+                      </div>
+                      {!n.read && <span style={s.unreadDot} />}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -348,6 +399,105 @@ const s = {
     backgroundColor: '#EF4444',
     borderRadius: '50%',
     border: '1.5px solid #FFFFFF',
+  },
+
+  // Notification sheet
+  notifOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
+  notifSheet: {
+    width: '100%',
+    maxWidth: '480px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '20px 20px 0 0',
+    padding: '12px 0 40px',
+    maxHeight: '75vh',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  notifHandle: {
+    width: '40px',
+    height: '4px',
+    backgroundColor: '#E0E0E0',
+    borderRadius: '2px',
+    margin: '0 auto 12px',
+  },
+  notifHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 20px 12px',
+    borderBottom: '1px solid #F0F0F0',
+  },
+  notifTitle: {
+    fontSize: '17px',
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  markAllBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#1A6B3C',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    padding: 0,
+  },
+  notifList: {
+    overflowY: 'auto',
+    flex: 1,
+  },
+  notifEmpty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '40px 24px',
+  },
+  notifRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    padding: '14px 20px',
+    borderBottom: '1px solid #F5F5F5',
+    cursor: 'pointer',
+  },
+  notifIcon: {
+    fontSize: '24px',
+    flexShrink: 0,
+    lineHeight: 1,
+    marginTop: '2px',
+  },
+  notifRowTitle: {
+    fontSize: '14px',
+    color: '#1A1A1A',
+    margin: '0 0 3px',
+  },
+  notifRowSub: {
+    fontSize: '12px',
+    color: '#666666',
+    margin: '0 0 4px',
+    lineHeight: '1.4',
+  },
+  notifRowTime: {
+    fontSize: '11px',
+    color: '#AAAAAA',
+    margin: 0,
+  },
+  unreadDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: '#1A6B3C',
+    flexShrink: 0,
+    marginTop: '6px',
   },
 
   // Location bar
