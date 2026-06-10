@@ -140,70 +140,98 @@ export default function CustomerHome() {
   const [notifs, setNotifs]           = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // ── Auth guard: redirect to login if no user data ──────────
-  useEffect(() => {
-    const user       = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-    const devSession = JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null');
-    const hasUser    = !!(user?.id || user?.phone || user?.email || devSession);
-    if (!hasUser) {
-      navigate('/login', { replace: true });
-      return;
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-        if (!user?.id) return;
-        const { data } = await supabase
-          .from('orders')
-          .select('id, order_number, status, created_at, sellers(store_name)')
-          .eq('customer_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        if (data) {
-          const mapped = data.map((order) => ({
-            id:      order.id,
-            title:   getNotifTitle(order.status),
-            message: `${order.sellers?.store_name || 'Store'} — #${order.order_number || order.id}`,
-            time:    getTimeAgo(order.created_at),
-            read:    false,
-            color:   getNotifColor(order.status),
-          }));
-          setNotifs(mapped);
-          setUnreadCount(mapped.length);
-        }
-      } catch {}
-    };
-    fetchNotifications();
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+
+    const initPage = async () => {
       try {
-        const { data } = await fetchSellers('Deoria');
-        if (!cancelled && data && data.length > 0) {
-          setNearbyStores(data.map((s, i) => ({
-            id:       s.id,
-            name:     s.store_name,
-            address:  s.address || s.district || '',
-            distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
-            rating:   parseFloat(s.rating) || 4.0,
-            reviews:  s.total_reviews      || 0,
-            open:     s.is_open,
-          })));
+        // 1. Check Supabase session + localStorage + devSession
+        const [{ data: { session } }] = await Promise.all([
+          supabase.auth.getSession(),
+        ]);
+        const storedUser = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || 'null'); } catch { return null; } })();
+        const devSession = (() => { try { return JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null'); } catch { return null; } })();
+
+        const isLoggedIn = session || storedUser?.id || storedUser?.phone || storedUser?.email || devSession;
+
+        if (!isLoggedIn) {
+          navigate('/login', { replace: true });
+          return;
         }
+
+        // 2. Supabase session exists but localStorage user missing → upsert
+        if (session && !storedUser) {
+          const { data: existing } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', session.user.email)
+            .maybeSingle();
+
+          if (existing) {
+            localStorage.setItem('medsetu_user', JSON.stringify(existing));
+          } else {
+            const { data: newUser } = await supabase
+              .from('users')
+              .insert({ email: session.user.email, role: 'customer' })
+              .select()
+              .single();
+            if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+          }
+        }
+
+        // 3. Fetch notifications
+        const currentUser = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || 'null'); } catch { return null; } })();
+        if (currentUser?.id) {
+          try {
+            const { data } = await supabase
+              .from('orders')
+              .select('id, order_number, status, created_at, sellers(store_name)')
+              .eq('customer_id', currentUser.id)
+              .order('created_at', { ascending: false })
+              .limit(10);
+            if (!cancelled && data) {
+              const mapped = data.map((order) => ({
+                id:      order.id,
+                title:   getNotifTitle(order.status),
+                message: `${order.sellers?.store_name || 'Store'} — #${order.order_number || order.id}`,
+                time:    getTimeAgo(order.created_at),
+                read:    false,
+                color:   getNotifColor(order.status),
+              }));
+              setNotifs(mapped);
+              setUnreadCount(mapped.length);
+            }
+          } catch {}
+        }
+
+        // 4. Fetch sellers
+        try {
+          const { data } = await fetchSellers('Deoria');
+          if (!cancelled && data && data.length > 0) {
+            setNearbyStores(data.map((s, i) => ({
+              id:       s.id,
+              name:     s.store_name,
+              address:  s.address || s.district || '',
+              distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
+              rating:   parseFloat(s.rating) || 4.0,
+              reviews:  s.total_reviews      || 0,
+              open:     s.is_open,
+            })));
+          }
+        } catch (err) {
+          console.error('Sellers fetch error:', err);
+        }
+
       } catch (err) {
-        console.error('Sellers fetch error:', err);
+        console.error('CustomerHome init error:', err);
       } finally {
         if (!cancelled) setStoresLoading(false);
       }
     };
-    load();
+
+    initPage();
     return () => { cancelled = true; };
-  }, []);
+  }, [navigate]);
 
   const NAV_TABS = [
     { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
@@ -270,9 +298,9 @@ export default function CustomerHome() {
               </button>
             </div>
             <div style={s.horizontalScroll}>
-              {nearbyStores.map((store) => (
+              {Array.isArray(nearbyStores) && nearbyStores.map((store) => (
                 <StoreCard
-                  key={store.id}
+                  key={store?.id || Math.random()}
                   store={store}
                   onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
                 />
@@ -286,7 +314,7 @@ export default function CustomerHome() {
               <span style={s.sectionTitle}>Categories</span>
             </div>
             <div style={s.horizontalScroll}>
-              {CATEGORIES.map((cat) => (
+              {Array.isArray(CATEGORIES) && CATEGORIES.map((cat) => (
                 <button
                   key={cat}
                   style={{

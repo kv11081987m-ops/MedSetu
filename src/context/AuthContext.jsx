@@ -55,6 +55,13 @@ export function AuthProvider({ children }) {
         setUser(session?.user ?? null);
         setLoading(false);
 
+        if (event === 'SIGNED_OUT') {
+          localStorage.removeItem('medsetu_user');
+          localStorage.removeItem('medsetu_role');
+          localStorage.removeItem('staff_pending_role');
+          return;
+        }
+
         if (event === 'SIGNED_IN' && session) {
           const emailUser = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
@@ -122,11 +129,10 @@ export function AuthProvider({ children }) {
               localStorage.setItem('medsetu_user', JSON.stringify(existing));
             }
 
-            // Redirect to home only if on login/splash page
+            // Redirect to home only if on login/splash/otp — not if already on home
             const currentPath = window.location.pathname;
-            if (currentPath === '/login' || currentPath === '/' || currentPath === '/otp') {
-              window.location.href = '/home';
-            }
+            const onAuthPage = ['/login', '/', '/otp', '/onboarding'].includes(currentPath);
+            if (onAuthPage) window.location.href = '/home';
           }
         }
       }
