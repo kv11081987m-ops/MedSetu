@@ -454,30 +454,27 @@ export default function InventoryManagement() {
   const [showBulkModal,  setShowBulkModal]  = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────
-  const fetchInventory = async (sid) => {
-    const { data, error } = await supabase
-      .from('medicines')
-      .select('*')
-      .eq('seller_id', sid)
-      .order('name');
-    if (!error && data) setMedicines(data);
+  const fetchInventory = async () => {
+    setLoading(true);
+    try {
+      const seller = await getCurrentSeller();
+      if (!seller) { setLoading(false); return; }
+      setSellerId(seller.id);
+      const { data, error } = await supabase
+        .from('medicines')
+        .select('*')
+        .eq('seller_id', seller.id)
+        .order('name');
+      if (error) throw error;
+      if (data) setMedicines(data);
+    } catch (err) {
+      console.error('Inventory error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const seller = await getCurrentSeller();
-        if (!seller) { navigate('/login'); return; }
-        setSellerId(seller.id);
-        await fetchInventory(seller.id);
-      } catch (err) {
-        console.error('Inventory load:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
+  useEffect(() => { fetchInventory(); }, []);
 
   // ── CRUD ─────────────────────────────────────────────────────
   const handleSave = async (formData, itemId) => {
@@ -696,7 +693,7 @@ export default function InventoryManagement() {
           <BulkModal
             sellerId={sellerId}
             onClose={() => setShowBulkModal(false)}
-            onDone={async () => { if (sellerId) await fetchInventory(sellerId); }}
+            onDone={async () => { await fetchInventory(); }}
           />
         )}
       </div>

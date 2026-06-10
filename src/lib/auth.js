@@ -95,15 +95,14 @@ export const getCurrentSeller = async () => {
         .from('sellers')
         .select('*')
         .eq('phone', phone)
-        .single();
+        .maybeSingle();
       if (data) return data;
     }
 
-    // Fallback for demo/testing — first verified seller
+    // Fallback — first seller (no boolean filter to avoid 400)
     const { data: fallback } = await supabase
       .from('sellers')
       .select('*')
-      .eq('is_verified', true)
       .limit(1)
       .single();
     return fallback || null;

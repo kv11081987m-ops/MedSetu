@@ -114,7 +114,6 @@ export default function MedicineSearch() {
     supabase
       .from('medicines')
       .select('id, name, salt_name, selling_price, stock, category, is_available')
-      .eq('is_available', true)
       .order('stock', { ascending: false })
       .limit(6)
       .then(({ data }) => {

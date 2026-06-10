@@ -65,7 +65,6 @@ export async function fetchSellers(district = 'Deoria') {
     .from('sellers')
     .select('*')
     .eq('district', district)
-    .eq('approval_status', 'approved')
     .order('rating', { ascending: false });
 
   return { data: data || [], error };
@@ -85,7 +84,6 @@ export async function searchMedicines(query) {
       )
     `)
     .ilike('name', `%${query}%`)
-    .eq('is_available', true)
     .order('selling_price', { ascending: true });
 
   return { data: data || [], error };
@@ -96,7 +94,6 @@ export async function fetchPopularMedicines(limit = 6) {
   const { data, error } = await supabase
     .from('medicines')
     .select('*, sellers(store_name)')
-    .eq('is_available', true)
     .order('stock', { ascending: false })
     .limit(limit);
 
