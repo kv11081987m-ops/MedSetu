@@ -24,6 +24,9 @@ import PharmacistPanel     from './screens/PharmacistPanel';
 import AdminPanel          from './screens/AdminPanel';
 import UserProfile         from './screens/UserProfile';
 import StaffLogin          from './screens/StaffLogin';
+import SellerRegister      from './screens/SellerRegister';
+import PharmacistRegister  from './screens/PharmacistRegister';
+import SuperAdminPanel     from './screens/SuperAdminPanel';
 
 // Fire connection test once on module load
 testSupabaseConnection();
@@ -75,6 +78,15 @@ function PublicOnlyRoute({ children }) {
   const { isAuthenticated, loading, userRole } = useAuth();
   if (loading) return <LoadingScreen />;
   if (isAuthenticated) return <Navigate to={roleHome(userRole)} replace />;
+  return children;
+}
+
+// ── Super Admin Route ─────────────────────────────────────────
+function SuperAdminRoute({ children }) {
+  const role  = localStorage.getItem('medsetu_role');
+  const user  = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
+  const isSA  = role === 'super_admin' || user?.email === 'kv11081987m@gmail.com';
+  if (!isSA) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -139,6 +151,13 @@ function AppRoutes() {
         <Route path="/inventory"        element={<ProtectedRoute allowedRoles={['seller']}><InventoryManagement /></ProtectedRoute>} />
         <Route path="/pharmacist"       element={<ProtectedRoute allowedRoles={['pharmacist']}><PharmacistPanel /></ProtectedRoute>} />
         <Route path="/admin"            element={<ProtectedRoute allowedRoles={['admin']}><AdminPanel /></ProtectedRoute>} />
+
+        {/* ── Registration (public) ── */}
+        <Route path="/seller-register"     element={<SellerRegister />} />
+        <Route path="/pharmacist-register" element={<PharmacistRegister />} />
+
+        {/* ── Super Admin (special protected) ── */}
+        <Route path="/super-admin" element={<SuperAdminRoute><SuperAdminPanel /></SuperAdminRoute>} />
 
         {/* ── 404 ── */}
         <Route path="*" element={<NotFound />} />

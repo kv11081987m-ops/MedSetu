@@ -51,6 +51,16 @@ export function AuthProvider({ children }) {
           const emailUser = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
+          if (pendingRole === 'super_admin') {
+            // ── Super Admin login ──
+            localStorage.setItem('medsetu_role', 'super_admin');
+            localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
+            localStorage.removeItem('staff_pending_role');
+            setUserRole('super_admin');
+            window.location.href = '/super-admin';
+            return;
+          }
+
           if (pendingRole) {
             // ── Staff magic link login ──
             localStorage.setItem('medsetu_role', pendingRole);
