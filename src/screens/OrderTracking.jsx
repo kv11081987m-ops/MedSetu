@@ -384,7 +384,10 @@ export default function OrderTracking() {
                 <Phone size={15} color="#1A6B3C" />
                 Store Ko Call Karo
               </button>
-              <button style={s.helpBtnBlue}>
+              <button style={s.helpBtnBlue} onClick={() => {
+                const msg = encodeURIComponent('Namaste, mujhe apne order ke baare mein poochna tha. Kya aap help kar sakte hain?');
+                window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+              }}>
                 <MessageCircle size={15} color="#2563EB" />
                 Support Se Baat Karo
               </button>

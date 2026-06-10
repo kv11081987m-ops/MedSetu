@@ -296,7 +296,10 @@ export default function MedicineSearch() {
               <button style={s.prescBtn} onClick={() => navigate('/prescription')}>
                 Prescription Upload Karo
               </button>
-              <button style={s.pharmacistBtn} onClick={() => navigate('/pharmacist')}>
+              <button style={s.pharmacistBtn} onClick={() => {
+                const msg = encodeURIComponent('Namaste, mujhe medicine ke baare mein poochna tha. Kya aap help kar sakte hain?');
+                window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+              }}>
                 Pharmacist Se Poochho
               </button>
             </div>
