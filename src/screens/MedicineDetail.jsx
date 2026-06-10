@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import { supabase } from '../lib/supabase';
 import {
   ArrowLeft, Share2, Heart, Pill, ChevronDown,
   ChevronUp, AlertTriangle, ShoppingCart, CheckCircle,
@@ -112,8 +113,61 @@ export default function MedicineDetail() {
   const [saved, setSaved]     = useState(false);
   const [openAcc, setOpenAcc] = useState('uses');
   const [cartAdded, setCartAdded] = useState(false);
+  const [availableStores, setAvailableStores] = useState(STORES);
+  const [similarMedicines, setSimilarMedicines] = useState(SIMILAR);
 
   const toggleAcc = (id) => setOpenAcc((prev) => (prev === id ? null : id));
+
+  // ── Fetch real stores + similar medicines ──────────────────
+  useEffect(() => {
+    if (!med) return;
+    const keyword = med.name.split(' ')[0];
+
+    supabase
+      .from('medicines')
+      .select('selling_price, stock, sellers(id, store_name, address)')
+      .ilike('name', `%${keyword}%`)
+      .gt('stock', 0)
+      .not('seller_id', 'is', null)
+      .limit(8)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          const COLORS = ['#1A6B3C', '#2563EB', '#EA6C00', '#9333EA'];
+          const BGS    = ['#E8F5EE', '#EAF2FF', '#FFF3E8', '#F3E8FF'];
+          const mapped = data
+            .filter((r) => r.sellers)
+            .map((r, i) => ({
+              id:       r.sellers.id,
+              initials: r.sellers.store_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase(),
+              name:     r.sellers.store_name,
+              distance: r.sellers.address ? r.sellers.address.split(',')[0] : 'Nearby',
+              price:    parseFloat(r.selling_price) || 0,
+              inStock:  (r.stock || 0) > 0,
+              color:    COLORS[i % COLORS.length],
+              bg:       BGS[i % BGS.length],
+            }));
+          if (mapped.length > 0) setAvailableStores(mapped);
+        }
+      });
+
+    if (med.category) {
+      supabase
+        .from('medicines')
+        .select('id, name, selling_price, price')
+        .ilike('category', `%${med.category.split(' ')[0]}%`)
+        .neq('id', med.id)
+        .limit(4)
+        .then(({ data }) => {
+          if (data && data.length > 0) {
+            setSimilarMedicines(data.map((r) => ({
+              id:    r.id,
+              name:  r.name,
+              price: parseFloat(r.selling_price ?? r.price) || 0,
+            })));
+          }
+        });
+    }
+  }, [med?.id]);
 
   if (!med) {
     return (
@@ -252,10 +306,10 @@ export default function MedicineDetail() {
           <div style={s.section}>
             <div style={s.sectionHead}>
               <p style={s.sectionTitle}>Kahan Milegi?</p>
-              <p style={s.sectionSub}>{med.stores || STORES.length} stores mein available</p>
+              <p style={s.sectionSub}>{availableStores.length} stores mein available</p>
             </div>
             <div style={s.hScroll}>
-              {STORES.map((store) => (
+              {availableStores.map((store) => (
                 <StoreCard
                   key={store.id}
                   store={store}
@@ -284,10 +338,11 @@ export default function MedicineDetail() {
           </div>
 
           {/* Similar Medicines */}
+          {similarMedicines.length > 0 && (
           <div style={s.section}>
             <p style={s.sectionTitle}>Milti Julti Medicines</p>
             <div style={s.hScroll}>
-              {SIMILAR.map((sim) => (
+              {similarMedicines.map((sim) => (
                 <div key={sim.id} style={s.simCard}>
                   <div style={s.simIconBox}>
                     <Pill size={22} color="#1A6B3C" />
@@ -301,6 +356,7 @@ export default function MedicineDetail() {
               ))}
             </div>
           </div>
+          )}
 
           {/* Bottom spacer */}
           <div style={{ height: '88px' }} />

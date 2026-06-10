@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { createOrLoginUser, verifyStoredOTP } from '../lib/auth';
+import { createOrLoginUser, verifyStoredOTP, generateOTP, storeOTP } from '../lib/auth';
 import { useAuth } from '../context/AuthContext';
 const OTP_LENGTH  = 6;
 const TIMER_START = 30;
@@ -12,13 +12,15 @@ export default function OTPScreen() {
   const { applyDevSession } = useAuth();
 
   const phone  = location.state?.phone || '0000000000';
+  const devOtp = location.state?.otp   || null;
   const masked = phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4);
 
-  const [otp,       setOtp]       = useState(Array(OTP_LENGTH).fill(''));
-  const [timeLeft,  setTimeLeft]  = useState(TIMER_START);
-  const [canResend, setCanResend] = useState(false);
-  const [error,     setError]     = useState('');
-  const [loading,   setLoading]   = useState(false);
+  const [otp,           setOtp]           = useState(Array(OTP_LENGTH).fill(''));
+  const [timeLeft,      setTimeLeft]      = useState(TIMER_START);
+  const [canResend,     setCanResend]     = useState(false);
+  const [error,         setError]         = useState('');
+  const [loading,       setLoading]       = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
   const inputRefs = useRef([]);
 
   // Countdown timer
@@ -90,12 +92,16 @@ export default function OTPScreen() {
     }
   };
 
-  const handleResend = async () => {
+  const handleResend = () => {
     if (!canResend) return;
+    if (!phone) { navigate('/login'); return; }
+    const newOtp = generateOTP();
+    storeOTP(phone, newOtp);
     setOtp(Array(OTP_LENGTH).fill(''));
     setTimeLeft(TIMER_START);
     setCanResend(false);
     setError('');
+    setResendMessage('Naya OTP generate ho gaya');
     inputRefs.current[0]?.focus();
   };
 
@@ -119,10 +125,21 @@ export default function OTPScreen() {
           </button>
         </div>
 
-        {/* SMS delivery note */}
-        <div style={styles.devBanner}>
-          📱 OTP aapke number pe SMS se aayega — kuch seconds wait karo
-        </div>
+        {/* Dev OTP hint (shown only when otp passed via state) */}
+        {devOtp ? (
+          <div style={styles.devBanner}>
+            🔐 Dev OTP: <strong>{devOtp}</strong> — SMS integration coming soon
+          </div>
+        ) : (
+          <div style={styles.devBanner}>
+            📱 OTP verify karo — SMS integration coming soon
+          </div>
+        )}
+        {resendMessage && (
+          <div style={{ ...styles.devBanner, backgroundColor: '#E8F5EE', borderColor: '#C8E6C9', color: '#1A6B3C' }}>
+            ✓ {resendMessage}
+          </div>
+        )}
 
         {/* OTP Boxes */}
         <div style={styles.otpRow} onPaste={handlePaste}>

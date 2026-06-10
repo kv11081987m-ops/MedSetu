@@ -31,12 +31,13 @@ export const createOrder = async (orderData) => {
 // Maps cart items → order_items schema (name, unit_price, total_price)
 export const createOrderItems = async (orderId, items) => {
   const orderItems = items.map((item) => ({
-    order_id:    orderId,
-    medicine_id: item.id   || null,
-    name:        item.name,
-    quantity:    item.quantity ?? item.qty ?? 1,
-    unit_price:  item.price   ?? item.selling_price ?? 0,
-    total_price: (item.quantity ?? item.qty ?? 1) * (item.price ?? item.selling_price ?? 0),
+    order_id:      orderId,
+    medicine_id:   item.id              || null,
+    medicine_name: item.name            || item.medicine_name || 'Medicine',
+    name:          item.name            || item.medicine_name || 'Medicine',
+    quantity:      item.quantity        ?? item.qty           ?? 1,
+    unit_price:    item.price           ?? item.selling_price ?? 0,
+    total_price:   (item.quantity       ?? item.qty           ?? 1) * (item.price ?? item.selling_price ?? 0),
   }));
 
   const { data, error } = await supabase

@@ -175,6 +175,15 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
   );
 }
 
+const getCurrentUserId = () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+};
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function OrderHistory() {
   const navigate = useNavigate();
@@ -184,7 +193,8 @@ export default function OrderHistory() {
   const [dbLoading, setDbLoading]       = useState(true);
 
   useEffect(() => {
-    fetchOrders().then(({ data, error }) => {
+    const userId = getCurrentUserId();
+    fetchOrders(userId).then(({ data, error }) => {
       if (!error && data.length > 0) {
         setDbOrders(data.map(mapOrder));
       }

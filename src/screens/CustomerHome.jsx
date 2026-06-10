@@ -2,11 +2,42 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchSellers } from '../lib/api';
 import { useCart } from '../context/CartContext';
+import { supabase } from '../lib/supabase';
 import {
   Bell, MapPin, ChevronDown, Search,
   FileText, Clock, Star, CheckCircle,
   Home, ShoppingBag, User, Pill,
 } from 'lucide-react';
+
+// ─── Notification helpers ─────────────────────────────────────
+const getNotifTitle = (status) => {
+  switch (status) {
+    case 'pending':          return '⏳ Order Received';
+    case 'confirmed':        return '✅ Order Confirmed';
+    case 'preparing':        return '📦 Order Preparing';
+    case 'out_for_delivery': return '🛵 Out for Delivery';
+    case 'delivered':        return '🎉 Order Delivered!';
+    case 'cancelled':        return '❌ Order Cancelled';
+    default:                 return '📋 Order Update';
+  }
+};
+const getNotifColor = (status) => {
+  switch (status) {
+    case 'delivered':        return '#1A6B3C';
+    case 'cancelled':        return '#DC3545';
+    case 'out_for_delivery': return '#FF8C00';
+    default:                 return '#2563EB';
+  }
+};
+const getTimeAgo = (dateString) => {
+  const diff  = Date.now() - new Date(dateString);
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  < 60) return `${mins} min pehle`;
+  if (hours < 24) return `${hours} ghante pehle`;
+  return `${days} din pehle`;
+};
 
 // ─── Dummy fallback stores ────────────────────────────────────
 const FALLBACK_STORES = [
@@ -19,12 +50,6 @@ const CATEGORIES = [
   'Sab', 'Medicines', 'Equipment', 'Surgical', 'Ayurvedic', 'Baby Care',
 ];
 
-const NOTIFICATIONS = [
-  { id: 1, icon: '🛵', title: 'Order Out for Delivery', sub: 'Aapka order deliver ho raha hai — 15 min mein!', time: '5 min pehle', read: false },
-  { id: 2, icon: '✅', title: 'Order Delivered',         sub: 'MED-2024-014 successfully deliver ho gaya', time: '2 ghante pehle', read: false },
-  { id: 3, icon: '💊', title: 'Reminder: Refill Karo',  sub: 'Paracetamol 500mg ka stock khatam ho raha hai', time: 'Kal',           read: true  },
-  { id: 4, icon: '🎁', title: 'Offer: FIRST10',         sub: 'Aaj FIRST10 use karo — 10% off milega',       time: '2 din pehle',  read: true  },
-];
 
 const QUICK_ACTIONS = [
   { label: 'Store Dhundho',       Icon: MapPin,    bg: '#E8F5EE', color: '#1A6B3C', route: '/store-locator' },
@@ -111,9 +136,37 @@ export default function CustomerHome() {
   const [activeTab, setActiveTab]           = useState('home');
   const [nearbyStores, setNearbyStores]     = useState(FALLBACK_STORES);
   const [storesLoading, setStoresLoading]   = useState(true);
-  const [showNotif, setShowNotif]           = useState(false);
-  const [notifs, setNotifs]                 = useState(NOTIFICATIONS);
-  const unreadCount = notifs.filter((n) => !n.read).length;
+  const [showNotif, setShowNotif]     = useState(false);
+  const [notifs, setNotifs]           = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+        if (!user?.id) return;
+        const { data } = await supabase
+          .from('orders')
+          .select('id, order_number, status, created_at, sellers(store_name)')
+          .eq('customer_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (data) {
+          const mapped = data.map((order) => ({
+            id:      order.id,
+            title:   getNotifTitle(order.status),
+            message: `${order.sellers?.store_name || 'Store'} — #${order.order_number || order.id}`,
+            time:    getTimeAgo(order.created_at),
+            read:    false,
+            color:   getNotifColor(order.status),
+          }));
+          setNotifs(mapped);
+          setUnreadCount(mapped.length);
+        }
+      } catch {}
+    };
+    fetchNotifications();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -314,7 +367,7 @@ export default function CustomerHome() {
               <div style={s.notifHeader}>
                 <span style={s.notifTitle}>Notifications</span>
                 {unreadCount > 0 && (
-                  <button style={s.markAllBtn} onClick={() => setNotifs((prev) => prev.map((n) => ({ ...n, read: true })))}>
+                  <button style={s.markAllBtn} onClick={() => { setUnreadCount(0); setNotifs((prev) => prev.map((n) => ({ ...n, read: true }))); }}>
                     Sab Read Karo
                   </button>
                 )}
@@ -332,10 +385,12 @@ export default function CustomerHome() {
                       style={{ ...s.notifRow, backgroundColor: n.read ? '#FFFFFF' : '#F0FBF4' }}
                       onClick={() => setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))}
                     >
-                      <span style={s.notifIcon}>{n.icon}</span>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: (n.color || '#2563EB') + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: n.color || '#2563EB' }} />
+                      </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ ...s.notifRowTitle, fontWeight: n.read ? '500' : '700' }}>{n.title}</p>
-                        <p style={s.notifRowSub}>{n.sub}</p>
+                        <p style={s.notifRowSub}>{n.message}</p>
                         <p style={s.notifRowTime}>{n.time}</p>
                       </div>
                       {!n.read && <span style={s.unreadDot} />}

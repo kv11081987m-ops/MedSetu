@@ -1,17 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export default function SplashScreen() {
   const navigate = useNavigate();
   const [visible, setVisible] = useState(false);
+  const timerRef      = useRef(null);
+  const innerTimerRef = useRef(null);
 
   useEffect(() => {
     setVisible(true);
-    const timer = setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setVisible(false);
-      setTimeout(() => navigate('/onboarding'), 400);
+      innerTimerRef.current = setTimeout(() => navigate('/onboarding'), 400);
     }, 2500);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timerRef.current);
+      clearTimeout(innerTimerRef.current);
+    };
   }, [navigate]);
 
   return (

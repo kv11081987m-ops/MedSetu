@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { getCurrentSeller } from '../lib/auth';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -49,7 +50,7 @@ const mapOrderDisplay = (order) => ({
   customer: order.customer_name || 'Customer',
   phone:    order.customer_phone || '',
   items:    order.order_items?.length
-    ? order.order_items.map((i) => `${i.medicine_name || 'Item'} x${i.quantity || 1}`)
+    ? order.order_items.map((i) => `${i.medicine_name || i.name || 'Item'} x${i.quantity || 1}`)
     : ['Order items'],
   amount:   order.final_amount || 0,
   status:   order.status,
@@ -187,13 +188,8 @@ export default function SellerDashboard() {
 
   const fetchSellerData = async () => {
     try {
-      const { data: seller, error } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('is_verified', true)
-        .limit(1)
-        .single();
-      if (error) throw error;
+      const seller = await getCurrentSeller();
+      if (!seller) { navigate('/login'); return; }
       setSellerData(seller);
       setStoreOpen(seller.is_open ?? true);
       await Promise.all([

@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Search, Plus, Package, AlertTriangle,
   XCircle, Calendar, ChevronDown, Edit2, MoreVertical,
-  X, Check, Trash2, TrendingDown,
+  X, Check, Trash2, TrendingDown, Upload, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getCurrentSeller } from '../lib/auth';
 
 // ─── Constants ────────────────────────────────────────────────
 const CATEGORIES   = ['Sab', 'Tablets', 'Syrup', 'Equipment', 'Ayurvedic'];
@@ -173,6 +174,183 @@ function EditModal({ item, onSave, onClose }) {
   );
 }
 
+// ─── BulkModal ────────────────────────────────────────────────
+function BulkModal({ sellerId, onClose, onDone }) {
+  const [csvData,       setCsvData]       = useState([]);
+  const [uploadStatus,  setUploadStatus]  = useState('idle'); // idle|preview|uploading|done|error
+  const [errorMsg,      setErrorMsg]      = useState('');
+
+  const validateRow = (row) => {
+    const errors = [];
+    if (!row.name?.trim())                           errors.push('Naam required');
+    if (!row.stock || isNaN(Number(row.stock)))      errors.push('Stock number chahiye');
+    if (!row.mrp   || isNaN(Number(row.mrp)))        errors.push('MRP number chahiye');
+    if (row.selling_price && isNaN(Number(row.selling_price))) errors.push('Selling price number chahiye');
+    return errors;
+  };
+
+  const parseCSV = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const lines = e.target.result.trim().split('\n');
+      if (lines.length < 2) { setErrorMsg('CSV mein data nahi hai'); setUploadStatus('error'); return; }
+      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/ /g, '_'));
+      const rows = lines.slice(1)
+        .map((line) => {
+          const vals = line.split(',').map((v) => v.trim());
+          const row  = {};
+          headers.forEach((h, i) => { row[h] = vals[i] || ''; });
+          const errs = validateRow(row);
+          return { ...row, _errors: errs, _valid: errs.length === 0 };
+        })
+        .filter((r) => r.name);
+      setCsvData(rows);
+      setUploadStatus('preview');
+    };
+    reader.onerror = () => { setErrorMsg('File read nahi ho saka'); setUploadStatus('error'); };
+    reader.readAsText(file);
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.csv')) { setErrorMsg('Sirf .csv file allowed hai'); setUploadStatus('error'); return; }
+    setUploadStatus('idle');
+    parseCSV(file);
+  };
+
+  const bulkUpload = async () => {
+    const validRows = csvData.filter((r) => r._valid);
+    if (!validRows.length) return;
+    setUploadStatus('uploading');
+    const records = validRows.map((r) => ({
+      name:          r.name.trim(),
+      brand:         r.brand?.trim()         || '',
+      category:      r.category?.trim()      || 'Tablets',
+      stock:         Number(r.stock)         || 0,
+      max_stock:     Number(r.max_stock)     || 60,
+      mrp:           Number(r.mrp)           || 0,
+      selling_price: Number(r.selling_price) || Number(r.mrp) || 0,
+      expiry_date:   r.expiry_date           || null,
+      seller_id:     sellerId,
+      is_available:  true,
+    }));
+    const BATCH = 50;
+    for (let i = 0; i < records.length; i += BATCH) {
+      const { error } = await supabase.from('medicines').insert(records.slice(i, i + BATCH));
+      if (error) { setErrorMsg(error.message); setUploadStatus('error'); return; }
+    }
+    setUploadStatus('done');
+    onDone();
+  };
+
+  const validCount   = csvData.filter((r) => r._valid).length;
+  const invalidCount = csvData.filter((r) => !r._valid).length;
+
+  return (
+    <div style={bs.overlay} onClick={onClose}>
+      <div style={bs.card} onClick={(e) => e.stopPropagation()}>
+
+        <div style={bs.header}>
+          <p style={bs.title}>Bulk Upload</p>
+          <button style={s.modalClose} onClick={onClose}><X size={20} color="#888" /></button>
+        </div>
+
+        {uploadStatus === 'done' && (
+          <div style={bs.centerBox}>
+            <span style={bs.bigEmoji}>✅</span>
+            <p style={bs.doneTitle}>{validCount} medicines add ho gayi!</p>
+            <p style={bs.doneSub}>Inventory update ho gayi hai</p>
+            <button style={bs.primaryBtn} onClick={onClose}>Done</button>
+          </div>
+        )}
+
+        {uploadStatus === 'uploading' && (
+          <div style={bs.centerBox}>
+            <p style={{ fontSize: '14px', color: '#555555' }}>Upload ho raha hai... please wait</p>
+          </div>
+        )}
+
+        {uploadStatus === 'error' && (
+          <div style={bs.centerBox}>
+            <span style={bs.bigEmoji}>❌</span>
+            <p style={bs.doneTitle}>Error aaya</p>
+            <p style={bs.doneSub}>{errorMsg}</p>
+            <button style={bs.retryBtn} onClick={() => { setUploadStatus('idle'); setCsvData([]); setErrorMsg(''); }}>
+              Dobara Try Karo
+            </button>
+          </div>
+        )}
+
+        {(uploadStatus === 'idle' || uploadStatus === 'preview') && (
+          <>
+            <div style={bs.infoCard}>
+              <p style={bs.infoTitle}>CSV Format Guide</p>
+              <p style={bs.infoLine}>Columns: <strong>name, brand, category, stock, max_stock, mrp, selling_price, expiry_date</strong></p>
+              <p style={bs.infoLine}>• <strong>name, stock, mrp</strong> — required fields</p>
+              <p style={bs.infoLine}>• expiry_date format: <strong>YYYY-MM</strong> (e.g. 2025-12)</p>
+            </div>
+
+            {uploadStatus === 'idle' && (
+              <label style={bs.dropZone}>
+                <Upload size={28} color="#2563EB" />
+                <p style={bs.dropText}>CSV file select karo</p>
+                <p style={bs.dropSub}>.csv files only</p>
+                <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFile} />
+              </label>
+            )}
+
+            {uploadStatus === 'preview' && csvData.length > 0 && (
+              <>
+                <div style={bs.previewSummary}>
+                  <span style={bs.validBadge}>✅ {validCount} valid</span>
+                  {invalidCount > 0 && <span style={bs.invalidBadge}>❌ {invalidCount} error</span>}
+                </div>
+                <div style={bs.tableWrap}>
+                  <table style={bs.table}>
+                    <thead>
+                      <tr>
+                        {['#', 'Naam', 'Stock', 'MRP', 'Status'].map((h) => (
+                          <th key={h} style={bs.th}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvData.map((row, i) => (
+                        <tr key={i} style={{ backgroundColor: row._valid ? '#F0FBF4' : '#FFF0F0' }}>
+                          <td style={bs.td}>{i + 1}</td>
+                          <td style={bs.td}>{row.name || '—'}</td>
+                          <td style={bs.td}>{row.stock || '—'}</td>
+                          <td style={bs.td}>{row.mrp ? `₹${row.mrp}` : '—'}</td>
+                          <td style={bs.td}>
+                            {row._valid
+                              ? <span style={{ color: '#1A6B3C', fontWeight: '700' }}>✓</span>
+                              : <span style={{ color: '#DC3545', fontSize: '11px' }}>✗ {row._errors[0]}</span>
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {validCount > 0 && (
+                  <button style={bs.primaryBtn} onClick={bulkUpload}>
+                    <Upload size={15} color="#fff" />
+                    {validCount} Medicines Upload Karo
+                  </button>
+                )}
+                <button style={bs.retryBtn} onClick={() => { setCsvData([]); setUploadStatus('idle'); }}>
+                  Doosri File Choose Karo
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ItemCard ─────────────────────────────────────────────────
 function ItemCard({ item, onEdit, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -268,11 +446,12 @@ export default function InventoryManagement() {
   const [loading,   setLoading]   = useState(true);
   const [sellerId,  setSellerId]  = useState(null);
 
-  const [query,      setQuery]      = useState('');
-  const [category,   setCategory]   = useState('Sab');
-  const [sort,       setSort]       = useState('Naam (A-Z)');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [editItem,   setEditItem]   = useState(null);
+  const [query,          setQuery]          = useState('');
+  const [category,       setCategory]       = useState('Sab');
+  const [sort,           setSort]           = useState('Naam (A-Z)');
+  const [searchOpen,     setSearchOpen]     = useState(false);
+  const [editItem,       setEditItem]       = useState(null);
+  const [showBulkModal,  setShowBulkModal]  = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────
   const fetchInventory = async (sid) => {
@@ -287,12 +466,10 @@ export default function InventoryManagement() {
   useEffect(() => {
     const load = async () => {
       try {
-        const { data: seller } = await supabase
-          .from('sellers').select('id').eq('is_verified', true).limit(1).single();
-        if (seller) {
-          setSellerId(seller.id);
-          await fetchInventory(seller.id);
-        }
+        const seller = await getCurrentSeller();
+        if (!seller) { navigate('/login'); return; }
+        setSellerId(seller.id);
+        await fetchInventory(seller.id);
       } catch (err) {
         console.error('Inventory load:', err);
       } finally {
@@ -335,6 +512,19 @@ export default function InventoryManagement() {
     const { error } = await supabase.from('medicines').delete().eq('id', id);
     if (error) { alert('Delete nahi hua: ' + error.message); return; }
     setMedicines((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  // ── CSV Template Download ─────────────────────────────────────
+  const downloadTemplate = () => {
+    const csv = [
+      'name,brand,category,stock,max_stock,mrp,selling_price,expiry_date',
+      'Paracetamol 500mg,Crocin,Tablets,100,200,15.00,12.00,2025-12',
+      'Amoxicillin 250mg,Amoxil,Capsules,50,150,45.00,38.00,2026-06',
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'medsetu_inventory_template.csv'; a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ── Derived state ─────────────────────────────────────────────
@@ -382,6 +572,13 @@ export default function InventoryManagement() {
           <div style={s.headerRight}>
             <button style={s.iconBtn} onClick={() => setSearchOpen((v) => !v)}>
               <Search size={20} color="#555555" />
+            </button>
+            <button style={s.bulkBtn} onClick={() => setShowBulkModal(true)}>
+              <Upload size={14} color="#2563EB" />
+              <span style={{ fontSize: '12px', fontWeight: '600', color: '#2563EB' }}>Bulk</span>
+            </button>
+            <button style={s.templateBtn} onClick={downloadTemplate}>
+              <Download size={14} color="#555555" />
             </button>
             <button style={s.addBtn} onClick={() => setEditItem({})}>
               <Plus size={18} color="#FFFFFF" />
@@ -493,6 +690,15 @@ export default function InventoryManagement() {
             onClose={() => setEditItem(null)}
           />
         )}
+
+        {/* Bulk Upload Modal */}
+        {showBulkModal && (
+          <BulkModal
+            sellerId={sellerId}
+            onClose={() => setShowBulkModal(false)}
+            onDone={async () => { if (sellerId) await fetchInventory(sellerId); }}
+          />
+        )}
       </div>
     </div>
   );
@@ -507,8 +713,10 @@ const s = {
   header:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 14px 12px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #F0F0F0', position: 'sticky', top: 0, zIndex: 20 },
   headerTitle: { fontSize: '17px', fontWeight: '700', color: '#1A1A1A' },
   headerRight: { display: 'flex', alignItems: 'center', gap: '6px' },
-  iconBtn: { background: 'none', border: 'none', padding: '6px', cursor: 'pointer', borderRadius: '8px', display: 'flex', alignItems: 'center' },
-  addBtn:  { width: '34px', height: '34px', borderRadius: '10px', backgroundColor: '#1A6B3C', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBtn:     { background: 'none', border: 'none', padding: '6px', cursor: 'pointer', borderRadius: '8px', display: 'flex', alignItems: 'center' },
+  addBtn:      { width: '34px', height: '34px', borderRadius: '10px', backgroundColor: '#1A6B3C', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  bulkBtn:     { display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 10px', border: '1.5px solid #2563EB', borderRadius: '8px', backgroundColor: '#EAF2FF', cursor: 'pointer', fontFamily: 'inherit' },
+  templateBtn: { display: 'flex', alignItems: 'center', padding: '6px 8px', border: '1.5px solid #E0E0E0', borderRadius: '8px', backgroundColor: '#FFFFFF', cursor: 'pointer' },
 
   // Search
   searchWrap:  { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #F0F0F0', padding: '10px 16px' },
@@ -587,4 +795,37 @@ const s = {
   input:        { padding: '10px 12px', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontSize: '14px', color: '#1A1A1A', outline: 'none', fontFamily: 'inherit', backgroundColor: '#FFFFFF', width: '100%', boxSizing: 'border-box' },
   select:       { padding: '10px 12px', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontSize: '14px', color: '#1A1A1A', outline: 'none', fontFamily: 'inherit', backgroundColor: '#FFFFFF', width: '100%' },
   saveBtn:      { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '14px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', marginTop: '4px' },
+};
+
+// ─── Bulk Modal Styles ────────────────────────────────────────
+const bs = {
+  overlay:        { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' },
+  card:           { width: '100%', maxWidth: '480px', backgroundColor: '#FFFFFF', borderRadius: '20px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '80vh', overflowY: 'auto' },
+  header:         { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  title:          { fontSize: '17px', fontWeight: '700', color: '#1A1A1A', margin: 0 },
+
+  infoCard:       { backgroundColor: '#F0F8FF', borderRadius: '12px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '4px', border: '1px solid #BBDEFB' },
+  infoTitle:      { fontSize: '12px', fontWeight: '700', color: '#1565C0', margin: '0 0 4px' },
+  infoLine:       { fontSize: '12px', color: '#1E3A5F', margin: 0, lineHeight: '1.5' },
+
+  dropZone:       { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '28px', border: '2px dashed #2563EB', borderRadius: '14px', backgroundColor: '#F8FBFF', cursor: 'pointer' },
+  dropText:       { fontSize: '14px', fontWeight: '600', color: '#2563EB', margin: 0 },
+  dropSub:        { fontSize: '12px', color: '#AAAAAA', margin: 0 },
+
+  previewSummary: { display: 'flex', gap: '10px', alignItems: 'center' },
+  validBadge:     { fontSize: '12px', fontWeight: '700', color: '#1A6B3C', backgroundColor: '#E8F5EE', padding: '4px 10px', borderRadius: '20px' },
+  invalidBadge:   { fontSize: '12px', fontWeight: '700', color: '#DC3545', backgroundColor: '#FFEBEE', padding: '4px 10px', borderRadius: '20px' },
+
+  tableWrap:      { overflowX: 'auto', borderRadius: '10px', border: '1px solid #E0E0E0' },
+  table:          { width: '100%', borderCollapse: 'collapse', fontSize: '12px' },
+  th:             { padding: '8px 10px', backgroundColor: '#F5F5F5', color: '#555555', fontWeight: '600', textAlign: 'left', whiteSpace: 'nowrap', borderBottom: '1px solid #E0E0E0' },
+  td:             { padding: '7px 10px', color: '#333333', borderBottom: '1px solid #F0F0F0', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+
+  centerBox:      { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px 0' },
+  bigEmoji:       { fontSize: '40px' },
+  doneTitle:      { fontSize: '16px', fontWeight: '700', color: '#1A1A1A', margin: 0, textAlign: 'center' },
+  doneSub:        { fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' },
+
+  primaryBtn:     { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '13px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', width: '100%' },
+  retryBtn:       { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '11px', backgroundColor: '#FFFFFF', color: '#555555', border: '1.5px solid #E0E0E0', borderRadius: '12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', width: '100%' },
 };

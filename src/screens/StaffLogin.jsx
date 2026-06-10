@@ -10,9 +10,9 @@ const ROLES = [
 ];
 
 const DEMO_CREDS = {
-  admin:      { email: 'admin@medsetu.in',  password: 'admin123',  route: '/admin' },
-  pharmacist: { email: 'pharma@medsetu.in', password: 'pharma123', route: '/pharmacist' },
-  seller:     { email: 'seller@medsetu.in', password: 'seller123', route: '/seller-dashboard' },
+  admin:      { email: import.meta.env.VITE_ADMIN_EMAIL,  password: import.meta.env.VITE_ADMIN_PASS,  route: '/admin'            },
+  pharmacist: { email: import.meta.env.VITE_PHARMA_EMAIL, password: import.meta.env.VITE_PHARMA_PASS, route: '/pharmacist'       },
+  seller:     { email: import.meta.env.VITE_SELLER_EMAIL, password: import.meta.env.VITE_SELLER_PASS, route: '/seller-dashboard' },
 };
 
 export default function StaffLogin() {
@@ -49,6 +49,9 @@ export default function StaffLogin() {
   return (
     <div style={s.wrapper}>
       <div style={s.container}>
+
+        {/* ── Logo ── */}
+        <img src="/logo.png" alt="MedSetu" style={{ width: '140px', height: 'auto', display: 'block', margin: '0 auto 4px' }} />
 
         {/* ── Header ── */}
         <div style={s.header}>

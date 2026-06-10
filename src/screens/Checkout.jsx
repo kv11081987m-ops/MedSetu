@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
+import { supabase } from '../lib/supabase';
 
 // ─── Dummy cart items ─────────────────────────────────────────
 const INITIAL_ITEMS = [
@@ -147,6 +148,7 @@ export default function Checkout() {
     return INITIAL_ITEMS;
   });
 
+  const [selectedAddress, setSelectedAddress] = useState('Address load ho raha hai...');
   const [delivery, setDelivery]         = useState('home');
   const [payment, setPayment]           = useState('cod');
   const [promoInput, setPromoInput]     = useState('');
@@ -157,6 +159,30 @@ export default function Checkout() {
   const [orderId, setOrderId]           = useState('');
   const [ordering, setOrdering]         = useState(false);
   const [orderError, setOrderError]     = useState('');
+
+  // ── Fetch default address ──────────────────────────────────
+  useEffect(() => {
+    const fetchDefaultAddress = async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+        if (!user?.id) { setSelectedAddress('Address add karo'); return; }
+        const { data } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_default', true)
+          .single();
+        if (data) {
+          setSelectedAddress(`${data.address_line}, ${data.city} — ${data.pincode}`);
+        } else {
+          setSelectedAddress('Address add karo');
+        }
+      } catch {
+        setSelectedAddress('Address add karo');
+      }
+    };
+    fetchDefaultAddress();
+  }, []);
 
   // ── Calculations ──
   const cartTotal  = items.reduce((sum, it) => sum + it.price * it.qty, 0);
@@ -314,7 +340,7 @@ export default function Checkout() {
             <p style={s.cardTitle}>Delivery Kahan Karen?</p>
             <div style={s.addressRow}>
               <MapPin size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 2 }} />
-              <p style={s.addressText}>123, Gandhi Nagar, Deoria — 274001</p>
+              <p style={s.addressText}>{selectedAddress}</p>
               <button style={s.changeLink}>Change</button>
             </div>
             <button style={s.addAddrBtn}>

@@ -6,7 +6,7 @@ import {
   ArrowLeft, Pencil, Camera, User, Phone, Mail, Calendar,
   Users, Home, Briefcase, Heart, AlertCircle, Activity,
   FileText, ChevronRight, Trash2, LogOut, Bell, Shield,
-  HelpCircle, Star, Plus, Pill,
+  HelpCircle, Star, Plus, Pill, MapPin,
 } from 'lucide-react';
 
 // ─── Data ─────────────────────────────────────────────────────
@@ -43,18 +43,22 @@ export default function UserProfile() {
   const navigate  = useNavigate();
   const { handleLogout: authLogout, devSession } = useAuth();
 
-  const [userData,    setUserData]    = useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [editMode,    setEditMode]    = useState(false);
-  const [showLogout,  setShowLogout]  = useState(false);
-  const [addresses,   setAddresses]   = useState(INITIAL_ADDRESSES);
+  const [userData,       setUserData]       = useState(null);
+  const [loading,        setLoading]        = useState(true);
+  const [editMode,       setEditMode]       = useState(false);
+  const [showLogout,     setShowLogout]     = useState(false);
+  const [addresses,      setAddresses]      = useState([]);
+  const [showAddAddress, setShowAddAddress] = useState(false);
+  const [newAddress,     setNewAddress]     = useState({
+    label: 'Ghar', address_line: '', city: 'Deoria',
+    district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
+  });
 
   // ── Fetch user ───────────────────────────────────────────────
   useEffect(() => {
-    const load = async () => {
+    const fetchUserProfile = async () => {
       try {
         const stored = localStorage.getItem('medsetu_user');
-        // Demo mode: no localStorage entry — build a guest profile from devSession
         if (!stored) {
           if (devSession?.phone) {
             setUserData({ name: 'Demo User', phone: devSession.phone, email: '', blood_group: '' });
@@ -73,7 +77,20 @@ export default function UserProfile() {
         setLoading(false);
       }
     };
-    load();
+    const fetchAddresses = async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+        if (!user?.id) return;
+        const { data } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('is_default', { ascending: false });
+        if (data) setAddresses(data);
+      } catch {}
+    };
+    fetchUserProfile();
+    fetchAddresses();
   }, []);
 
   // ── Profile update ───────────────────────────────────────────
@@ -104,7 +121,27 @@ export default function UserProfile() {
     navigate('/login', { replace: true });
   };
 
-  const deleteAddress = (id) => setAddresses((a) => a.filter((x) => x.id !== id));
+  const deleteAddress = async (addressId) => {
+    if (!window.confirm('Address delete karna chahte hain?')) return;
+    const { error } = await supabase.from('addresses').delete().eq('id', addressId);
+    if (!error) setAddresses((prev) => prev.filter((a) => a.id !== addressId));
+  };
+
+  const addAddress = async () => {
+    if (!newAddress.address_line.trim()) { alert('Address daalo'); return; }
+    try {
+      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+      const { data, error } = await supabase
+        .from('addresses')
+        .insert({ user_id: user.id, ...newAddress, is_default: addresses.length === 0 })
+        .select();
+      if (!error && data) {
+        setAddresses((prev) => [...prev, data[0]]);
+        setShowAddAddress(false);
+        setNewAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '' });
+      }
+    } catch (err) { alert('Add nahi hua: ' + err.message); }
+  };
 
   // ── Loading / null states ────────────────────────────────────
   if (loading) {
@@ -243,35 +280,48 @@ export default function UserProfile() {
           <div style={s.card}>
             <div style={s.cardHead}>
               <p style={s.cardTitle}>Mere Addresses</p>
-              <button style={s.greenBtn}>
+              <button style={s.greenBtn} onClick={() => setShowAddAddress(true)}>
                 <Plus size={13} color="#FFFFFF" />
                 Naya Add
               </button>
             </div>
 
-            {addresses.map(({ id, type, Icon, color, bg, isDefault, line1, line2 }) => (
-              <div key={id} style={s.addrCard}>
-                <div style={{ ...s.addrIconBox, backgroundColor: bg }}>
-                  <Icon size={17} color={color} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={s.addrBadgeRow}>
-                    <span style={{ ...s.typeBadge, color, backgroundColor: bg }}>{type}</span>
-                    {isDefault && <span style={s.defaultBadge}>Default</span>}
+            {addresses.length === 0 ? (
+              <p style={{ color: '#666666', textAlign: 'center', fontSize: '13px', margin: '8px 0' }}>
+                Koi address nahi — pehla address add karo
+              </p>
+            ) : (
+              addresses.map((addr) => {
+                const LABEL_STYLES = {
+                  Ghar:   { Icon: Home,      color: '#1A6B3C', bg: '#E8F5EE' },
+                  Office: { Icon: Briefcase, color: '#2563EB', bg: '#EAF2FF' },
+                };
+                const { Icon: AddrIcon, color: ac, bg: abg } = LABEL_STYLES[addr.label] || { Icon: MapPin, color: '#EA6C00', bg: '#FFF3E8' };
+                return (
+                  <div key={addr.id} style={s.addrCard}>
+                    <div style={{ ...s.addrIconBox, backgroundColor: abg }}>
+                      <AddrIcon size={17} color={ac} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={s.addrBadgeRow}>
+                        <span style={{ ...s.typeBadge, color: ac, backgroundColor: abg }}>{addr.label}</span>
+                        {addr.is_default && <span style={s.defaultBadge}>Default</span>}
+                      </div>
+                      <p style={s.addrLine1}>{addr.address_line}</p>
+                      <p style={s.addrLine2}>{addr.city} — {addr.pincode}</p>
+                    </div>
+                    <div style={s.addrActions}>
+                      <button style={s.addrIconBtn}><Pencil size={14} color="#888888" /></button>
+                      <button style={s.addrIconBtn} onClick={() => deleteAddress(addr.id)}>
+                        <Trash2 size={14} color="#DC3545" />
+                      </button>
+                    </div>
                   </div>
-                  <p style={s.addrLine1}>{line1}</p>
-                  <p style={s.addrLine2}>{line2}</p>
-                </div>
-                <div style={s.addrActions}>
-                  <button style={s.addrIconBtn}><Pencil size={14} color="#888888" /></button>
-                  <button style={s.addrIconBtn} onClick={() => deleteAddress(id)}>
-                    <Trash2 size={14} color="#DC3545" />
-                  </button>
-                </div>
-              </div>
-            ))}
+                );
+              })
+            )}
 
-            <button style={s.dashedAddBtn}>
+            <button style={s.dashedAddBtn} onClick={() => setShowAddAddress(true)}>
               <Plus size={16} color="#1A6B3C" />
               Naya Address Add Karo
             </button>
@@ -359,6 +409,56 @@ export default function UserProfile() {
 
           <div style={{ height: '24px' }} />
         </div>
+
+        {/* ── Add Address Sheet ── */}
+        {showAddAddress && (
+          <>
+            <div style={{ ...s.overlay, zIndex: 59 }} onClick={() => setShowAddAddress(false)} />
+            <div style={{ ...s.modal, zIndex: 60, position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px' }}>
+              <div style={s.modalHandle} />
+              <p style={s.modalTitle}>Naya Address Add Karo</p>
+
+              {/* Label */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
+                {['Ghar', 'Office', 'Other'].map((lbl) => (
+                  <button
+                    key={lbl}
+                    style={{
+                      flex: 1, padding: '8px', border: '1.5px solid',
+                      borderColor: newAddress.label === lbl ? '#1A6B3C' : '#E0E0E0',
+                      backgroundColor: newAddress.label === lbl ? '#E8F5EE' : '#FFFFFF',
+                      color: newAddress.label === lbl ? '#1A6B3C' : '#888888',
+                      borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                    onClick={() => setNewAddress((p) => ({ ...p, label: lbl }))}
+                  >{lbl}</button>
+                ))}
+              </div>
+
+              {/* Address Line */}
+              <textarea
+                style={{ ...s.infoInput, resize: 'none', lineHeight: '1.5', padding: '10px 12px' }}
+                rows={3}
+                placeholder="Gali, Mohalla, Landmark..."
+                value={newAddress.address_line}
+                onChange={(e) => setNewAddress((p) => ({ ...p, address_line: e.target.value }))}
+              />
+
+              {/* Pincode */}
+              <input
+                style={s.infoInput}
+                placeholder="Pincode (6 digits)"
+                maxLength={6}
+                value={newAddress.pincode}
+                onChange={(e) => setNewAddress((p) => ({ ...p, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+              />
+
+              <button style={s.modalPrimary} onClick={addAddress}>Save Karo</button>
+              <button style={s.modalSecondary} onClick={() => setShowAddAddress(false)}>Cancel</button>
+            </div>
+          </>
+        )}
 
         {/* ── Logout Confirm Modal ── */}
         {showLogout && (

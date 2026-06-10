@@ -84,3 +84,30 @@ export const sendEmailOTP = async (email) => {
 export const onAuthStateChange = (callback) => {
   return supabase.auth.onAuthStateChange(callback);
 };
+
+export const getCurrentSeller = async () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    const phone = user?.phone || null;
+
+    if (phone) {
+      const { data } = await supabase
+        .from('sellers')
+        .select('*')
+        .eq('phone', phone)
+        .single();
+      if (data) return data;
+    }
+
+    // Fallback for demo/testing — first verified seller
+    const { data: fallback } = await supabase
+      .from('sellers')
+      .select('*')
+      .eq('is_verified', true)
+      .limit(1)
+      .single();
+    return fallback || null;
+  } catch {
+    return null;
+  }
+};

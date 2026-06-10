@@ -256,10 +256,19 @@ export default function PharmacistPanel() {
   const [notifications, setNotifications]   = useState(INIT_NOTIFS);
   const [notifOpen, setNotifOpen]           = useState(false);
 
-  // ── Load availability ────────────────────────────────────────
+  // ── Load availability (localStorage first, then DB) ──────────
   useEffect(() => {
-    const saved = localStorage.getItem('pharmacist_available');
-    if (saved !== null) setAvailable(saved === 'true');
+    const localSaved = localStorage.getItem('pharmacist_available');
+    if (localSaved !== null) setAvailable(localSaved === 'true');
+    try {
+      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+      if (user?.id) {
+        supabase.from('users').select('is_available').eq('id', user.id).single()
+          .then(({ data }) => {
+            if (data && typeof data.is_available === 'boolean') setAvailable(data.is_available);
+          });
+      }
+    } catch {}
   }, []);
 
   // ── Fetch data ───────────────────────────────────────────────
@@ -297,8 +306,16 @@ export default function PharmacistPanel() {
   const pendingRx    = allRx.filter((r) => r.status === 'pending');
 
   // ── Handlers ─────────────────────────────────────────────────
-  const handleCallAction = (id) =>
-    setCompletedCallIds((prev) => new Set([...prev, id]));
+  const handleCallAction = async (orderId) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ pharmacist_verified: true, status: 'confirmed' })
+      .eq('id', orderId);
+    if (!error) {
+      setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
+      setCompletedCallIds((prev) => new Set([...prev, orderId]));
+    }
+  };
 
   const handleRxApprove = async (dbId) => {
     const { error } = await supabase
@@ -325,10 +342,16 @@ export default function PharmacistPanel() {
     alert(`Customer Info\nNaam: ${name}\nPhone: +91 ${phone}`);
   };
 
-  const toggleAvailability = () => {
+  const toggleAvailability = async () => {
     const newStatus = !available;
     setAvailable(newStatus);
     localStorage.setItem('pharmacist_available', newStatus.toString());
+    try {
+      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+      if (user?.id) {
+        await supabase.from('users').update({ is_available: newStatus }).eq('id', user.id);
+      }
+    } catch {}
   };
 
   const saveNotes = () => { setNotesSaved(true); setTimeout(() => setNotesSaved(false), 2000); };

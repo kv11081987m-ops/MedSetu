@@ -296,7 +296,18 @@ function DisputeTabCard({ d, onResolve }) {
   );
 }
 
-// ─── DB order mapper ──────────────────────────────────────────
+// ─── DB mappers ───────────────────────────────────────────────
+const mapDispute = (d, i) => ({
+  id:       `D-${String(d.id).slice(0, 8).toUpperCase()}`,
+  customer: d.users?.name          || d.customer_name || 'Customer',
+  seller:   d.sellers?.store_name  || d.seller_name   || 'Seller',
+  issue:    d.description          || d.issue         || 'Issue reported',
+  amount:   String(d.amount        || d.order_amount  || 0),
+  status:   d.status               || 'open',
+  since:    d.created_at ? `${Math.floor((Date.now() - new Date(d.created_at)) / 86400000)} din pehle` : '—',
+  urgent:   i === 0 && d.status === 'open',
+});
+
 const mapOrderCard = (order) => ({
   id:       order.order_number || String(order.id).slice(0, 8).toUpperCase(),
   customer: order.customer_name || 'Customer',
@@ -333,10 +344,7 @@ export default function AdminPanel() {
   const [loading,         setLoading]         = useState(true);
 
   // ── UI state ─────────────────────────────────────────────────
-  const [disputes,      setDisputes]     = useState([
-    { id: 'Dispute #D-089', customer: 'Ramesh Kumar', seller: 'Arogya Medical Hall', issue: 'Wrong medicine delivered', amount: '450', since: '2 din se open hai', urgent: true  },
-    { id: 'Dispute #D-088', customer: 'Priya Singh',  seller: 'City Medical Store',  issue: 'Delivery nahi hua',        amount: '892', since: '1 din se open',    urgent: false },
-  ]);
+  const [disputes,      setDisputes]     = useState([]);
   const [settings,      setSettings]     = useState({ registrations: true, delivery: true, pharmCall: true, maintenance: false });
   const [activeTab,     setActiveTab]    = useState('dashboard');
   const [sellerFilter,  setSellerFilter] = useState('sab');
@@ -367,13 +375,30 @@ export default function AdminPanel() {
       setAllOrders(orders || []);
 
       const gmv = orders?.reduce((sum, o) => sum + (o.final_amount || 0), 0) || 0;
+
+      // Fetch disputes (table may not exist — fail silently)
+      let openDisputeCount = 0;
+      try {
+        const { data: dbDisputes } = await supabase
+          .from('disputes')
+          .select('*, users(name), sellers(store_name)')
+          .order('created_at', { ascending: false });
+        if (dbDisputes && dbDisputes.length > 0) {
+          const mappedAll  = dbDisputes.map(mapDispute);
+          const openOnly   = mappedAll.filter((d) => d.status === 'open');
+          openDisputeCount = openOnly.length;
+          setAllDisputes(mappedAll);
+          setDisputes(openOnly);
+        }
+      } catch {}
+
       setStats({
         totalUsers:    userCount  || 0,
         activeSellers: active.length,
         pendingSellers:pending.length,
         todayOrders:   orders?.length || 0,
         todayGMV:      gmv,
-        openDisputes:  0,
+        openDisputes:  openDisputeCount,
       });
     } catch (err) {
       console.error('Admin fetch:', err);

@@ -37,8 +37,7 @@ export default function LoginScreen() {
     if (phone.length !== 10) { setError('Sahi 10-digit number daalo'); return; }
     const otp = generateOTP();
     storeOTP(phone, otp);
-    console.log('Dev OTP:', otp);
-    navigate('/otp', { state: { phone } });
+    navigate('/otp', { state: { phone, otp } });
   };
 
   // ── Email handler ──────────────────────────────────────────
