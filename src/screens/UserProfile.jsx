@@ -41,7 +41,7 @@ const SETTINGS_ROWS = [
 // ─── Main Screen ──────────────────────────────────────────────
 export default function UserProfile() {
   const navigate  = useNavigate();
-  const { handleLogout: authLogout } = useAuth();
+  const { handleLogout: authLogout, devSession } = useAuth();
 
   const [userData,    setUserData]    = useState(null);
   const [loading,     setLoading]     = useState(true);
@@ -54,7 +54,14 @@ export default function UserProfile() {
     const load = async () => {
       try {
         const stored = localStorage.getItem('medsetu_user');
-        if (!stored) { navigate('/login'); return; }
+        // Demo mode: no localStorage entry — build a guest profile from devSession
+        if (!stored) {
+          if (devSession?.phone) {
+            setUserData({ name: 'Demo User', phone: devSession.phone, email: '', blood_group: '' });
+          }
+          setLoading(false);
+          return;
+        }
         const localUser = JSON.parse(stored);
         const { data, error } = await supabase
           .from('users').select('*').eq('id', localUser.id).single();
