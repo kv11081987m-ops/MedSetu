@@ -65,8 +65,16 @@ function roleHome(role) {
 // ── Protected Route ───────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
   const { isAuthenticated, loading, userRole } = useAuth();
+
+  // Synchronous localStorage fallback so we never hang on a blank page
+  const lsUser    = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
+  const devSession = (() => { try { return JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null'); } catch { return null; } })();
+  const lsLoggedIn = !!(lsUser?.id || lsUser?.phone || lsUser?.email || devSession);
+
+  // Show loader only briefly; if localStorage says no user, go to login immediately
+  if (loading && !lsLoggedIn) return <Navigate to="/login" replace />;
   if (loading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated && !lsLoggedIn) return <Navigate to="/login" replace />;
   if (allowedRoles && !allowedRoles.includes(userRole)) {
     return <Navigate to={roleHome(userRole)} replace />;
   }

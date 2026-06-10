@@ -35,8 +35,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading]  = useState(true);
 
   useEffect(() => {
-    // Initial user load
+    // Initial user load — clear stale role if no real session exists
     getCurrentUser().then((u) => {
+      if (!u) {
+        const dev = (() => { try { return JSON.parse(sessionStorage.getItem(DEV_KEY) || 'null'); } catch { return null; } })();
+        if (!dev) {
+          // No Supabase session and no dev session — clear stale localStorage
+          localStorage.removeItem('medsetu_role');
+          localStorage.removeItem('medsetu_user');
+        }
+      }
       setUser(u);
       setLoading(false);
     });

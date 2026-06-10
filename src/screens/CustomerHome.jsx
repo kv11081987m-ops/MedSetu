@@ -140,6 +140,17 @@ export default function CustomerHome() {
   const [notifs, setNotifs]           = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // ── Auth guard: redirect to login if no user data ──────────
+  useEffect(() => {
+    const user       = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    const devSession = JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null');
+    const hasUser    = !!(user?.id || user?.phone || user?.email || devSession);
+    if (!hasUser) {
+      navigate('/login', { replace: true });
+      return;
+    }
+  }, [navigate]);
+
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
