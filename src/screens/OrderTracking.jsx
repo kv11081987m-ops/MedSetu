@@ -144,7 +144,8 @@ export default function OrderTracking() {
 
   const handleCancelConfirm = async () => {
     setShowCancel(false);
-    if (orderId) await updateOrderStatus(orderId, 'cancelled');
+    const targetId = order?.id || orderId;
+    if (targetId) await updateOrderStatus(targetId, 'cancelled');
     setCancelled(true);
   };
 

@@ -34,8 +34,9 @@ export default function UserProfile() {
   const [editMode,       setEditMode]       = useState(false);
   const [showLogout,     setShowLogout]     = useState(false);
   const [addresses,      setAddresses]      = useState([]);
-  const [showAddAddress, setShowAddAddress] = useState(false);
-  const [newAddress,     setNewAddress]     = useState({
+  const [showAddAddress,  setShowAddAddress]  = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState(null);
+  const [newAddress,      setNewAddress]      = useState({
     label: 'Ghar', address_line: '', city: 'Deoria',
     district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
   });
@@ -136,16 +137,31 @@ export default function UserProfile() {
     if (!newAddress.address_line.trim()) { alert('Address daalo'); return; }
     try {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-      const { data, error } = await supabase
-        .from('addresses')
-        .insert({ user_id: user.id, ...newAddress, is_default: addresses.length === 0 })
-        .select();
-      if (!error && data) {
-        setAddresses((prev) => [...prev, data[0]]);
+      const resetForm = () => {
         setShowAddAddress(false);
+        setEditingAddressId(null);
         setNewAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '' });
+      };
+      if (editingAddressId) {
+        const { error } = await supabase
+          .from('addresses')
+          .update({ label: newAddress.label, address_line: newAddress.address_line, city: newAddress.city, district: newAddress.district, state: newAddress.state, pincode: newAddress.pincode })
+          .eq('id', editingAddressId);
+        if (!error) {
+          setAddresses((prev) => prev.map((a) => a.id === editingAddressId ? { ...a, ...newAddress } : a));
+          resetForm();
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('addresses')
+          .insert({ user_id: user.id, ...newAddress, is_default: addresses.length === 0 })
+          .select();
+        if (!error && data) {
+          setAddresses((prev) => [...prev, data[0]]);
+          resetForm();
+        }
       }
-    } catch (err) { alert('Add nahi hua: ' + err.message); }
+    } catch (err) { alert('Save nahi hua: ' + err.message); }
   };
 
   // ── Loading / null states ────────────────────────────────────
@@ -316,7 +332,11 @@ export default function UserProfile() {
                       <p style={s.addrLine2}>{addr.city} — {addr.pincode}</p>
                     </div>
                     <div style={s.addrActions}>
-                      <button style={s.addrIconBtn}><Pencil size={14} color="#888888" /></button>
+                      <button style={s.addrIconBtn} onClick={() => {
+                        setEditingAddressId(addr.id);
+                        setNewAddress({ label: addr.label, address_line: addr.address_line, city: addr.city, district: addr.district, state: addr.state, pincode: addr.pincode || '' });
+                        setShowAddAddress(true);
+                      }}><Pencil size={14} color="#888888" /></button>
                       <button style={s.addrIconBtn} onClick={() => deleteAddress(addr.id)}>
                         <Trash2 size={14} color="#DC3545" />
                       </button>
@@ -372,7 +392,7 @@ export default function UserProfile() {
                 <ChevronRight size={16} color="#CCCCCC" />
               </div>
             ))}
-            <button style={s.dashedAddBtn}>
+            <button style={s.dashedAddBtn} onClick={() => navigate('/prescription')}>
               <Plus size={16} color="#1A6B3C" />
               Naya Prescription Upload Karo
             </button>
@@ -409,10 +429,10 @@ export default function UserProfile() {
         {/* ── Add Address Sheet ── */}
         {showAddAddress && (
           <>
-            <div style={{ ...s.overlay, zIndex: 59 }} onClick={() => setShowAddAddress(false)} />
+            <div style={{ ...s.overlay, zIndex: 59 }} onClick={() => { setShowAddAddress(false); setEditingAddressId(null); }} />
             <div style={{ ...s.modal, zIndex: 60, position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px' }}>
               <div style={s.modalHandle} />
-              <p style={s.modalTitle}>Naya Address Add Karo</p>
+              <p style={s.modalTitle}>{editingAddressId ? 'Address Edit Karo' : 'Naya Address Add Karo'}</p>
 
               {/* Label */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
@@ -451,7 +471,7 @@ export default function UserProfile() {
               />
 
               <button style={s.modalPrimary} onClick={addAddress}>Save Karo</button>
-              <button style={s.modalSecondary} onClick={() => setShowAddAddress(false)}>Cancel</button>
+              <button style={s.modalSecondary} onClick={() => { setShowAddAddress(false); setEditingAddressId(null); }}>Cancel</button>
             </div>
           </>
         )}

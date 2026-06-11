@@ -263,7 +263,7 @@ export default function PharmacistPanel() {
     try {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
       if (user?.id) {
-        supabase.from('users').select('is_available').eq('id', user.id).single()
+        supabase.from('users').select('is_available').eq('id', user.id).maybeSingle()
           .then(({ data }) => {
             if (data && typeof data.is_available === 'boolean') setAvailable(data.is_available);
           });

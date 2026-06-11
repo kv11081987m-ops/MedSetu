@@ -17,7 +17,7 @@ export function mapSeller(row, index = 0) {
     initials,
     name:     row.store_name,
     address:  row.address || row.district || '',
-    distance: `~${((index + 1) * 0.8).toFixed(1)} km`,  // placeholder — GPS calc later
+    distance: null,
     rating:   parseFloat(row.rating)       || 4.0,
     reviews:  row.total_reviews            || 0,
     open:     row.is_open,

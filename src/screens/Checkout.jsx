@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, ShoppingCart, Store, MapPin, Pill,
   Monitor, Truck, Tag, CheckCircle, Clock,
@@ -123,7 +123,8 @@ function SuccessOverlay({ onTrack, onHome, orderId }) {
 
 // ─── Main Screen ──────────────────────────────────────────────
 export default function Checkout() {
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+  const location  = useLocation();
   const { cartItems, cartSellerId, cartSellerName, clearCart } = useCart();
 
   const [items, setItems] = useState(() =>
@@ -138,8 +139,11 @@ export default function Checkout() {
     }))
   );
 
-  const [selectedAddress, setSelectedAddress] = useState('');
-  const [addressLoading, setAddressLoading]   = useState(true);
+  const [selectedAddress,     setSelectedAddress]     = useState('');
+  const [addressLoading,      setAddressLoading]      = useState(true);
+  const [prescriptionUploaded, setPrescriptionUploaded] = useState(
+    !!location.state?.prescriptionUrl
+  );
   const [delivery, setDelivery]         = useState('home');
   const [payment, setPayment]           = useState('cod');
   const [promoInput, setPromoInput]     = useState('');
@@ -175,6 +179,21 @@ export default function Checkout() {
     fetchDefaultAddress();
   }, []);
 
+  // ── Check if user has uploaded a prescription (for Rx items) ──
+  useEffect(() => {
+    if (!hasRxItems || prescriptionUploaded) return;
+    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    if (!user?.id) return;
+    supabase
+      .from('prescriptions')
+      .select('id')
+      .eq('user_id', user.id)
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.length) setPrescriptionUploaded(true);
+      });
+  }, [hasRxItems, prescriptionUploaded]);
+
   // ── Calculations ──
   const cartTotal  = items.reduce((sum, it) => sum + it.price * it.qty, 0);
   const delivFee   = delivery === 'home' ? DELIVERY_FEE : 0;
@@ -201,8 +220,8 @@ export default function Checkout() {
     }
   };
 
-  // ── Derived: prescription requirement check ──
-  const rxVerified = !hasRxItems || items.every((it) => !it.rx);
+  // ── Derived: prescription verified if no Rx items or user uploaded one ──
+  const rxVerified = !hasRxItems || prescriptionUploaded;
 
   // ── Place Order (real Supabase) ──
   const placeOrder = async () => {
@@ -347,9 +366,9 @@ export default function Checkout() {
                   ? 'Address load ho raha hai...'
                   : selectedAddress || 'Koi address nahi mila — naya add karo'}
               </p>
-              <button style={s.changeLink}>Change</button>
+              <button style={s.changeLink} onClick={() => navigate('/profile', { state: { openAddress: true } })}>Change</button>
             </div>
-            <button style={s.addAddrBtn}>
+            <button style={s.addAddrBtn} onClick={() => navigate('/profile', { state: { openAddress: true } })}>
               <Plus size={14} color="#1A6B3C" />
               Naya Address Add Karo
             </button>
@@ -407,7 +426,9 @@ export default function Checkout() {
                   <p style={{ ...s.rxTitle, color: '#EA6C00' }}>Prescription Pending</p>
                   <p style={s.rxSub}>Rx items ke liye prescription zaroori hai</p>
                 </div>
-                <button style={s.uploadRxBtn} onClick={() => navigate('/prescription')}>
+                <button style={s.uploadRxBtn} onClick={() =>
+                  navigate('/prescription', { state: { returnTo: '/checkout' } })
+                }>
                   Upload Karo
                 </button>
               </>

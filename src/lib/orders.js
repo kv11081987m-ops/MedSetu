@@ -89,7 +89,7 @@ export const fetchOrderById = async (orderIdentifier) => {
     ? query.eq('id', orderIdentifier)
     : query.eq('order_number', orderIdentifier);
 
-  const { data, error } = await query.single();
+  const { data, error } = await query.maybeSingle();
   return { data, error };
 };
 

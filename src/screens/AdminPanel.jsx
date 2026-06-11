@@ -155,7 +155,7 @@ function SellerCard({ seller, onApprove, onReject }) {
             <span style={{ fontSize: '12px', color: ok ? '#1A6B3C' : '#DC3545', fontWeight: '600' }}>{text}</span>
           </div>
         ))}
-        <button style={s.viewDocsBtn}>View Documents →</button>
+        <button style={s.viewDocsBtn} onClick={() => alert(`Seller: ${seller.store_name}\nLicense: ${seller.license || 'On file'}\nVerification required offline`)}>View Documents →</button>
       </div>
       {seller.warning && (
         <div style={s.warnRow}>
@@ -241,7 +241,7 @@ function SellerListCard({ seller, onApprove, onReject }) {
             </button>
           </>
         )}
-        <button style={{ ...s.detailsBtn, marginLeft: 'auto' }}>Details Dekho <ChevronRight size={13} /></button>
+        <button style={{ ...s.detailsBtn, marginLeft: 'auto' }} onClick={() => alert(`Seller: ${seller.store_name}\nOwner: ${seller.owner_name}\nPhone: ${seller.phone}\nDistrict: ${seller.district}`)}>Details Dekho <ChevronRight size={13} /></button>
       </div>
     </div>
   );
@@ -290,7 +290,7 @@ function DisputeTabCard({ d, onResolve }) {
             <CheckCircle size={14} color="#FFFFFF" /> Resolve Karo
           </button>
         )}
-        <button style={s.detailsBtn}>Details Dekho <ChevronRight size={13} /></button>
+        <button style={s.detailsBtn} onClick={() => alert(`Dispute #${d.id}\nCustomer: ${d.customer}\nSeller: ${d.seller}\nIssue: ${d.issue}\nAmount: ₹${d.amount}`)}>Details Dekho <ChevronRight size={13} /></button>
       </div>
     </div>
   );
@@ -422,11 +422,20 @@ export default function AdminPanel() {
   };
 
   const rejectSeller = async (sellerId) => {
-    const { error } = await supabase.from('sellers').delete().eq('id', sellerId);
-    if (!error) {
+    const reason = window.prompt('Rejection reason daalo:') || 'Documents incomplete';
+    if (reason === null) return;
+    try {
+      const { error } = await supabase
+        .from('sellers')
+        .update({ is_verified: false, rejection_reason: reason })
+        .eq('id', sellerId);
+      if (error) throw error;
       setPendingSellers((prev) => prev.filter((s) => s.id !== sellerId));
-      setAllDbSellers((prev) => prev.filter((s) => s.id !== sellerId));
+      setAllDbSellers((prev) => prev.map((s) => s.id === sellerId ? { ...s, is_verified: false } : s));
       setStats((prev) => ({ ...prev, pendingSellers: Math.max(0, prev.pendingSellers - 1) }));
+      alert('Seller reject kar diya.\nReason: ' + reason);
+    } catch (err) {
+      alert('Error: ' + err.message);
     }
   };
 
@@ -700,10 +709,14 @@ export default function AdminPanel() {
 
       <div style={{ ...s.whiteCard, border: '1.5px solid #FFCDD2' }}>
         <p style={{ ...s.sectionTitle, color: '#DC3545' }}>Danger Zone</p>
-        <button style={s.dangerOutlineBtn}>
+        <button style={s.dangerOutlineBtn} onClick={() => {
+          if (window.confirm('Browser cache clear karna chahte hain?')) {
+            window.location.reload(true);
+          }
+        }}>
           <Trash2 size={16} color="#DC3545" /> Sab Cache Clear Karo
         </button>
-        <button style={s.dangerFillBtn}>
+        <button style={s.dangerFillBtn} onClick={() => alert('Emergency Shutdown: Supabase se maintenance mode enable karo.\nYeh feature super admin panel se available hai.')}>
           <Power size={16} color="#FFFFFF" /> Emergency Shutdown
         </button>
       </div>

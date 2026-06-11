@@ -91,8 +91,12 @@ function StoreCard({ store, onOrder }) {
           <StarRating rating={store.rating} />
           <span style={s.dotSep}>·</span>
           <span style={s.reviewCount}>{store.reviews} reviews</span>
-          <span style={s.dotSep}>·</span>
-          <span style={s.distanceBadge}>{store.distance}</span>
+          {store.distance && (
+            <>
+              <span style={s.dotSep}>·</span>
+              <span style={s.distanceBadge}>{store.distance}</span>
+            </>
+          )}
         </div>
 
         <div style={s.storeFooter}>
@@ -275,9 +279,9 @@ export default function CustomerHome() {
               </button>
             </div>
             <div style={s.horizontalScroll}>
-              {Array.isArray(nearbyStores) && nearbyStores.map((store) => (
+              {Array.isArray(nearbyStores) && nearbyStores.map((store, idx) => (
                 <StoreCard
-                  key={store?.id || store?.store_name || `store-${nearbyStores.indexOf(store)}`}
+                  key={store?.id || store?.store_name || `store-${idx}`}
                   store={store}
                   onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
                 />

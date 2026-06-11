@@ -11,9 +11,14 @@ export default function OTPScreen() {
   const location = useLocation();
   const { applyDevSession } = useAuth();
 
-  const phone  = location.state?.phone || '0000000000';
+  const phone  = location.state?.phone || '';
   const devOtp = location.state?.otp   || null;
-  const masked = phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4);
+  const masked = phone ? phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4) : 'XXXXXXXXXX';
+
+  // Redirect if accessed directly without phone state
+  useEffect(() => {
+    if (!location.state?.phone) navigate('/login', { replace: true });
+  }, [location.state, navigate]);
 
   const [otp,           setOtp]           = useState(Array(OTP_LENGTH).fill(''));
   const [timeLeft,      setTimeLeft]      = useState(TIMER_START);

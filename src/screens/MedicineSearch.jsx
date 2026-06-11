@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
 import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
   Search, SearchX, Home, ShoppingBag, User, ChevronDown,
@@ -98,6 +99,7 @@ function ResultCard({ med, onDetail, onOrder }) {
 // ─── Main Screen ──────────────────────────────────────────────
 export default function MedicineSearch() {
   const navigate = useNavigate();
+  const { addToCart } = useCart();
   const inputRef = useRef(null);
 
   const [query, setQuery]           = useState('');
@@ -281,7 +283,11 @@ export default function MedicineSearch() {
                     <PopularCard
                       key={item.id}
                       item={item}
-                      onAdd={(it) => { addToRecent(it.name); setQuery(it.name); }}
+                      onAdd={(it) => {
+                        addToRecent(it.name);
+                        addToCart({ ...it, price: it.price ?? 0 }, null);
+                        navigate('/checkout');
+                      }}
                     />
                   ))}
                 </div>
@@ -342,7 +348,13 @@ export default function MedicineSearch() {
                     key={med.id}
                     med={med}
                     onDetail={(m) => navigate('/medicine-detail', { state: { medicine: m } })}
-                    onOrder={(m) => navigate('/checkout', { state: { medicine: m } })}
+                    onOrder={(m) => {
+                      const seller = m.storeInfo
+                        ? { id: m.storeInfo.id, name: m.storeInfo.store_name }
+                        : null;
+                      addToCart({ ...m, price: m.price ?? m.mrp ?? 0 }, seller);
+                      navigate('/checkout');
+                    }}
                   />
                 ))}
               </div>
