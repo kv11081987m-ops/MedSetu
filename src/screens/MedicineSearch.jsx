@@ -36,7 +36,7 @@ const ALL_MEDICINES = [
   { id: 10, name: 'Dextromethorphan Syrup', brand: 'Benadryl', salt: 'DXM',             mrp: 95,   price: 80,   off: 16, rxRequired: false, stores: 2, type: 'syrup'     },
 ];
 
-const FILTERS = ['Sab', 'Tablets', 'Syrup', 'Injection', 'Equipment', 'Ayurvedic'];
+const FILTERS = ['Sab', 'Tablets', 'Syrup', 'Injection', 'Equipment', 'Ayurvedic', 'Generic', 'Branded'];
 
 const filterKey = { Tablets: 'tablet', Syrup: 'syrup', Equipment: 'equipment', Injection: 'injection', Ayurvedic: 'ayurvedic' };
 
@@ -182,11 +182,16 @@ export default function MedicineSearch() {
     inputRef.current?.focus();
   };
 
-  // When DB results exist, apply local category filter on top of them
-  // When no DB results yet (empty query), fall back to ALL_MEDICINES for category browsing
+  const applyFilter = (list) => {
+    if (activeFilter === 'Sab')     return list;
+    if (activeFilter === 'Generic') return list.filter((m) => m.is_generic === true);
+    if (activeFilter === 'Branded') return list.filter((m) => m.is_generic === false || m.is_generic == null);
+    return list.filter((m) => m.type === filterKey[activeFilter]);
+  };
+
   const results = query.trim()
-    ? dbResults.filter((m) => activeFilter === 'Sab' || m.type === filterKey[activeFilter])
-    : ALL_MEDICINES.filter((m) => activeFilter !== 'Sab' && m.type === filterKey[activeFilter]);
+    ? applyFilter(dbResults)
+    : applyFilter(ALL_MEDICINES).filter(() => activeFilter !== 'Sab');
 
   const isSearching = query.length > 0;
 

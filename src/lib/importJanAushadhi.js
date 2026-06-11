@@ -19,6 +19,7 @@ export const importJanAushadhi = async (csvFile) => {
               mrp_max:                parseFloat(row['MRP']) || 0,
               unit:                   row['Unit Size']?.trim() || '',
               requires_prescription:  requiresPrescription(row['Group Name']),
+              is_generic:             true,
               source:                 'janaushadhi',
               is_verified:            true,
               is_active:              true,

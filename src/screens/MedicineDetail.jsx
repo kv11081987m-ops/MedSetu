@@ -257,6 +257,11 @@ export default function MedicineDetail() {
           {/* Medicine Info */}
           <div style={s.infoBlock}>
             <h1 style={s.medName}>{med.name}</h1>
+            {med.is_generic && (
+              <span style={{ background: '#E8F5E9', color: '#1A6B3C', fontSize: '11px', padding: '2px 8px', borderRadius: '99px', fontWeight: '500', marginRight: '6px', display: 'inline-block', marginBottom: '6px' }}>
+                ✓ Jan Aushadhi Generic
+              </span>
+            )}
             <p style={s.medBrand}>{med.brand || med.salt || ''}</p>
             <div style={s.tagRow}>
               {med.category && <span style={s.tagGreen}>{med.category}</span>}
