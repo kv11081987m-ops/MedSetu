@@ -86,53 +86,138 @@ export default function SuperAdminPanel() {
 
   // ── Seller actions ────────────────────────────────────────
   const approveSeller = async (registrationId) => {
-    const reg = allSellers.find((s) => s.id === registrationId);
+    const reg = pendingSellers.find((s) => s.id === registrationId);
     if (!reg) return;
     try {
-      const { error } = await supabase.from('sellers').insert({
-        store_name:      reg.store_name,
-        owner_name:      reg.owner_name,
-        phone:           reg.mobile,
-        address:         reg.address,
-        district:        reg.district,
-        drug_license:    reg.drug_license_number,
-        pharmacist_name: reg.pharmacist_name,
-        is_verified:     true,
-        is_open:         false,
-      });
-      if (error) throw error;
-      await supabase.from('staff_whitelist').insert({ email: reg.email, role: 'seller', name: reg.owner_name, phone: reg.mobile, is_approved: true });
-      await supabase.from('seller_registrations').update({ status: 'approved' }).eq('id', registrationId);
+      // 1. sellers table mein add karo
+      const { data: seller, error: sellerError } = await supabase
+        .from('sellers')
+        .insert({
+          store_name:      reg.store_name,
+          owner_name:      reg.owner_name,
+          phone:           reg.mobile,
+          email:           reg.email,
+          address:         reg.address,
+          district:        reg.district,
+          drug_license:    reg.drug_license_number,
+          pharmacist_name: reg.pharmacist_name,
+          is_verified:     true,
+          is_open:         false,
+        })
+        .select()
+        .single();
+      if (sellerError) throw sellerError;
+
+      // 2. staff_whitelist mein upsert karo (duplicate email safe)
+      const { error: whitelistError } = await supabase
+        .from('staff_whitelist')
+        .upsert(
+          {
+            email:         reg.email,
+            role:          'seller',
+            name:          reg.owner_name,
+            phone:         reg.mobile,
+            is_approved:   true,
+            approval_date: new Date().toISOString(),
+          },
+          { onConflict: 'email' }
+        );
+      if (whitelistError) throw whitelistError;
+
+      // 3. registration status update
+      const { error: regError } = await supabase
+        .from('seller_registrations')
+        .update({ status: 'approved', review_date: new Date().toISOString() })
+        .eq('id', registrationId);
+      if (regError) throw regError;
+
+      // 4. UI update
       setAllSellers((p) => p.map((s) => s.id === registrationId ? { ...s, status: 'approved' } : s));
       setPendingSellers((p) => p.filter((s) => s.id !== registrationId));
       setStats((p) => ({ ...p, pendingSellers: p.pendingSellers - 1, activeSellers: p.activeSellers + 1 }));
-      alert('Seller approve ho gaya!');
+
+      alert(
+        '✅ Seller approve ho gaya!\n' +
+        reg.store_name + '\n\n' +
+        'Ab seller apne email se Google login kar sakta hai:\n' +
+        reg.email
+      );
+    } catch (err) {
+      alert('❌ Error: ' + err.message);
+      console.error(err);
+    }
+  };
+
+  const rejectSeller = async (registrationId) => {
+    const reasonText = window.prompt('Rejection ka reason batao:') || 'Documents incomplete hain';
+    if (reasonText === null) return; // user pressed Cancel
+
+    try {
+      const { error } = await supabase
+        .from('seller_registrations')
+        .update({
+          status:           'rejected',
+          rejection_reason: reasonText,
+          review_date:      new Date().toISOString(),
+        })
+        .eq('id', registrationId);
+      if (error) throw error;
+
+      setAllSellers((p) => p.map((s) => s.id === registrationId ? { ...s, status: 'rejected' } : s));
+      setPendingSellers((p) => p.filter((s) => s.id !== registrationId));
+      setStats((p) => ({ ...p, pendingSellers: p.pendingSellers - 1 }));
+
+      alert('Seller reject kar diya.\nReason: ' + reasonText);
     } catch (err) {
       alert('Error: ' + err.message);
     }
   };
 
-  const rejectSeller = async (registrationId) => {
-    const reason = window.prompt('Rejection reason daalo:') || 'Documents incomplete';
-    await supabase.from('seller_registrations').update({ status: 'rejected', rejection_reason: reason }).eq('id', registrationId);
-    setAllSellers((p) => p.map((s) => s.id === registrationId ? { ...s, status: 'rejected' } : s));
-    setPendingSellers((p) => p.filter((s) => s.id !== registrationId));
-    setStats((p) => ({ ...p, pendingSellers: p.pendingSellers - 1 }));
-    alert('Seller reject kar diya.');
-  };
-
   // ── Pharmacist actions ────────────────────────────────────
-  const approvePharmacist = async (id) => {
-    await supabase.from('staff_whitelist').update({ is_approved: true }).eq('id', id);
-    setPendingPharmacists((p) => p.filter((ph) => ph.id !== id));
-    setStats((p) => ({ ...p, pendingPharmacists: p.pendingPharmacists - 1 }));
-    alert('Pharmacist approve ho gaya!');
+  const approvePharmacist = async (pharmacistId) => {
+    const pharma = pendingPharmacists.find((p) => p.id === pharmacistId);
+    if (!pharma) return;
+    try {
+      const { error } = await supabase
+        .from('staff_whitelist')
+        .update({ is_approved: true, approval_date: new Date().toISOString() })
+        .eq('id', pharmacistId);
+      if (error) throw error;
+
+      setPendingPharmacists((p) => p.filter((ph) => ph.id !== pharmacistId));
+      setStats((p) => ({ ...p, pendingPharmacists: p.pendingPharmacists - 1 }));
+
+      alert(
+        '✅ Pharmacist approve ho gaya!\n' +
+        pharma.name + '\n\n' +
+        'Ab pharmacist apne email se Google login kar sakta hai:\n' +
+        pharma.email
+      );
+    } catch (err) {
+      alert('❌ Error: ' + err.message);
+    }
   };
 
   const rejectPharmacist = async (id) => {
-    await supabase.from('staff_whitelist').delete().eq('id', id);
-    setPendingPharmacists((p) => p.filter((ph) => ph.id !== id));
-    alert('Pharmacist reject kar diya.');
+    const reasonText = window.prompt('Rejection ka reason batao:') || 'Credentials verify nahi ho sake';
+    if (reasonText === null) return; // user pressed Cancel
+
+    try {
+      const { error } = await supabase
+        .from('staff_whitelist')
+        .update({
+          is_approved:      false,
+          rejection_reason: reasonText,
+          review_date:      new Date().toISOString(),
+        })
+        .eq('id', id);
+      if (error) throw error;
+
+      setPendingPharmacists((p) => p.filter((ph) => ph.id !== id));
+      alert('Pharmacist reject kar diya.\nReason: ' + reasonText);
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
   };
 
   // ── Admin actions ─────────────────────────────────────────

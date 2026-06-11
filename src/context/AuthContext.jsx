@@ -36,18 +36,21 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Initial user load — clear stale role if no real session exists
-    getCurrentUser().then((u) => {
-      if (!u) {
-        const dev = (() => { try { return JSON.parse(sessionStorage.getItem(DEV_KEY) || 'null'); } catch { return null; } })();
-        if (!dev) {
-          // No Supabase session and no dev session — clear stale localStorage
-          localStorage.removeItem('medsetu_role');
-          localStorage.removeItem('medsetu_user');
+    getCurrentUser()
+      .then((u) => {
+        if (!u) {
+          const dev = (() => { try { return JSON.parse(sessionStorage.getItem(DEV_KEY) || 'null'); } catch { return null; } })();
+          if (!dev) {
+            localStorage.removeItem('medsetu_role');
+            localStorage.removeItem('medsetu_user');
+          }
         }
-      }
-      setUser(u);
-      setLoading(false);
-    });
+        setUser(u);
+        setLoading(false);
+      })
+      .catch(() => {
+        setLoading(false);
+      });
 
     // Listen for auth state changes (login / logout / magic link callback)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -77,12 +80,36 @@ export function AuthProvider({ children }) {
           }
 
           if (pendingRole) {
-            // ── Staff magic link login ──
+            // ── Staff login (magic link OR Google OAuth) ──
+
+            // For seller & pharmacist — verify whitelist approval before granting access
+            if (pendingRole === 'seller' || pendingRole === 'pharmacist') {
+              const { data: whitelisted } = await supabase
+                .from('staff_whitelist')
+                .select('*')
+                .eq('email', emailUser.email)
+                .eq('role', pendingRole)
+                .eq('is_approved', true)
+                .maybeSingle();
+
+              if (!whitelisted) {
+                // Not approved — sign out and redirect back to staff login
+                await supabase.auth.signOut();
+                localStorage.removeItem('staff_pending_role');
+                alert(
+                  '❌ Aapka account approved nahi hai.\n\n' +
+                  'Pehle registration form bharke approval ka wait karo.'
+                );
+                window.location.href = '/staff-login';
+                return;
+              }
+            }
+
             localStorage.setItem('medsetu_role', pendingRole);
             localStorage.removeItem('staff_pending_role');
             setUserRole(pendingRole);
 
-            // Try to upsert user record — gracefully skip if users table missing/fails
+            // Upsert user record
             try {
               const { data: existing } = await supabase
                 .from('users').select('*').eq('email', emailUser.email).maybeSingle();
@@ -90,7 +117,14 @@ export function AuthProvider({ children }) {
                 localStorage.setItem('medsetu_user', JSON.stringify(existing));
               } else {
                 const { data: newUser } = await supabase
-                  .from('users').insert({ email: emailUser.email, role: pendingRole }).select().single();
+                  .from('users')
+                  .insert({
+                    email: emailUser.email,
+                    name:  emailUser.user_metadata?.full_name || null,
+                    role:  pendingRole,
+                  })
+                  .select()
+                  .single();
                 if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
               }
             } catch {}

@@ -138,13 +138,13 @@ export default function Checkout() {
     }))
   );
 
-  const [selectedAddress, setSelectedAddress] = useState('Address load ho raha hai...');
+  const [selectedAddress, setSelectedAddress] = useState('');
+  const [addressLoading, setAddressLoading]   = useState(true);
   const [delivery, setDelivery]         = useState('home');
   const [payment, setPayment]           = useState('cod');
   const [promoInput, setPromoInput]     = useState('');
   const [promoApplied, setPromoApplied] = useState(false);
   const [promoError, setPromoError]     = useState('');
-  const [rxVerified]                    = useState(true);
   const [success, setSuccess]           = useState(false);
   const [orderId, setOrderId]           = useState('');
   const [ordering, setOrdering]         = useState(false);
@@ -156,20 +156,20 @@ export default function Checkout() {
     const fetchDefaultAddress = async () => {
       try {
         const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-        if (!user?.id) { setSelectedAddress('Address add karo'); return; }
+        if (!user?.id) { setSelectedAddress(''); setAddressLoading(false); return; }
         const { data } = await supabase
           .from('addresses')
           .select('*')
           .eq('user_id', user.id)
           .eq('is_default', true)
-          .single();
-        if (data) {
-          setSelectedAddress(`${data.address_line}, ${data.city} — ${data.pincode}`);
-        } else {
-          setSelectedAddress('Address add karo');
-        }
+          .maybeSingle();
+        setSelectedAddress(
+          data ? `${data.address_line}, ${data.city} — ${data.pincode}` : ''
+        );
       } catch {
-        setSelectedAddress('Address add karo');
+        setSelectedAddress('');
+      } finally {
+        setAddressLoading(false);
       }
     };
     fetchDefaultAddress();
@@ -201,13 +201,28 @@ export default function Checkout() {
     }
   };
 
+  // ── Derived: prescription requirement check ──
+  const rxVerified = !hasRxItems || items.every((it) => !it.rx);
+
   // ── Place Order (real Supabase) ──
   const placeOrder = async () => {
     if (!items.length || ordering) return;
+    if (hasRxItems && !rxVerified) {
+      setOrderError('Prescription required items ke liye pehle Rx upload karo');
+      return;
+    }
+    if (delivery === 'home' && !selectedAddress) {
+      setOrderError('Delivery address add karo');
+      return;
+    }
     setOrdering(true);
     setOrderError('');
 
+    const storedUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    const customerId   = storedUser?.id || null;
+
     const orderData = {
+      customerId,
       sellerId:       cartSellerId || null,
       totalAmount:    cartTotal,
       deliveryCharge: delivFee,
@@ -216,17 +231,14 @@ export default function Checkout() {
       finalAmount:    grandTotal,
       paymentMethod:  payment,
       deliveryType:   delivery,
+      deliveryAddress: delivery === 'home' ? selectedAddress : 'Store Pickup',
     };
 
     try {
       const { data: orderRows, error: orderErr } = await createOrder(orderData);
 
       if (orderErr || !orderRows?.length) {
-        // Demo fallback: show success even without DB (dev mode)
-        const fallbackId = 'MED-' + Date.now();
-        setOrderId(fallbackId);
-        clearCart();
-        setSuccess(true);
+        setOrderError(orderErr?.message || 'Order nahi ho saka. Dobara try karo.');
         setOrdering(false);
         return;
       }
@@ -246,10 +258,8 @@ export default function Checkout() {
       setOrderId(newOrder.order_number || 'MED-' + Date.now());
       clearCart();
       setSuccess(true);
-    } catch {
-      setOrderId('MED-' + Date.now());
-      clearCart();
-      setSuccess(true);
+    } catch (err) {
+      setOrderError(err?.message || 'Order nahi ho saka. Dobara try karo.');
     } finally {
       setOrdering(false);
     }
@@ -332,7 +342,11 @@ export default function Checkout() {
             <p style={s.cardTitle}>Delivery Kahan Karen?</p>
             <div style={s.addressRow}>
               <MapPin size={18} color="#1A6B3C" style={{ flexShrink: 0, marginTop: 2 }} />
-              <p style={s.addressText}>{selectedAddress}</p>
+              <p style={s.addressText}>
+                {addressLoading
+                  ? 'Address load ho raha hai...'
+                  : selectedAddress || 'Koi address nahi mila — naya add karo'}
+              </p>
               <button style={s.changeLink}>Change</button>
             </div>
             <button style={s.addAddrBtn}>
@@ -512,9 +526,9 @@ export default function Checkout() {
             <p style={s.bottomPrice}>₹{grandTotal.toFixed(2)}</p>
           </div>
           <button
-            style={{ ...s.placeBtn, opacity: (items.length && !ordering) ? 1 : 0.45 }}
+            style={{ ...s.placeBtn, opacity: (items.length && !ordering && !addressLoading) ? 1 : 0.45 }}
             onClick={placeOrder}
-            disabled={!items.length || ordering}
+            disabled={!items.length || ordering || addressLoading}
           >
             <ShoppingCart size={17} color="#FFFFFF" />
             {ordering ? 'Order Ho Raha Hai...' : 'Order Place Karo'}

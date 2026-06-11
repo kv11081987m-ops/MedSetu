@@ -28,19 +28,20 @@ export const createOrLoginUser = async (phone) => {
     .from('users')
     .select('*')
     .eq('phone', phone)
-    .single();
+    .maybeSingle();
 
   if (existing) {
     localStorage.setItem('medsetu_user', JSON.stringify(existing));
     return existing;
   }
 
-  const { data: newUser } = await supabase
+  const { data: newUser, error } = await supabase
     .from('users')
     .insert({ phone, role: 'customer' })
     .select()
     .single();
 
+  if (error) throw error;
   localStorage.setItem('medsetu_user', JSON.stringify(newUser));
   return newUser;
 };
@@ -107,12 +108,13 @@ export const getCurrentSeller = async () => {
       if (data) return data;
     }
 
-    // Dev fallback — first seller in DB
+    // Dev fallback — only in dev mode, return null in production
+    if (!import.meta.env.DEV) return null;
     const { data: fallback } = await supabase
       .from('sellers')
       .select('*')
       .limit(1)
-      .single();
+      .maybeSingle();
     return fallback || null;
   } catch {
     return null;

@@ -277,7 +277,7 @@ export default function CustomerHome() {
             <div style={s.horizontalScroll}>
               {Array.isArray(nearbyStores) && nearbyStores.map((store) => (
                 <StoreCard
-                  key={store?.id || Math.random()}
+                  key={store?.id || store?.store_name || `store-${nearbyStores.indexOf(store)}`}
                   store={store}
                   onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
                 />

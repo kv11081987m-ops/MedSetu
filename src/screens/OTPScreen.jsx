@@ -125,14 +125,10 @@ export default function OTPScreen() {
           </button>
         </div>
 
-        {/* Dev OTP hint (shown only when otp passed via state) */}
-        {devOtp ? (
+        {/* Dev OTP hint — only shown in local dev mode, never in production */}
+        {import.meta.env.DEV && devOtp && (
           <div style={styles.devBanner}>
-            🔐 Dev OTP: <strong>{devOtp}</strong> — SMS integration coming soon
-          </div>
-        ) : (
-          <div style={styles.devBanner}>
-            📱 OTP verify karo — SMS integration coming soon
+            🔐 Dev OTP: <strong>{devOtp}</strong> — SMS integration active in production
           </div>
         )}
         {resendMessage && (

@@ -276,7 +276,7 @@ export default function MedicineDetail() {
                 </div>
                 <span style={s.perStrip}>Per strip: {med.perStrip || med.per_strip || '10 tablets'}</span>
               </div>
-              {med.stock !== 0 && (
+              {med.stock != null && med.stock !== 0 && (
               <div style={s.stockPill}>
                 <CheckCircle size={14} color="#1A6B3C" />
                 <span style={s.stockText}>In Stock</span>

@@ -317,6 +317,16 @@ export default function PharmacistPanel() {
     }
   };
 
+  const handleRejectCall = async (orderId) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ pharmacist_verified: false, status: 'cancelled' })
+      .eq('id', orderId);
+    if (!error) {
+      setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
+    }
+  };
+
   const handleRxApprove = async (dbId) => {
     const { error } = await supabase
       .from('prescriptions')
@@ -404,7 +414,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {pendingCalls.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={handleCallAction} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} />
             ))}
           </div>
         )}
@@ -499,7 +509,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {displayed.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={handleCallAction} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} />
             ))}
           </div>
         )}

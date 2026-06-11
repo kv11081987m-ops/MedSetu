@@ -51,7 +51,7 @@ export function mapMedicine(row) {
     price,
     off,
     rxRequired:   row.requires_prescription || false,
-    stores:       row.sellers ? 1 : 1,  // join gives one seller per row
+    stores:       row.sellers ? 1 : 0,
     storeInfo:    row.sellers || null,
     type,
     stock:        row.stock || 0,

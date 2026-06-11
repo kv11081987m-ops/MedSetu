@@ -122,10 +122,6 @@ const nf = {
   link:    { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
 };
 
-// ── CSS spin keyframe (injected once) ─────────────────────────
-const spinStyle = document.createElement('style');
-spinStyle.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-document.head.appendChild(spinStyle);
 
 // ── Routes ────────────────────────────────────────────────────
 function AppRoutes() {

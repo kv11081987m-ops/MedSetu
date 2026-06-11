@@ -152,12 +152,13 @@ export default function MedicineSearch() {
     }
 
     setSearching(true);
+    let cancelled = false;
     debounceRef.current = setTimeout(async () => {
       const { data, error } = await searchMedicines(val.trim());
+      if (cancelled) return;
       setSearching(false);
       if (error) {
         setSearchError(true);
-        // Fall back to local search on error
         const q = val.toLowerCase();
         setDbResults(
           ALL_MEDICINES.filter(
@@ -171,6 +172,7 @@ export default function MedicineSearch() {
         setDbResults(data.map(mapMedicine));
       }
     }, 400);
+    return () => { cancelled = true; };
   }, []);
 
   const handleRecentClick = (term) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { fetchOrderById } from '../lib/orders';
+import { fetchOrderById, updateOrderStatus } from '../lib/orders';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
   MapPin, Package, IndianRupee, CreditCard, Store,
@@ -148,8 +148,9 @@ export default function OrderTracking() {
     setCancelled(true);
   };
 
-  // Subtle bike oscillation
+  // Subtle bike oscillation — only while in transit
   useEffect(() => {
+    if (activeStep >= 4) return;
     let dir = 1;
     const id = setInterval(() => {
       setBikeX((x) => {
@@ -159,7 +160,7 @@ export default function OrderTracking() {
       });
     }, 60);
     return () => clearInterval(id);
-  }, []);
+  }, [activeStep]);
 
   if (!loading && !orderId) {
     return (
@@ -212,7 +213,7 @@ export default function OrderTracking() {
           </button>
           <div style={{ textAlign: 'center' }}>
             <p style={s.headerTitle}>Order Track Karo</p>
-            <p style={s.headerSub}>#MED-2024-017</p>
+            <p style={s.headerSub}>#{order?.order_number || orderId || 'MED-XXXX'}</p>
           </div>
           <div style={{ width: 34 }} />
         </div>

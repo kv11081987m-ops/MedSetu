@@ -47,9 +47,11 @@ export const createOrderItems = async (orderId, items) => {
   return { data, error };
 };
 
-// ── Fetch all orders (for order history) ──────────────────────
-export const fetchOrders = async (customerId = null) => {
-  let query = supabase
+// ── Fetch orders for a specific customer (customerId required) ─
+export const fetchOrders = async (customerId) => {
+  if (!customerId) return { data: [], error: new Error('customerId is required') };
+
+  const { data, error } = await supabase
     .from('orders')
     .select(`
       *,
@@ -60,11 +62,9 @@ export const fetchOrders = async (customerId = null) => {
         phone
       )
     `)
+    .eq('customer_id', customerId)
     .order('created_at', { ascending: false });
 
-  if (customerId) query = query.eq('customer_id', customerId);
-
-  const { data, error } = await query;
   return { data: data || [], error };
 };
 
