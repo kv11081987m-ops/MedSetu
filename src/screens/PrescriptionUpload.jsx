@@ -144,7 +144,7 @@ export default function PrescriptionUpload() {
           delivery_type:     delivery,
         })
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 

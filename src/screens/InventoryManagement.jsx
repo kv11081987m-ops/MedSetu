@@ -497,7 +497,7 @@ export default function InventoryManagement() {
         .from('medicines')
         .insert({ ...formData, seller_id: sellerId })
         .select()
-        .single();
+        .maybeSingle();
       if (error) { alert('Add nahi hua: ' + error.message); return; }
       if (data) setMedicines((prev) => [...prev, data]);
     }

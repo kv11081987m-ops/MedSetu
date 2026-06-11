@@ -27,8 +27,8 @@ import SellerRegister      from './screens/SellerRegister';
 import PharmacistRegister  from './screens/PharmacistRegister';
 import SuperAdminPanel     from './screens/SuperAdminPanel';
 
-// Fire connection test once on module load
-testSupabaseConnection();
+// Fire connection test once on module load (dev only)
+if (import.meta.env.DEV) testSupabaseConnection();
 // insertSeedData(); // ← uncomment once, run, then comment back
 
 // ── Scroll to top on route change ─────────────────────────────

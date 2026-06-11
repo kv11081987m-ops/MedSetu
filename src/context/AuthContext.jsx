@@ -124,7 +124,7 @@ export function AuthProvider({ children }) {
                     role:  pendingRole,
                   })
                   .select()
-                  .single();
+                  .maybeSingle();
                 if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
               }
             } catch {}
@@ -149,7 +149,7 @@ export function AuthProvider({ children }) {
                 localStorage.setItem('medsetu_user', JSON.stringify(existing));
               } else {
                 const { data: newUser } = await supabase
-                  .from('users').insert({ email: emailUser.email, role: 'customer' }).select().single();
+                  .from('users').insert({ email: emailUser.email, role: 'customer' }).select().maybeSingle();
                 if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
               }
             } catch {}

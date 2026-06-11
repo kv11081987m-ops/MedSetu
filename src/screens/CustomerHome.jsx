@@ -74,7 +74,7 @@ function StoreCard({ store, onOrder }) {
     <div style={s.storeCard}>
       {/* Store initial avatar */}
       <div style={s.storeAvatar}>
-        <span style={s.storeInitial}>{store.name[0]}</span>
+        <span style={s.storeInitial}>{(store.name || 'M')[0]}</span>
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>

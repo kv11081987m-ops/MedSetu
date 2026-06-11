@@ -105,7 +105,7 @@ export default function SuperAdminPanel() {
           is_open:         false,
         })
         .select()
-        .single();
+        .maybeSingle();
       if (sellerError) throw sellerError;
 
       // 2. staff_whitelist mein upsert karo (duplicate email safe)
@@ -223,11 +223,13 @@ export default function SuperAdminPanel() {
   // ── Admin actions ─────────────────────────────────────────
   const addAdmin = async () => {
     if (!adminForm.naam || !adminForm.email) { alert('Naam aur email zaroori hai'); return; }
-    const { data, error } = await supabase.from('staff_whitelist').insert({ email: adminForm.email, role: 'admin', name: adminForm.naam, is_approved: true }).select().single();
-    if (error) { alert('Error: ' + error.message); return; }
-    setAdmins((p) => [...p, data]);
-    setAdminForm({ naam: '', email: '', permissions: [] });
-    alert('Admin add ho gaya!');
+    try {
+      const { data, error } = await supabase.from('staff_whitelist').insert({ email: adminForm.email, role: 'admin', name: adminForm.naam, is_approved: true }).select().maybeSingle();
+      if (error) { alert('Error: ' + error.message); return; }
+      setAdmins((p) => [...p, data]);
+      setAdminForm({ naam: '', email: '', permissions: [] });
+      alert('Admin add ho gaya!');
+    } catch (err) { alert('Error: ' + err.message); }
   };
 
   const removeAdmin = async (id) => {

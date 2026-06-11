@@ -56,7 +56,7 @@ export default function UserProfile() {
         }
         const localUser = JSON.parse(stored);
         const { data, error } = await supabase
-          .from('users').select('*').eq('id', localUser.id).single();
+          .from('users').select('*').eq('id', localUser.id).maybeSingle();
         if (!error && data) setUserData(data);
         else setUserData(localUser);
       } catch {

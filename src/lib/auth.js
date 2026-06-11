@@ -39,9 +39,10 @@ export const createOrLoginUser = async (phone) => {
     .from('users')
     .insert({ phone, role: 'customer' })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!newUser) throw new Error('User create nahi hua');
   localStorage.setItem('medsetu_user', JSON.stringify(newUser));
   return newUser;
 };

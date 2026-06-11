@@ -179,6 +179,14 @@ export default function Checkout() {
     fetchDefaultAddress();
   }, []);
 
+  // ── Calculations (must be before the Rx useEffect) ──
+  const hasRxItems  = items.some((it) => it.rx);
+  const cartTotal  = items.reduce((sum, it) => sum + it.price * it.qty, 0);
+  const delivFee   = delivery === 'home' ? DELIVERY_FEE : 0;
+  const discount   = promoApplied ? cartTotal * (PROMO_PCT / 100) : 0;
+  const grandTotal = cartTotal + delivFee - discount;
+  const totalItems  = items.reduce((sum, it) => sum + it.qty, 0);
+
   // ── Check if user has uploaded a prescription (for Rx items) ──
   useEffect(() => {
     if (!hasRxItems || prescriptionUploaded) return;
@@ -193,14 +201,6 @@ export default function Checkout() {
         if (data?.length) setPrescriptionUploaded(true);
       });
   }, [hasRxItems, prescriptionUploaded]);
-
-  // ── Calculations ──
-  const cartTotal  = items.reduce((sum, it) => sum + it.price * it.qty, 0);
-  const delivFee   = delivery === 'home' ? DELIVERY_FEE : 0;
-  const discount   = promoApplied ? cartTotal * (PROMO_PCT / 100) : 0;
-  const grandTotal = cartTotal + delivFee - discount;
-  const totalItems  = items.reduce((sum, it) => sum + it.qty, 0);
-  const hasRxItems  = items.some((it) => it.rx);
 
   const handleQty = (id, delta) => {
     setItems((prev) => prev.map((it) =>
