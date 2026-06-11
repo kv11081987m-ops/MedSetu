@@ -71,12 +71,6 @@ function CartItem({ item, onQtyChange, onRemove }) {
 
 // ─── Success Overlay ──────────────────────────────────────────
 function SuccessOverlay({ onTrack, onHome, orderId }) {
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = `@keyframes confettiFall { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }`;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
 
   return (
     <div style={s.overlay}>

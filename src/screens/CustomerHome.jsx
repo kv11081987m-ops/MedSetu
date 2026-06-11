@@ -40,11 +40,6 @@ const getTimeAgo = (dateString) => {
 };
 
 // ─── Dummy fallback stores ────────────────────────────────────
-const FALLBACK_STORES = [
-  { id: 'f1', name: 'Shri Ram Medical Store', address: 'Civil Lines, Deoria',    distance: '0.8 km', rating: 4.5, reviews: 128, open: true  },
-  { id: 'f2', name: 'Arogya Medical Hall',    address: 'Station Road, Deoria',   distance: '1.2 km', rating: 4.2, reviews: 86,  open: true  },
-  { id: 'f3', name: 'Gupta Medical Agency',   address: 'Collector Ganj, Deoria', distance: '2.1 km', rating: 4.8, reviews: 214, open: false },
-];
 
 const CATEGORIES = [
   'Sab', 'Medicines', 'Equipment', 'Surgical', 'Ayurvedic', 'Baby Care',
@@ -138,7 +133,7 @@ export default function CustomerHome() {
   const { cartCount } = useCart();
   const [activeCategory, setActiveCategory] = useState('Sab');
   const [activeTab, setActiveTab]           = useState('home');
-  const [nearbyStores, setNearbyStores]     = useState(FALLBACK_STORES);
+  const [nearbyStores, setNearbyStores]     = useState([]);
   const [storesLoading, setStoresLoading]   = useState(true);
   const [showNotif, setShowNotif]     = useState(false);
   const [notifs, setNotifs]           = useState([]);
@@ -164,11 +159,11 @@ export default function CustomerHome() {
         try {
           const { data } = await fetchSellers('Deoria');
           if (!cancelled && data && data.length > 0) {
-            setNearbyStores(data.map((s, i) => ({
+            setNearbyStores(data.map((s) => ({
               id:       s.id,
               name:     s.store_name,
               address:  s.address || s.district || '',
-              distance: `~${((i + 1) * 0.8).toFixed(1)} km`,
+              distance: null,
               rating:   parseFloat(s.rating) || 4.0,
               reviews:  s.total_reviews      || 0,
               open:     s.is_open,
@@ -278,15 +273,21 @@ export default function CustomerHome() {
                 Sab Dekho
               </button>
             </div>
-            <div style={s.horizontalScroll}>
-              {Array.isArray(nearbyStores) && nearbyStores.map((store, idx) => (
-                <StoreCard
-                  key={store?.id || store?.store_name || `store-${idx}`}
-                  store={store}
-                  onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
-                />
-              ))}
-            </div>
+            {storesLoading ? (
+              <p style={{ fontSize: '13px', color: '#AAAAAA', padding: '12px 0' }}>Stores load ho rahe hain...</p>
+            ) : nearbyStores.length === 0 ? (
+              <p style={{ fontSize: '13px', color: '#888888', padding: '12px 0' }}>Aapke area mein koi store nahi mila</p>
+            ) : (
+              <div style={s.horizontalScroll}>
+                {nearbyStores.map((store, idx) => (
+                  <StoreCard
+                    key={store?.id || store?.name || `store-${idx}`}
+                    store={store}
+                    onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Categories */}

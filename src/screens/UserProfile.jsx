@@ -11,12 +11,6 @@ import {
 
 // ─── Data ─────────────────────────────────────────────────────
 
-const PRESCRIPTIONS = [
-  { id: 1, doctor: 'Dr. R.K. Singh, MBBS', hospital: 'City Hospital, Deoria',    date: '15 Jan 2025', meds: 3 },
-  { id: 2, doctor: 'Dr. A. Sharma',        hospital: 'Primary Health Centre',    date: '02 Dec 2024', meds: 1 },
-  { id: 3, doctor: 'Dr. Meena Verma',      hospital: 'Arogya Clinic, Padrauna',  date: '18 Nov 2024', meds: 2 },
-];
-
 const SETTINGS_ROWS = [
   { Icon: Bell,       label: 'Notifications',      sub: 'Order updates, offers',    color: '#E65100', bg: '#FFF3E0' },
   { Icon: Shield,     label: 'Privacy & Security',  sub: 'Password, data',          color: '#2563EB', bg: '#EAF2FF' },
@@ -40,7 +34,8 @@ export default function UserProfile() {
     label: 'Ghar', address_line: '', city: 'Deoria',
     district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
   });
-  const [orderStats, setOrderStats] = useState({ totalOrders: 0, totalSpent: 0 });
+  const [orderStats,     setOrderStats]     = useState({ totalOrders: 0, totalSpent: 0 });
+  const [prescriptions,  setPrescriptions]  = useState([]);
 
   // ── Fetch user ───────────────────────────────────────────────
   useEffect(() => {
@@ -94,9 +89,23 @@ export default function UserProfile() {
         }
       } catch {}
     };
+    const fetchPrescriptions = async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+        if (!user?.id) return;
+        const { data } = await supabase
+          .from('prescriptions')
+          .select('id, doctor_name, hospital_name, prescription_date, notes, image_url')
+          .eq('user_id', user.id)
+          .order('prescription_date', { ascending: false })
+          .limit(5);
+        if (data) setPrescriptions(data);
+      } catch {}
+    };
     fetchUserProfile();
     fetchAddresses();
     fetchOrderStats();
+    fetchPrescriptions();
   }, []);
 
   // ── Profile update ───────────────────────────────────────────
@@ -376,22 +385,32 @@ export default function UserProfile() {
                 Sab Dekho
               </button>
             </div>
-            {PRESCRIPTIONS.map((rx) => (
-              <div key={rx.id} style={s.rxRow}>
-                <div style={s.rxIconBox}>
-                  <FileText size={18} color="#1A6B3C" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <p style={s.rxDoctor}>{rx.doctor}</p>
-                  <p style={s.rxHosp}>{rx.hospital}</p>
-                  <div style={s.rxMeta}>
-                    <span style={s.rxDate}>{rx.date}</span>
-                    <span style={s.rxMeds}>{rx.meds} medicines</span>
+            {prescriptions.length === 0 ? (
+              <p style={{ color: '#888888', fontSize: '13px', textAlign: 'center', margin: '8px 0' }}>
+                Koi prescription nahi mili — Upload karo
+              </p>
+            ) : (
+              prescriptions.map((rx) => (
+                <div key={rx.id} style={s.rxRow}>
+                  <div style={s.rxIconBox}>
+                    <FileText size={18} color="#1A6B3C" />
                   </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={s.rxDoctor}>{rx.doctor_name || 'Doctor'}</p>
+                    <p style={s.rxHosp}>{rx.hospital_name || '—'}</p>
+                    <div style={s.rxMeta}>
+                      <span style={s.rxDate}>
+                        {rx.prescription_date
+                          ? new Date(rx.prescription_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : '—'}
+                      </span>
+                      {rx.notes && <span style={s.rxMeds}>{rx.notes}</span>}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} color="#CCCCCC" />
                 </div>
-                <ChevronRight size={16} color="#CCCCCC" />
-              </div>
-            ))}
+              ))
+            )}
             <button style={s.dashedAddBtn} onClick={() => navigate('/prescription')}>
               <Plus size={16} color="#1A6B3C" />
               Naya Prescription Upload Karo

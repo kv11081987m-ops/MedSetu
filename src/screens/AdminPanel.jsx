@@ -76,12 +76,6 @@ const ALL_DISPUTES_INIT = [
   { id: 'D-087', customer: 'Mohan Lal',   seller: 'Ram Medical Store',   issue: 'Medicine expired thi',     amount: '234', status: 'resolved'     },
 ];
 
-const INIT_NOTIFS = [
-  { id: 1, dotColor: '#1A6B3C', title: 'Naya seller registration:', subtitle: 'Ram Medical, Deoria', time: '10 min pehle',   read: false },
-  { id: 2, dotColor: '#E65100', title: 'Dispute #D-089 open hua',   subtitle: '',                    time: '32 min pehle',   read: false },
-  { id: 3, dotColor: '#888888', title: 'Order #MED-089 delivered',  subtitle: '',                    time: '1 ghanta pehle', read: true  },
-  { id: 4, dotColor: '#888888', title: 'Naya user registered',      subtitle: '',                    time: '2 ghante pehle', read: true  },
-];
 
 // ─── Status Badge ─────────────────────────────────────────────
 const STATUS_MAP = {
@@ -351,7 +345,7 @@ export default function AdminPanel() {
   const [orderFilter,   setOrderFilter]  = useState('sab');
   const [allDisputes,   setAllDisputes]  = useState(ALL_DISPUTES_INIT);
   const [disputeFilter, setDisputeFilter]= useState('open');
-  const [notifications, setNotifications]= useState(INIT_NOTIFS);
+  const [notifications, setNotifications]= useState([]);
   const [notifOpen,     setNotifOpen]    = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────

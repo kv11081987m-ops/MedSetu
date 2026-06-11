@@ -92,7 +92,7 @@ function PublicOnlyRoute({ children }) {
 function SuperAdminRoute({ children }) {
   const role  = localStorage.getItem('medsetu_role');
   const user  = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
-  const isSA  = role === 'super_admin' || user?.email === 'kv11081987m@gmail.com';
+  const isSA  = role === 'super_admin';
   if (!isSA) return <Navigate to="/login" replace />;
   return children;
 }

@@ -288,24 +288,35 @@ export default function OrderTracking() {
           </div>
 
           {/* Delivery Person Card */}
-          <div style={s.delivCard}>
-            <div style={s.delivAvatar}>
-              <span style={s.delivInitial}>R</span>
+          {activeStep === 3 && (
+            <div style={s.delivCard}>
+              <div style={s.delivAvatar}>
+                <span style={s.delivInitial}>D</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={s.delivName}>
+                  {order?.delivery_partner_name || 'Delivery Partner'}
+                </p>
+                <p style={s.delivRole}>Delivery Partner</p>
+                <p style={s.delivPlate}>
+                  {order?.delivery_vehicle_number || 'Assigned'}
+                </p>
+              </div>
+              <div style={s.delivActions}>
+                {order?.delivery_partner_phone && (
+                  <button style={s.callCircle} onClick={() => window.open(`tel:${order.delivery_partner_phone}`)}>
+                    <Phone size={17} color="#1A6B3C" />
+                  </button>
+                )}
+                <button style={s.msgCircle} onClick={() => {
+                  const msg = encodeURIComponent('Namaste, mera order kahan hai?');
+                  window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+                }}>
+                  <MessageCircle size={17} color="#2563EB" />
+                </button>
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <p style={s.delivName}>Rahul Kumar</p>
-              <p style={s.delivRole}>Delivery Partner</p>
-              <p style={s.delivPlate}>🏍️ UP 53 XX 1234</p>
-            </div>
-            <div style={s.delivActions}>
-              <button style={s.callCircle} onClick={() => window.open('tel:+919876543210')}>
-                <Phone size={17} color="#1A6B3C" />
-              </button>
-              <button style={s.msgCircle}>
-                <MessageCircle size={17} color="#2563EB" />
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* Live Map */}
           <div style={s.mapContainer}>
