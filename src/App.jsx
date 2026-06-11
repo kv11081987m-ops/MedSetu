@@ -26,6 +26,7 @@ import StaffLogin          from './screens/StaffLogin';
 import SellerRegister      from './screens/SellerRegister';
 import PharmacistRegister  from './screens/PharmacistRegister';
 import SuperAdminPanel     from './screens/SuperAdminPanel';
+import MedicineImport      from './screens/MedicineImport';
 
 // Fire connection test once on module load (dev only)
 if (import.meta.env.DEV) testSupabaseConnection();
@@ -160,7 +161,8 @@ function AppRoutes() {
         <Route path="/pharmacist-register" element={<PharmacistRegister />} />
 
         {/* ── Super Admin (special protected) ── */}
-        <Route path="/super-admin" element={<SuperAdminRoute><SuperAdminPanel /></SuperAdminRoute>} />
+        <Route path="/super-admin"       element={<SuperAdminRoute><SuperAdminPanel /></SuperAdminRoute>} />
+        <Route path="/medicine-import"   element={<SuperAdminRoute><MedicineImport /></SuperAdminRoute>} />
 
         {/* ── 404 ── */}
         <Route path="*" element={<NotFound />} />

@@ -604,6 +604,7 @@ function TabOffers({ offers, setOffers, offerForm, setOfferForm }) {
 // TAB: Settings
 // ══════════════════════════════════════════════════════════════
 function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
+  const navigate = useNavigate()
   const toggle = (key) => setSettings((p) => ({ ...p, [key]: !p[key] }));
 
   const saveSettings = async () => {
@@ -647,6 +648,16 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
         <input style={s.inputSm} type="number" min="0" value={settings.deliveryCharge} onChange={(e) => setSettings((p) => ({ ...p, deliveryCharge: e.target.value }))} />
         <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: saving ? 0.7 : 1 }} onClick={saveSettings} disabled={saving}>
           {saving ? 'Save Ho Raha Hai...' : 'Save Karo'}
+        </button>
+      </div>
+
+      <div style={s.formCard}>
+        <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 12px' }}>Data Management</p>
+        <button
+          onClick={() => navigate('/medicine-import')}
+          style={{ width: '100%', padding: '12px', background: '#1A6B3C', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '600', fontFamily: 'inherit' }}
+        >
+          💊 Jan Aushadhi Import
         </button>
       </div>
 
