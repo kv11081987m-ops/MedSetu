@@ -6,8 +6,7 @@ import {
   Search, SearchX, Home, ShoppingBag, User, ChevronDown,
   RefreshCw,
 } from 'lucide-react';
-import { searchMedicines, mapMedicine } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { searchMedicines, fetchPopularMedicines, mapMedicine } from '../lib/api';
 
 // ─── Dummy Data ───────────────────────────────────────────────
 const INITIAL_RECENT = [
@@ -113,24 +112,14 @@ export default function MedicineSearch() {
   const debounceRef = useRef(null);
 
   useEffect(() => {
-    supabase
-      .from('medicines')
-      .select('id, name, salt_name, selling_price, stock, category, is_available')
-      .order('stock', { ascending: false })
-      .limit(6)
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setPopularMeds(data.map((m) => {
-            const cat  = (m.category || '').toLowerCase();
-            const type = cat.includes('tablet')   ? 'tablet'
-                       : cat.includes('syrup')    ? 'syrup'
-                       : cat.includes('equip')    ? 'equipment'
-                       : cat.includes('inject')   ? 'injection'
-                       : 'tablet';
-            return { id: m.id, name: m.name, salt: m.salt_name || '', price: parseFloat(m.selling_price) || 0, stores: 1, type };
-          }));
-        }
-      });
+    fetchPopularMedicines(12).then(({ data }) => {
+      if (data && data.length > 0) {
+        setPopularMeds(data.map((m) => {
+          const mapped = mapMedicine(m);
+          return { id: mapped.id, name: mapped.name, salt: mapped.salt, price: mapped.mrp, stores: mapped.stores, type: mapped.type };
+        }));
+      }
+    });
   }, []);
 
   useEffect(() => { inputRef.current?.focus(); }, []);

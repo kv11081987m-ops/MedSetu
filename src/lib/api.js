@@ -28,34 +28,31 @@ export function mapSeller(row, index = 0) {
   };
 }
 
-// Map Supabase medicine row → UI shape used across screens
+// Map master_medicines row → UI shape used across screens
 export function mapMedicine(row) {
-  const cat  = (row.category || '').toLowerCase();
-  const type = cat.includes('tablet') ? 'tablet'
-             : cat.includes('syrup')  ? 'syrup'
-             : cat.includes('equip')  ? 'equipment'
-             : cat.includes('inject') ? 'injection'
-             : cat.includes('powder') ? 'syrup'
+  const df   = (row.dosage_form || '').toLowerCase();
+  const type = df.includes('tablet') || df.includes('capsule') ? 'tablet'
+             : df.includes('syrup')  || df.includes('suspension') || df.includes('liquid') ? 'syrup'
+             : df.includes('inject') ? 'injection'
+             : df.includes('inhaler') ? 'injection'
+             : df.includes('powder') ? 'syrup'
              : 'tablet';
 
-  const mrp   = parseFloat(row.mrp)           || 0;
-  const price = parseFloat(row.selling_price)  || 0;
-  const off   = mrp > 0 ? Math.round((1 - price / mrp) * 100) : 0;
+  const mrp = parseFloat(row.mrp_max) || 0;
 
   return {
-    id:           row.id,
-    name:         row.name,
-    brand:        row.brand        || '',
-    salt:         row.salt_name    || '',
+    id:          row.id,
+    name:        row.name,
+    brand:       row.brand_names || row.manufacturer || '',
+    salt:        row.generic_name || row.salt_composition || '',
     mrp,
-    price,
-    off,
-    rxRequired:   row.requires_prescription || false,
-    stores:       row.sellers ? 1 : 0,
-    storeInfo:    row.sellers || null,
+    price:       mrp,
+    off:         0,
+    rxRequired:  row.requires_prescription || false,
+    stores:      1,
+    storeInfo:   null,
     type,
-    stock:        row.stock || 0,
-    isAvailable:  row.is_available,
+    is_generic:  row.is_generic || false,
   };
 }
 
@@ -70,32 +67,36 @@ export async function fetchSellers(district = 'Deoria') {
   return { data: data || [], error };
 }
 
-// ── Search medicines ───────────────────────────────────────────
+// ── Search medicines (master_medicines, 248K) ─────────────────
 export async function searchMedicines(query) {
-  const { data, error } = await supabase
-    .from('medicines')
-    .select(`
-      *,
-      sellers (
-        store_name,
-        district,
-        rating,
-        is_open
-      )
-    `)
-    .ilike('name', `%${query}%`)
-    .order('selling_price', { ascending: true });
+  if (!query || query.length < 2) return { data: [], error: null };
 
-  return { data: data || [], error };
+  const { data, error } = await supabase
+    .from('master_medicines')
+    .select('*')
+    .or(
+      `name.ilike.%${query}%,` +
+      `generic_name.ilike.%${query}%,` +
+      `salt_composition.ilike.%${query}%,` +
+      `search_tags.ilike.%${query}%`
+    )
+    .eq('is_active', true)
+    .order('name')
+    .limit(20);
+
+  if (error) { console.error(error); return { data: [], error }; }
+  return { data: data || [], error: null };
 }
 
-// ── Fetch all available medicines (for home/popular) ──────────
-export async function fetchPopularMedicines(limit = 6) {
+// ── Fetch popular medicines (for home/search landing) ─────────
+export async function fetchPopularMedicines(limit = 12) {
   const { data, error } = await supabase
-    .from('medicines')
-    .select('*, sellers(store_name)')
-    .order('stock', { ascending: false })
+    .from('master_medicines')
+    .select('*')
+    .eq('is_active', true)
+    .order('mrp_max', { ascending: true })
     .limit(limit);
 
-  return { data: data || [], error };
+  if (error) return { data: [], error };
+  return { data: data || [], error: null };
 }
