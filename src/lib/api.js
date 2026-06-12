@@ -79,13 +79,13 @@ export async function searchMedicines(query) {
 
   const [janRes, genericRes, brandedRes] = await Promise.all([
     supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('source', 'janaushadhi')
+      .eq('is_active', true).eq('source', 'janaushadhi').gt('mrp_max', 0)
       .order('mrp_max', { ascending: true }).limit(5),
     supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('is_generic', true).neq('source', 'janaushadhi')
+      .eq('is_active', true).eq('is_generic', true).neq('source', 'janaushadhi').gt('mrp_max', 0)
       .order('mrp_max', { ascending: true }).limit(5),
     supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('is_generic', false)
+      .eq('is_active', true).eq('is_generic', false).gt('mrp_max', 0)
       .order('mrp_max', { ascending: false }).limit(5),
   ]);
 
@@ -122,6 +122,7 @@ export async function fetchPopularMedicines(limit = 12) {
     .from('master_medicines')
     .select('*')
     .eq('is_active', true)
+    .gt('mrp_max', 0)
     .order('mrp_max', { ascending: true })
     .limit(limit);
 
