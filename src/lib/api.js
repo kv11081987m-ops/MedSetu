@@ -67,33 +67,53 @@ export async function fetchSellers(district = 'Deoria') {
   return { data: data || [], error };
 }
 
-// ── Search medicines (master_medicines, 248K) ─────────────────
+// ── Search medicines — 3 sections: branded / generic / janaushadhi ──
 export async function searchMedicines(query) {
-  if (!query || query.length < 2) return { data: [], error: null };
+  const empty = { branded: [], generic: [], janaushadhi: [] };
+  if (!query || query.length < 2) return empty;
 
-  const { data, error } = await supabase
-    .from('master_medicines')
-    .select('*')
-    .or(
-      `name.ilike.%${query}%,` +
-      `generic_name.ilike.%${query}%,` +
-      `salt_composition.ilike.%${query}%`
-    )
-    .eq('is_active', true)
-    .order('name')
-    .limit(50);
+  const filter =
+    `name.ilike.%${query}%,` +
+    `generic_name.ilike.%${query}%,` +
+    `salt_composition.ilike.%${query}%`;
 
-  if (error) { console.error(error); return { data: [], error }; }
+  const [janRes, genericRes, brandedRes] = await Promise.all([
+    supabase.from('master_medicines').select('*').or(filter)
+      .eq('is_active', true).eq('source', 'janaushadhi')
+      .order('mrp_max', { ascending: true }).limit(5),
+    supabase.from('master_medicines').select('*').or(filter)
+      .eq('is_active', true).eq('is_generic', true).neq('source', 'janaushadhi')
+      .order('mrp_max', { ascending: true }).limit(5),
+    supabase.from('master_medicines').select('*').or(filter)
+      .eq('is_active', true).eq('is_generic', false)
+      .order('mrp_max', { ascending: false }).limit(5),
+  ]);
 
-  const seen = new Set();
-  const unique = (data || []).filter(med => {
-    const key = med.name.toLowerCase().split(' ')[0];
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return {
+    janaushadhi: janRes.data     || [],
+    generic:     genericRes.data || [],
+    branded:     brandedRes.data || [],
+  };
+}
 
-  return { data: unique.slice(0, 20), error: null };
+// ── Rate per dose ─────────────────────────────────────────────
+export function getRatePerDose(med) {
+  const price = parseFloat(med.mrp_max || med.mrp) || 0;
+  const pack  = (med.unit || med.pack_size_label || '').toLowerCase();
+
+  const tabMatch = pack.match(/(\d+)\s*tab/i) || pack.match(/strip of (\d+)/i);
+  if (tabMatch) {
+    const count = parseInt(tabMatch[1]);
+    return { perDose: (price / count).toFixed(2), unit: 'tablet', total: count };
+  }
+
+  const mlMatch = pack.match(/(\d+)\s*ml/i);
+  if (mlMatch) {
+    const ml = parseInt(mlMatch[1]);
+    return { perDose: (price / ml).toFixed(2), unit: 'ml', total: ml };
+  }
+
+  return { perDose: price.toFixed(2), unit: 'unit', total: 1 };
 }
 
 // ── Fetch popular medicines (for home/search landing) ─────────
