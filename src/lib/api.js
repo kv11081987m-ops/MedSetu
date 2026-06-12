@@ -77,15 +77,23 @@ export async function searchMedicines(query) {
     .or(
       `name.ilike.%${query}%,` +
       `generic_name.ilike.%${query}%,` +
-      `salt_composition.ilike.%${query}%,` +
-      `search_tags.ilike.%${query}%`
+      `salt_composition.ilike.%${query}%`
     )
     .eq('is_active', true)
     .order('name')
-    .limit(20);
+    .limit(50);
 
   if (error) { console.error(error); return { data: [], error }; }
-  return { data: data || [], error: null };
+
+  const seen = new Set();
+  const unique = (data || []).filter(med => {
+    const key = med.name.toLowerCase().split(' ')[0];
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return { data: unique.slice(0, 20), error: null };
 }
 
 // ── Fetch popular medicines (for home/search landing) ─────────
