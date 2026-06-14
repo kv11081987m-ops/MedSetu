@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -26,12 +26,14 @@ const INITIAL_FORM = {
 export default function SellerRegister() {
   const navigate = useNavigate();
 
-  const [step,        setStep]        = useState(1);
-  const [formData,    setFormData]    = useState(INITIAL_FORM);
-  const [agreed,      setAgreed]      = useState(false);
-  const [submitting,  setSubmitting]  = useState(false);
-  const [submitted,   setSubmitted]   = useState(false);
-  const [errors,      setErrors]      = useState({});
+  const [step,              setStep]              = useState(1);
+  const [formData,          setFormData]          = useState(INITIAL_FORM);
+  const [agreed,            setAgreed]            = useState(false);
+  const [submitting,        setSubmitting]        = useState(false);
+  const [submitted,         setSubmitted]         = useState(false);
+  const [errors,            setErrors]            = useState({});
+  const [drugLicenseFile,   setDrugLicenseFile]   = useState(null);
+  const [pharmacistCertFile,setPharmacistCertFile]= useState(null);
 
   const set = (field) => (e) => {
     setFormData((p) => ({ ...p, [field]: e.target.value }));
@@ -70,30 +72,50 @@ export default function SellerRegister() {
   const nextStep = () => { if (validateStep()) setStep((s) => s + 1); };
   const prevStep = () => setStep((s) => s - 1);
 
+  const uploadFile = async (file, bucket, folder) => {
+    const ext  = file.name.split('.').pop();
+    const path = `${folder}/${formData.mobile}_${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: false });
+    if (error) throw error;
+    return path;
+  };
+
   const handleSubmit = async () => {
     if (!validateStep()) return;
     setSubmitting(true);
     try {
+      let drugLicenseUrl   = null;
+      let pharmacistCertUrl = null;
+
+      if (drugLicenseFile) {
+        drugLicenseUrl = await uploadFile(drugLicenseFile, 'seller-documents', 'drug-licenses');
+      }
+      if (pharmacistCertFile) {
+        pharmacistCertUrl = await uploadFile(pharmacistCertFile, 'pharmacist-documents', 'pharmacist-certs');
+      }
+
       const { error } = await supabase.from('seller_registrations').insert({
-        owner_name:             formData.ownerName,
-        mobile:                 formData.mobile,
-        email:                  formData.email,
-        aadhar_number:          formData.aadharNumber,
-        store_name:             formData.storeName,
-        address:                formData.address,
-        district:               formData.district,
-        city:                   formData.city,
-        pincode:                formData.pincode,
-        maps_link:              formData.mapsLink || null,
-        drug_license_number:    formData.drugLicenseNumber,
-        drug_license_expiry:    formData.drugLicenseExpiry,
-        pharmacist_name:        formData.pharmacistName,
-        pharmacist_reg_number:  formData.pharmacistRegNumber,
-        bank_name:              formData.bankName,
-        account_number:         formData.accountNumber,
-        ifsc_code:              formData.ifscCode.toUpperCase(),
-        upi_id:                 formData.upiId || null,
-        status:                 'pending',
+        owner_name:              formData.ownerName,
+        mobile:                  formData.mobile,
+        email:                   formData.email,
+        aadhar_number:           formData.aadharNumber,
+        store_name:              formData.storeName,
+        address:                 formData.address,
+        district:                formData.district,
+        city:                    formData.city,
+        pincode:                 formData.pincode,
+        maps_link:               formData.mapsLink || null,
+        drug_license_number:     formData.drugLicenseNumber,
+        drug_license_expiry:     formData.drugLicenseExpiry,
+        drug_license_image_url:  drugLicenseUrl,
+        pharmacist_name:         formData.pharmacistName,
+        pharmacist_reg_number:   formData.pharmacistRegNumber,
+        pharmacist_cert_url:     pharmacistCertUrl,
+        bank_name:               formData.bankName,
+        account_number:          formData.accountNumber,
+        ifsc_code:               formData.ifscCode.toUpperCase(),
+        upi_id:                  formData.upiId || null,
+        status:                  'pending',
       });
       if (error) throw error;
       setSubmitted(true);
@@ -132,7 +154,13 @@ export default function SellerRegister() {
         <div style={s.card}>
           {step === 1 && <Step1 formData={formData} set={set} errors={errors} />}
           {step === 2 && <Step2 formData={formData} set={set} errors={errors} />}
-          {step === 3 && <Step3 formData={formData} set={set} errors={errors} />}
+          {step === 3 && (
+            <Step3
+              formData={formData} set={set} errors={errors}
+              drugLicenseFile={drugLicenseFile}   setDrugLicenseFile={setDrugLicenseFile}
+              pharmacistCertFile={pharmacistCertFile} setPharmacistCertFile={setPharmacistCertFile}
+            />
+          )}
           {step === 4 && (
             <Step4
               formData={formData} set={set} errors={errors}
@@ -145,7 +173,9 @@ export default function SellerRegister() {
             onClick={step === TOTAL_STEPS ? handleSubmit : nextStep}
             disabled={(step === 4 && !agreed) || submitting}
           >
-            {submitting ? 'Submit Ho Raha Hai...' : step === TOTAL_STEPS ? 'Registration Submit Karo' : 'Aage Badho →'}
+            {submitting
+              ? (drugLicenseFile || pharmacistCertFile ? 'Files Upload Ho Rahi Hain...' : 'Submit Ho Raha Hai...')
+              : step === TOTAL_STEPS ? 'Registration Submit Karo' : 'Aage Badho →'}
           </button>
         </div>
 
@@ -206,7 +236,17 @@ function Step2({ formData, set, errors }) {
 }
 
 // ── Step 3 — Legal Documents ──────────────────────────────────
-function Step3({ formData, set, errors }) {
+function Step3({ formData, set, errors, drugLicenseFile, setDrugLicenseFile, pharmacistCertFile, setPharmacistCertFile }) {
+  const drugLicenseRef    = useRef(null);
+  const pharmacistCertRef = useRef(null);
+
+  const onFileChange = (setter) => (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('File 5MB se badi hai. Chhoti file select karo.'); e.target.value = ''; return; }
+    setter(file);
+  };
+
   return (
     <>
       <Field label="Drug License Number *" error={errors.drugLicenseNumber}>
@@ -215,17 +255,58 @@ function Step3({ formData, set, errors }) {
       <Field label="Drug License Expiry Date *" error={errors.drugLicenseExpiry}>
         <input style={inp} type="date" value={formData.drugLicenseExpiry} onChange={set('drugLicenseExpiry')} />
       </Field>
-      <Field label="Drug License Image *" error={errors.drugLicenseImage}>
-        <div style={s.fileNote}>📎 File upload — Supabase Storage baad mein connect hoga</div>
+      <Field label="Drug License Image" error={errors.drugLicenseImage}>
+        <input
+          ref={drugLicenseRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.pdf"
+          style={{ display: 'none' }}
+          onChange={onFileChange(setDrugLicenseFile)}
+        />
+        <button
+          type="button"
+          onClick={() => drugLicenseRef.current?.click()}
+          style={fileUploadBtn(!!drugLicenseFile)}>
+          {drugLicenseFile
+            ? `✅ ${drugLicenseFile.name}`
+            : '📎 Drug License Upload Karo (JPG / PNG / PDF)'}
+        </button>
+        {drugLicenseFile && (
+          <button type="button" onClick={() => { setDrugLicenseFile(null); drugLicenseRef.current.value = ''; }}
+            style={fileRemoveBtn}>
+            × Hatao
+          </button>
+        )}
       </Field>
+
       <Field label="Pharmacist Ka Naam *" error={errors.pharmacistName}>
         <input style={inp} value={formData.pharmacistName} onChange={set('pharmacistName')} placeholder="Registered pharmacist ka naam" />
       </Field>
       <Field label="Pharmacist Reg. Number *" error={errors.pharmacistRegNumber}>
         <input style={inp} value={formData.pharmacistRegNumber} onChange={set('pharmacistRegNumber')} placeholder="UP-PH-XXXX-XXXXX" />
       </Field>
-      <Field label="Pharmacist Certificate *" error={errors.pharmacistCert}>
-        <div style={s.fileNote}>📎 File upload — Supabase Storage baad mein connect hoga</div>
+      <Field label="Pharmacist Certificate" error={errors.pharmacistCert}>
+        <input
+          ref={pharmacistCertRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.pdf"
+          style={{ display: 'none' }}
+          onChange={onFileChange(setPharmacistCertFile)}
+        />
+        <button
+          type="button"
+          onClick={() => pharmacistCertRef.current?.click()}
+          style={fileUploadBtn(!!pharmacistCertFile)}>
+          {pharmacistCertFile
+            ? `✅ ${pharmacistCertFile.name}`
+            : '📎 Pharmacist Certificate Upload Karo (JPG / PNG / PDF)'}
+        </button>
+        {pharmacistCertFile && (
+          <button type="button" onClick={() => { setPharmacistCertFile(null); pharmacistCertRef.current.value = ''; }}
+            style={fileRemoveBtn}>
+            × Hatao
+          </button>
+        )}
       </Field>
     </>
   );
@@ -292,6 +373,23 @@ function Field({ label, error, children }) {
     </div>
   );
 }
+
+// ── File upload button styles ─────────────────────────────────
+const fileUploadBtn = (hasFile) => ({
+  width: '100%', padding: '12px 14px', fontFamily: 'inherit',
+  border: `2px dashed ${hasFile ? '#1A6B3C' : '#C8C8C8'}`,
+  borderRadius: '10px', cursor: 'pointer', fontSize: '14px', textAlign: 'left',
+  backgroundColor: hasFile ? '#E8F5E9' : '#FAFAFA',
+  color: hasFile ? '#1A6B3C' : '#888888',
+  fontWeight: hasFile ? '600' : '400',
+  transition: 'all 0.2s',
+  wordBreak: 'break-all',
+});
+
+const fileRemoveBtn = {
+  marginTop: '4px', background: 'none', border: 'none', cursor: 'pointer',
+  fontSize: '12px', color: '#e53935', fontFamily: 'inherit', padding: '0',
+};
 
 // ── Shared input style ────────────────────────────────────────
 const inp = {
