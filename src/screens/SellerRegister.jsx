@@ -88,10 +88,10 @@ export default function SellerRegister() {
       let pharmacistCertUrl = null;
 
       if (drugLicenseFile) {
-        drugLicenseUrl = await uploadFile(drugLicenseFile, 'seller-documents', 'drug-licenses');
+        drugLicenseUrl = await uploadFile(drugLicenseFile, 'seller-documents', 'drug-license');
       }
       if (pharmacistCertFile) {
-        pharmacistCertUrl = await uploadFile(pharmacistCertFile, 'pharmacist-documents', 'pharmacist-certs');
+        pharmacistCertUrl = await uploadFile(pharmacistCertFile, 'seller-documents', 'pharmacist-cert');
       }
 
       const { error } = await supabase.from('seller_registrations').insert({
