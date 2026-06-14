@@ -66,11 +66,11 @@ export function AuthProvider({ children }) {
         }
 
         if (event === 'SIGNED_IN' && session) {
-          const emailUser = session.user;
+          const emailUser   = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
+          // ── 1. Super Admin ────────────────────────────────────
           if (pendingRole === 'super_admin') {
-            // ── Super Admin login ──
             localStorage.setItem('medsetu_role', 'super_admin');
             localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
             localStorage.removeItem('staff_pending_role');
@@ -79,37 +79,45 @@ export function AuthProvider({ children }) {
             return;
           }
 
-          if (pendingRole) {
-            // ── Staff login (magic link OR Google OAuth) ──
+          // ── 2. Staff role — pendingRole se ya whitelist fallback ──
+          // pendingRole missing = magic link was opened in a different browser,
+          // so we check staff_whitelist directly as a fallback.
+          let staffRole = (pendingRole && pendingRole !== 'customer') ? pendingRole : null;
 
-            // For seller & pharmacist — verify whitelist approval before granting access
-            if (pendingRole === 'seller' || pendingRole === 'pharmacist') {
-              const { data: whitelisted } = await supabase
+          if (!staffRole) {
+            // Whitelist fallback: email se role uthao
+            try {
+              const { data: wl } = await supabase
                 .from('staff_whitelist')
-                .select('*')
+                .select('role')
                 .eq('email', emailUser.email)
-                .eq('role', pendingRole)
                 .eq('is_approved', true)
                 .maybeSingle();
-
-              if (!whitelisted) {
-                // Not approved — sign out and redirect back to staff login
-                await supabase.auth.signOut();
-                localStorage.removeItem('staff_pending_role');
-                alert(
-                  '❌ Aapka account approved nahi hai.\n\n' +
-                  'Pehle registration form bharke approval ka wait karo.'
-                );
-                window.location.href = '/staff-login';
-                return;
-              }
+              if (wl?.role) staffRole = wl.role;
+            } catch {}
+          } else if (staffRole === 'seller' || staffRole === 'pharmacist') {
+            // pendingRole set hai — verify whitelist approval
+            const { data: wl } = await supabase
+              .from('staff_whitelist')
+              .select('*')
+              .eq('email', emailUser.email)
+              .eq('role', staffRole)
+              .eq('is_approved', true)
+              .maybeSingle();
+            if (!wl) {
+              await supabase.auth.signOut();
+              localStorage.removeItem('staff_pending_role');
+              alert('❌ Aapka account approved nahi hai.\n\nPehle registration form bharke approval ka wait karo.');
+              window.location.href = '/staff-login';
+              return;
             }
+          }
 
-            localStorage.setItem('medsetu_role', pendingRole);
+          if (staffRole && staffRole !== 'customer') {
+            localStorage.setItem('medsetu_role', staffRole);
             localStorage.removeItem('staff_pending_role');
-            setUserRole(pendingRole);
+            setUserRole(staffRole);
 
-            // Upsert user record
             try {
               const { data: existing } = await supabase
                 .from('users').select('*').eq('email', emailUser.email).maybeSingle();
@@ -118,47 +126,38 @@ export function AuthProvider({ children }) {
               } else {
                 const { data: newUser } = await supabase
                   .from('users')
-                  .insert({
-                    email: emailUser.email,
-                    name:  emailUser.user_metadata?.full_name || null,
-                    role:  pendingRole,
-                  })
-                  .select()
-                  .maybeSingle();
+                  .insert({ email: emailUser.email, name: emailUser.user_metadata?.full_name || null, role: staffRole })
+                  .select().maybeSingle();
                 if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
               }
             } catch {}
 
-            // Redirect to role dashboard
             const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard' };
-            if (routes[pendingRole]) window.location.href = routes[pendingRole];
-
-          } else {
-            // ── Customer magic link login ──
-            const savedRole = localStorage.getItem('medsetu_role');
-            if (!savedRole) {
-              localStorage.setItem('medsetu_role', 'customer');
-              setUserRole('customer');
-            }
-
-            // Try to upsert user record — gracefully skip if users table missing/fails
-            try {
-              const { data: existing } = await supabase
-                .from('users').select('*').eq('email', emailUser.email).maybeSingle();
-              if (existing) {
-                localStorage.setItem('medsetu_user', JSON.stringify(existing));
-              } else {
-                const { data: newUser } = await supabase
-                  .from('users').insert({ email: emailUser.email, role: 'customer' }).select().maybeSingle();
-                if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-              }
-            } catch {}
-
-            // Redirect to home only if on login/splash/otp page
-            const currentPath = window.location.pathname;
-            const onAuthPage = ['/login', '/', '/otp', '/onboarding'].includes(currentPath);
-            if (onAuthPage) window.location.href = '/home';
+            window.location.href = routes[staffRole] || '/home';
+            return;
           }
+
+          // ── 3. Customer magic link login ──────────────────────
+          const savedRole = localStorage.getItem('medsetu_role');
+          if (!savedRole) {
+            localStorage.setItem('medsetu_role', 'customer');
+            setUserRole('customer');
+          }
+          try {
+            const { data: existing } = await supabase
+              .from('users').select('*').eq('email', emailUser.email).maybeSingle();
+            if (existing) {
+              localStorage.setItem('medsetu_user', JSON.stringify(existing));
+            } else {
+              const { data: newUser } = await supabase
+                .from('users').insert({ email: emailUser.email, role: 'customer' }).select().maybeSingle();
+              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
+            }
+          } catch {}
+
+          const currentPath = window.location.pathname;
+          const onAuthPage  = ['/login', '/', '/otp', '/onboarding', '/staff-login'].includes(currentPath);
+          if (onAuthPage) window.location.href = '/home';
         }
       }
     );
