@@ -28,11 +28,36 @@ export default function LoginScreen() {
     if (error) setError('');
   };
 
-  const handleSendOTP = () => {
+  const handleSendOTP = async () => {
     if (phone.length !== 10) { setError('Sahi 10-digit number daalo'); return; }
-    const otp = generateOTP();
-    storeOTP(phone, otp);
-    navigate('/otp', { state: { phone, otp } });
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const otp = generateOTP();
+      storeOTP(phone, otp);
+
+      const response = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, otp }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        console.warn('SMS failed:', data.message);
+        setError('SMS nahi gaya — dev mode mein try karo');
+      }
+
+      navigate('/otp', { state: { phone } });
+    } catch (err) {
+      console.error(err);
+      navigate('/otp', { state: { phone } });
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── Email handler ──────────────────────────────────────────
@@ -110,8 +135,12 @@ export default function LoginScreen() {
                 />
               </div>
               {error && <p style={s.errorText}>{error}</p>}
-              <button style={s.primaryBtn} onClick={handleSendOTP}>
-                OTP Bhejo
+              <button
+                style={{ ...s.primaryBtn, opacity: loading ? 0.7 : 1 }}
+                onClick={handleSendOTP}
+                disabled={loading}
+              >
+                {loading ? 'OTP Bheja Ja Raha Hai...' : 'OTP Bhejo'}
               </button>
             </div>
           )}
