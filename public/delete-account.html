@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Account – MedSetu</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #ffffff;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 680px; margin: 0 auto; }
+    .header {
+      border-bottom: 2px solid #F26C0A;
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+    .logo-icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      background: #F26C0A; display: flex; align-items: center;
+      justify-content: center; color: white; font-weight: 700; font-size: 18px;
+    }
+    .logo-text { font-size: 22px; font-weight: 600; color: #0C447C; }
+    h1 { font-size: 24px; font-weight: 600; color: #0C447C; }
+    h2 { font-size: 17px; font-weight: 600; color: #0C447C; margin: 1.5rem 0 0.5rem; }
+    p { margin-bottom: 1rem; color: #333; }
+    ul { margin: 0.5rem 0 1rem 1.5rem; }
+    ul li { margin-bottom: 0.4rem; color: #333; }
+    .warning-box {
+      background: #fff8f0;
+      border: 1px solid #F26C0A;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+    }
+    .warning-box p { margin: 0; color: #7a3800; }
+    .steps {
+      background: #f0f6ff;
+      border: 1px solid #b5d4f4;
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      margin: 1.5rem 0;
+    }
+    .step {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 0.75rem;
+      align-items: flex-start;
+    }
+    .step:last-child { margin-bottom: 0; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #0C447C; color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600; flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .email-btn {
+      display: inline-block;
+      background: #E53935;
+      color: white;
+      padding: 12px 28px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      margin: 1rem 0;
+    }
+    .email-btn:hover { background: #c62828; }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #eee;
+      font-size: 13px;
+      color: #888;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">M</div>
+        <span class="logo-text">MedSetu</span>
+      </div>
+      <h1>Delete Your Account</h1>
+    </div>
+
+    <p>We're sorry to see you go. You can request permanent deletion of your MedSetu account and all associated data by following the steps below.</p>
+
+    <div class="warning-box">
+      <p>⚠️ <strong>Warning:</strong> Account deletion is permanent and cannot be undone. All your order history, saved addresses, and personal data will be permanently removed.</p>
+    </div>
+
+    <h2>What will be deleted</h2>
+    <ul>
+      <li>Your profile (name, phone number, email)</li>
+      <li>Saved delivery addresses</li>
+      <li>Order history and medicine records</li>
+      <li>All account preferences and settings</li>
+    </ul>
+
+    <h2>How to request account deletion</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <p style="margin:0;">Send an email to <strong>support@medsetu.app</strong> with subject line: <strong>"Account Deletion Request"</strong></p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <p style="margin:0;">Include your registered mobile number or email address in the email body.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <p style="margin:0;">We will process your request within <strong>7 working days</strong> and send a confirmation.</p>
+      </div>
+    </div>
+
+    <a href="mailto:support@medsetu.app?subject=Account%20Deletion%20Request&body=Hello%20MedSetu%20Team%2C%0A%0AI%20would%20like%20to%20permanently%20delete%20my%20account.%0A%0ARegistered%20Mobile%20Number%2FEmail%3A%20%5BYour%20number%20here%5D%0A%0AThank%20you." class="email-btn">
+      📧 Send Deletion Request
+    </a>
+
+    <h2>Need help instead?</h2>
+    <p>If you're facing any issue with the app, our support team is happy to help before you decide to delete your account.</p>
+    <p>Contact us: <a href="mailto:support@medsetu.app" style="color: #0C447C;">support@medsetu.app</a></p>
+
+    <footer>
+      &copy; 2026 MedSetu – SetuVerse. All rights reserved.
+    </footer>
+  </div>
+</body>
+</html>
