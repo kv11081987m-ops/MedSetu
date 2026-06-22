@@ -65,6 +65,7 @@ export default function PrescriptionUpload() {
     supabase
       .from('sellers')
       .select('id, store_name, address')
+      .eq('seller_type', 'retailer')
       .limit(10)
       .then(({ data }) => { if (data) setRealStores(data); });
   }, []);

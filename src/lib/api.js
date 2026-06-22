@@ -62,6 +62,7 @@ export async function fetchSellers(district = 'Deoria') {
     .from('sellers')
     .select('*')
     .eq('district', district)
+    .eq('seller_type', 'retailer')
     .order('rating', { ascending: false });
 
   return { data: data || [], error };
