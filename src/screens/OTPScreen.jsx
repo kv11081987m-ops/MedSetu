@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { createOrLoginUser, verifyStoredOTP, generateOTP, storeOTP } from '../lib/auth';
+import { verifyFirebaseOTP, sendFirebaseOTP } from '../lib/firebaseOTP';
 import { useAuth } from '../context/AuthContext';
 const OTP_LENGTH  = 6;
 const TIMER_START = 30;
@@ -11,8 +12,9 @@ export default function OTPScreen() {
   const location = useLocation();
   const { applyDevSession } = useAuth();
 
-  const phone  = location.state?.phone || '';
-  const devOtp = location.state?.otp   || null;
+  const phone  = location.state?.phone  || '';
+  const method = location.state?.method || null;
+  const devOtp = location.state?.otp    || null;
   const masked = phone ? phone.slice(0, 4).replace(/\d/g, 'X') + phone.slice(4) : 'XXXXXXXXXX';
 
   // Redirect if accessed directly without phone state
@@ -77,19 +79,33 @@ export default function OTPScreen() {
       return;
     }
 
-    const result = verifyStoredOTP(phone, code);
-    if (!result.valid) {
-      setError(result.message);
-      setOtp(Array(OTP_LENGTH).fill(''));
-      inputRefs.current[0]?.focus();
-      return;
-    }
-
     setLoading(true);
+    setError('');
+
     try {
-      applyDevSession(phone, 'customer');
-      await createOrLoginUser(phone);
-      navigate('/home', { replace: true });
+      if (method === 'firebase') {
+        const result = await verifyFirebaseOTP(code);
+        if (result.success) {
+          applyDevSession(phone, 'customer');
+          await createOrLoginUser(phone);
+          navigate('/home', { replace: true });
+        } else {
+          setError(result.error);
+          setOtp(Array(OTP_LENGTH).fill(''));
+          inputRefs.current[0]?.focus();
+        }
+      } else {
+        const result = verifyStoredOTP(phone, code);
+        if (!result.valid) {
+          setError(result.message);
+          setOtp(Array(OTP_LENGTH).fill(''));
+          inputRefs.current[0]?.focus();
+          return;
+        }
+        applyDevSession(phone, 'customer');
+        await createOrLoginUser(phone);
+        navigate('/home', { replace: true });
+      }
     } catch (err) {
       setError('Login mein dikkat: ' + err.message);
     } finally {
@@ -97,17 +113,24 @@ export default function OTPScreen() {
     }
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
     if (!canResend) return;
     if (!phone) { navigate('/login'); return; }
-    const newOtp = generateOTP();
-    storeOTP(phone, newOtp);
+
     setOtp(Array(OTP_LENGTH).fill(''));
     setTimeLeft(TIMER_START);
     setCanResend(false);
     setError('');
-    setResendMessage('Naya OTP generate ho gaya');
     inputRefs.current[0]?.focus();
+
+    if (method === 'firebase') {
+      const result = await sendFirebaseOTP(phone);
+      setResendMessage(result.success ? 'Naya OTP bhej diya' : 'OTP nahi gaya — dobara try karo');
+    } else {
+      const newOtp = generateOTP();
+      storeOTP(phone, newOtp);
+      setResendMessage('Naya OTP generate ho gaya');
+    }
   };
 
   return (
