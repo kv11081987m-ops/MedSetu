@@ -42,9 +42,9 @@ const MEDICINE_CATEGORIES = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────
-function getItemStatus(stock, expiryDate) {
-  if (stock === 0) return 'out';
-  if (stock <= 10) return 'low';
+function getItemStatus(available, expiryDate) {
+  if (available === 0) return 'out';
+  if (available <= 10) return 'low';
   if (expiryDate) {
     const monthsLeft = (new Date(expiryDate) - Date.now()) / (1000 * 60 * 60 * 24 * 30);
     if (monthsLeft <= 3) return 'expiring';
@@ -62,7 +62,9 @@ function formatExpiry(dateStr) {
 function mapInventoryItem(item, idx) {
   const { color, bg } = PALETTE[idx % PALETTE.length];
   const med = item.master_medicines || {};
-  const stock = item.stock_quantity ?? 0;
+  const stock    = item.stock_quantity    ?? 0;
+  const reserved = item.reserved_quantity ?? 0;
+  const available = stock - reserved;
   return {
     id:          item.id,
     initial:     (med.name || 'M')[0].toUpperCase(),
@@ -73,26 +75,31 @@ function mapInventoryItem(item, idx) {
     manufacturer: med.manufacturer || '',
     category:    med.category || 'Other',
     stock,
+    reserved,
+    available,
     maxStock:    Math.max(stock * 2, 60),
     mrp:         med.mrp_max || 0,
-    selling:     item.selling_price || 0,
+    selling:     item.selling_price,               // null stays null — pending rate
+    isPending:   item.selling_price == null,
     unit:        item.unit || 'strips',
     expiry:      formatExpiry(item.expiry_date),
     expiryRaw:   item.expiry_date || '',
     batchNumber: item.batch_number || '',
     isJanAushadhi: med.source === 'janaushadhi',
     requiresRx:  med.requires_prescription || false,
-    status:      getItemStatus(stock, item.expiry_date),
+    status:      getItemStatus(available, item.expiry_date),
+    minOrderQty: item.min_order_quantity ?? 1,
   };
 }
 
 // ─── EditModal (for editing existing inventory items) ─────────
-function EditModal({ item, onSave, onClose }) {
+function EditModal({ item, onSave, onClose, isWholesaler }) {
   const [formData, setFormData] = useState({
     stock:   String(item?.stock   ?? ''),
     selling: String(item?.selling ?? ''),
     expiry:  item?.expiryRaw || '',
     unit:    item?.unit || 'strips',
+    moq:     String(item?.minOrderQty ?? 1),
   });
 
   const set = (field) => (e) => setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -101,9 +108,10 @@ function EditModal({ item, onSave, onClose }) {
     if (!formData.stock.trim()) { alert('Stock quantity daalna zaroori hai'); return; }
     if (!formData.selling.trim()) { alert('Selling price daalna zaroori hai'); return; }
     onSave({
-      stock:         Number(formData.stock),
-      selling_price: Number(formData.selling),
-      expiry_date:   formData.expiry || null,
+      stock:              Number(formData.stock),
+      selling_price:      Number(formData.selling),
+      expiry_date:        formData.expiry || null,
+      min_order_quantity: isWholesaler ? (parseInt(formData.moq) || 1) : undefined,
     }, item.id);
   };
 
@@ -150,6 +158,17 @@ function EditModal({ item, onSave, onClose }) {
             onChange={set('expiry')} />
         </div>
 
+        {isWholesaler && (
+          <div style={s.fieldWrap}>
+            <label style={s.label}>Minimum Order Quantity (MOQ)</label>
+            <input style={s.input} type="number" min="1"
+              value={formData.moq} onChange={set('moq')} />
+            <p style={{ fontSize: '11px', color: '#888888', margin: '4px 0 0' }}>
+              Retailer kam se kam itne units order kar sakta hai
+            </p>
+          </div>
+        )}
+
         <button style={s.saveBtn} onClick={handleSubmit}>
           <Check size={16} color="#FFFFFF" />
           Update Karo
@@ -160,7 +179,7 @@ function EditModal({ item, onSave, onClose }) {
 }
 
 // ─── SearchModal ──────────────────────────────────────────────
-function SearchModal({ onSelectMedicine, onClose }) {
+function SearchModal({ onSelectMedicine, onClose, onRequestManual }) {
   const [query, setQuery]           = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading]       = useState(false);
@@ -218,7 +237,7 @@ function SearchModal({ onSelectMedicine, onClose }) {
               <div style={{ padding: '20px 0', textAlign: 'center' }}>
                 <p style={{ fontSize: '14px', color: '#888', margin: '0 0 12px' }}>"{query}" nahi mili database mein</p>
                 <button
-                  onClick={() => { onClose(); }}
+                  onClick={() => onRequestManual()}
                   style={{ ...s.saveBtn, backgroundColor: '#2563EB', fontSize: '13px', padding: '10px 20px', width: 'auto', display: 'inline-flex' }}>
                   Manually Request Karo
                 </button>
@@ -265,7 +284,7 @@ function SearchModal({ onSelectMedicine, onClose }) {
                 ))}
 
                 <div
-                  onClick={onClose}
+                  onClick={() => onRequestManual()}
                   style={{ padding: '14px 4px', textAlign: 'center', color: '#2563EB', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
                   + "{query}" nahi mili? Manually request karo
                 </div>
@@ -285,13 +304,14 @@ function SearchModal({ onSelectMedicine, onClose }) {
 }
 
 // ─── AddDetailsModal ──────────────────────────────────────────
-function AddDetailsModal({ medicine, onAdd, onClose }) {
+function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler }) {
   const [form, setForm] = useState({
-    sellingPrice: medicine?.mrp_max ? String(Math.round(medicine.mrp_max * 0.9)) : '',
-    stock:        '',
-    unit:         'strips',
-    expiryDate:   '',
-    batchNumber:  '',
+    sellingPrice:     medicine?.mrp_max ? String(Math.round(medicine.mrp_max * 0.9)) : '',
+    stock:            '',
+    unit:             'strips',
+    expiryDate:       '',
+    batchNumber:      '',
+    minOrderQuantity: '1',
   });
   const [saving, setSaving] = useState(false);
 
@@ -373,6 +393,17 @@ function AddDetailsModal({ medicine, onAdd, onClose }) {
           <input style={s.input} type="text" placeholder="e.g. B2024001"
             value={form.batchNumber} onChange={set('batchNumber')} />
         </div>
+
+        {isWholesaler && (
+          <div style={s.fieldWrap}>
+            <label style={s.label}>Minimum Order Quantity (MOQ)</label>
+            <input style={s.input} type="number" min="1" placeholder="1"
+              value={form.minOrderQuantity} onChange={set('minOrderQuantity')} />
+            <p style={{ fontSize: '11px', color: '#888888', margin: '4px 0 0' }}>
+              Retailer kam se kam itne units order kar sakta hai
+            </p>
+          </div>
+        )}
 
         <button style={{ ...s.saveBtn, opacity: saving ? 0.7 : 1 }} onClick={handleSubmit} disabled={saving}>
           <Check size={16} color="#FFFFFF" />
@@ -499,6 +530,7 @@ function BulkModal({ sellerId, onClose, onDone }) {
   const [csvData,       setCsvData]       = useState([]);
   const [uploadStatus,  setUploadStatus]  = useState('idle');
   const [errorMsg,      setErrorMsg]      = useState('');
+  const [results,       setResults]       = useState({ added: [], unmatched: [], failed: [] });
 
   const validateRow = (row) => {
     const errors = [];
@@ -543,23 +575,36 @@ function BulkModal({ sellerId, onClose, onDone }) {
     const validRows = csvData.filter((r) => r._valid);
     if (!validRows.length) return;
     setUploadStatus('uploading');
-    const records = validRows.map((r) => ({
-      name:          r.name.trim(),
-      brand:         r.brand?.trim()         || '',
-      category:      r.category?.trim()      || 'Tablets',
-      stock:         Number(r.stock)         || 0,
-      max_stock:     Number(r.max_stock)     || 60,
-      mrp:           Number(r.mrp)           || 0,
-      selling_price: Number(r.selling_price) || Number(r.mrp) || 0,
-      expiry_date:   r.expiry_date           || null,
-      seller_id:     sellerId,
-      is_available:  true,
-    }));
-    const BATCH = 50;
-    for (let i = 0; i < records.length; i += BATCH) {
-      const { error } = await supabase.from('medicines').insert(records.slice(i, i + BATCH));
-      if (error) { setErrorMsg(error.message); setUploadStatus('error'); return; }
+    const res = { added: [], unmatched: [], failed: [] };
+    for (const r of validRows) {
+      const { data: match, error: matchErr } = await supabase
+        .from('master_medicines')
+        .select('id, name')
+        .ilike('name', r.name.trim())
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      if (matchErr) { res.failed.push(r.name); continue; }
+      if (!match)   { res.unmatched.push(r.name); continue; }
+      try {
+        const rawExpiry = r.expiry_date?.trim() || '';
+        const expiryDate = rawExpiry
+          ? (rawExpiry.length === 7 ? rawExpiry + '-01' : rawExpiry)
+          : null;
+        await addToSellerInventory(match.id, {
+          sellingPrice:     Number(r.selling_price) || Number(r.mrp) || 0,
+          stock:            Number(r.stock)          || 0,
+          unit:             r.unit                   || 'strips',
+          expiryDate,
+          batchNumber:      r.batch_number           || null,
+          minOrderQuantity: r.min_order_quantity     || 1,
+        });
+        res.added.push(r.name);
+      } catch {
+        res.failed.push(r.name);
+      }
     }
+    setResults(res);
     setUploadStatus('done');
     onDone();
   };
@@ -576,11 +621,31 @@ function BulkModal({ sellerId, onClose, onDone }) {
         </div>
 
         {uploadStatus === 'done' && (
-          <div style={bs.centerBox}>
-            <span style={bs.bigEmoji}>✅</span>
-            <p style={bs.doneTitle}>{validCount} medicines add ho gayi!</p>
-            <p style={bs.doneSub}>Inventory update ho gayi hai</p>
-            <button style={bs.primaryBtn} onClick={onClose}>Done</button>
+          <div style={{ ...bs.centerBox, alignItems: 'flex-start' }}>
+            <p style={{ ...bs.doneTitle, alignSelf: 'center' }}>
+              ✅ {results.added.length} medicines add ho gayi!
+            </p>
+            {results.unmatched.length > 0 && (
+              <div style={{ width: '100%', marginTop: '10px' }}>
+                <p style={{ fontSize: '13px', color: '#E65100', fontWeight: '600', margin: '0 0 4px' }}>
+                  ⚠️ {results.unmatched.length} medicines master list mein nahi mili (manually add karein):
+                </p>
+                {results.unmatched.map((n, i) => (
+                  <p key={i} style={{ fontSize: '12px', color: '#555555', margin: '2px 0', paddingLeft: '8px' }}>• {n}</p>
+                ))}
+              </div>
+            )}
+            {results.failed.length > 0 && (
+              <div style={{ width: '100%', marginTop: '10px' }}>
+                <p style={{ fontSize: '13px', color: '#DC3545', fontWeight: '600', margin: '0 0 4px' }}>
+                  ❌ {results.failed.length} add nahi ho saki:
+                </p>
+                {results.failed.map((n, i) => (
+                  <p key={i} style={{ fontSize: '12px', color: '#555555', margin: '2px 0', paddingLeft: '8px' }}>• {n}</p>
+                ))}
+              </div>
+            )}
+            <button style={{ ...bs.primaryBtn, alignSelf: 'center', marginTop: '14px' }} onClick={onClose}>Done</button>
           </div>
         )}
 
@@ -719,11 +784,21 @@ function ItemCard({ item, onEdit, onDelete }) {
 
         <div style={s.stockInfoRow}>
           <span style={s.stockNum}>
-            Stock:{' '}
+            Available:{' '}
             <strong style={{ color: item.status === 'out' ? '#DC3545' : '#1A1A1A' }}>
-              {item.stock === 0 ? 'N/A' : `${item.stock} ${item.unit}`}
+              {item.available === 0 ? 'N/A' : `${item.available} ${item.unit}`}
             </strong>
+            {item.reserved > 0 && (
+              <span style={{ fontSize: '10px', color: '#888888', marginLeft: '6px' }}>
+                (कुल {item.stock}, {item.reserved} reserved)
+              </span>
+            )}
           </span>
+          {item.isPending && (
+            <span style={{ ...s.statusTag, color: '#B45309', backgroundColor: '#FEF3C7' }}>
+              ⏳ Rate Pending
+            </span>
+          )}
           {st.label && (
             <span style={{ ...s.statusTag, color: st.label.color, backgroundColor: st.label.bg }}>
               {item.status === 'low'      && <TrendingDown size={10} />}
@@ -742,7 +817,9 @@ function ItemCard({ item, onEdit, onDelete }) {
           <span style={s.priceText}>
             MRP <span style={s.mrpVal}>₹{item.mrp}</span>
             {' · '}
-            Sell <span style={s.sellVal}>₹{item.selling}</span>
+            {item.isPending
+              ? <span style={{ color: '#B45309', fontWeight: '700' }}>⏳ Rate set karein</span>
+              : <>Sell <span style={s.sellVal}>₹{item.selling}</span></>}
           </span>
           <span style={{
             ...s.expiryText,
@@ -772,6 +849,7 @@ export default function InventoryManagement() {
   const [inventory,     setInventory]     = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [sellerId,      setSellerId]      = useState(null);
+  const [sellerType,    setSellerType]    = useState(null);
 
   const [query,         setQuery]         = useState('');
   const [category,      setCategory]      = useState('Sab');
@@ -792,7 +870,10 @@ export default function InventoryManagement() {
     setLoading(true);
     try {
       const seller = await getCurrentSeller();
-      if (seller) setSellerId(seller.id);
+      if (seller) {
+        setSellerId(seller.id);
+        setSellerType(seller.seller_type);
+      }
       const data = await fetchSellerInventory();
       setInventory(data);
     } catch (err) {
@@ -803,6 +884,8 @@ export default function InventoryManagement() {
   };
 
   useEffect(() => { loadInventory(); }, []);
+
+  const isWholesaler = sellerType === 'wholesaler';
 
   // ── Edit existing item ────────────────────────────────────────
   const handleSave = async (formData, itemId) => {
@@ -859,7 +942,7 @@ export default function InventoryManagement() {
   };
 
   // ── Derived state ─────────────────────────────────────────────
-  const items = useMemo(() => inventory.map(mapInventoryItem), [inventory]);
+  const items = useMemo(() => (inventory || []).map(mapInventoryItem), [inventory]);
 
   const summary = useMemo(() => ({
     total:    items.length,
@@ -872,12 +955,12 @@ export default function InventoryManagement() {
     let list = items.filter((i) => {
       const matchCat = category === 'Sab' || i.category === category;
       const q = query.toLowerCase();
-      const matchQ = !q || i.name.toLowerCase().includes(q) || i.brand.toLowerCase().includes(q) || i.manufacturer.toLowerCase().includes(q);
+      const matchQ = !q || (i.name || '').toLowerCase().includes(q) || (i.brand || '').toLowerCase().includes(q) || (i.manufacturer || '').toLowerCase().includes(q);
       return matchCat && matchQ;
     });
     if (sort === 'Naam (A-Z)')       list = [...list].sort((a, b) => a.name.localeCompare(b.name));
-    if (sort === 'Low Stock Pehle')  list = [...list].sort((a, b) => a.stock - b.stock);
-    if (sort === 'Price')            list = [...list].sort((a, b) => a.selling - b.selling);
+    if (sort === 'Low Stock Pehle')  list = [...list].sort((a, b) => a.available - b.available);
+    if (sort === 'Price')            list = [...list].sort((a, b) => (a.selling ?? 0) - (b.selling ?? 0));
     if (sort === 'Expiry Date')      list = [...list].sort((a, b) => (a.expiryRaw || '').localeCompare(b.expiryRaw || ''));
     return list;
   }, [items, query, category, sort]);
@@ -1019,6 +1102,7 @@ export default function InventoryManagement() {
             item={editItem}
             onSave={handleSave}
             onClose={() => setEditItem(null)}
+            isWholesaler={isWholesaler}
           />
         )}
 
@@ -1036,6 +1120,7 @@ export default function InventoryManagement() {
           <SearchModal
             onSelectMedicine={handleSelectMedicine}
             onClose={() => setShowSearchModal(false)}
+            onRequestManual={() => { setShowSearchModal(false); setShowRequestModal(true); }}
           />
         )}
 
@@ -1045,6 +1130,7 @@ export default function InventoryManagement() {
             medicine={selectedMedicine}
             onAdd={handleAddToInventory}
             onClose={() => { setShowAddModal(false); setSelectedMedicine(null); }}
+            isWholesaler={isWholesaler}
           />
         )}
 

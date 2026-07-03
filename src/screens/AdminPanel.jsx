@@ -3,53 +3,36 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
+  fetchCommissionDelegation,
+  fetchPendingCommissionRequests,
+  approveCommissionRequest as approveCommissionRequestDb,
+  rejectCommissionRequest  as rejectCommissionRequestDb,
+} from '../lib/commission';
+import MedicineBandsTab from './MedicineBandsTab';
+import {
   Bell, Users, Store, ShoppingBag, IndianRupee, AlertTriangle,
   FileText, Settings, Download, CheckCircle, X, ChevronRight,
   LayoutDashboard, LogOut, Trash2, Power,
 } from 'lucide-react';
 
 // ─── Static Data ──────────────────────────────────────────────
-const METRIC_CARDS = [
-  { Icon: Users,         val: '1,247',   label: 'Total Users',     sub: '+23 aaj',            subColor: '#1A6B3C', color: '#1A6B3C', bg: '#E8F5EE' },
-  { Icon: Store,         val: '34',      label: 'Active Sellers',  sub: '3 pending approval', subColor: '#E65100', color: '#2563EB', bg: '#EAF2FF' },
-  { Icon: ShoppingBag,   val: '89',      label: 'Aaj Ke Orders',   sub: '+12% kal se',         subColor: '#1A6B3C', color: '#7C3AED', bg: '#F3EEFF' },
-  { Icon: IndianRupee,   val: '₹45,280', label: 'Aaj Ka GMV',      sub: '+18% kal se',         subColor: '#1A6B3C', color: '#E65100', bg: '#FFF3E0' },
-  { Icon: AlertTriangle, val: '7',       label: 'Open Disputes',   sub: '2 urgent',            subColor: '#DC3545', color: '#DC3545', bg: '#FFEBEE' },
-];
+const DISTRICT_COLORS = ['#1A6B3C', '#2563EB', '#E65100', '#7C3AED', '#888888'];
 
-const WEEK_BARS = [
-  { day: 'Mon', val: 45 }, { day: 'Tue', val: 67 }, { day: 'Wed', val: 89 },
-  { day: 'Thu', val: 72 }, { day: 'Fri', val: 95 }, { day: 'Sat', val: 110 }, { day: 'Sun', val: 88 },
-];
-const MAX_BAR = 110;
-
-const DISTRICTS = [
-  { name: 'Deoria',      sellers: 18, pct: 75, color: '#1A6B3C' },
-  { name: 'Gorakhpur',   sellers: 10, pct: 42, color: '#2563EB' },
-  { name: 'Kushinagar',  sellers: 4,  pct: 17, color: '#E65100' },
-  { name: 'Maharajganj', sellers: 2,  pct: 8,  color: '#888888' },
-];
-
-const TOP_MEDS = [
-  'Paracetamol — 234 orders', 'ORS Powder — 187 orders',
-  'Azithromycin — 156 orders', 'BP Machine — 89 orders',
-];
-
-const ACTIVITY = [
-  { color: '#1A6B3C', text: 'New seller approved: Ram Medical, Deoria',       time: '10 min ago'      },
-  { color: '#2563EB', text: 'Order #MED-2024-089 delivered',                   time: '15 min ago'      },
-  { color: '#F59E0B', text: 'Dispute #D-089 opened',                          time: '32 min ago'      },
-  { color: '#1A6B3C', text: 'New user registered: Sunita Devi',               time: '45 min ago'      },
-  { color: '#DC3545', text: 'Seller rejected: XYZ Medical (incomplete docs)', time: '1 ghanta pehle'  },
-];
+const getTimeAgo = (dateStr) => {
+  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+  if (diff < 60)    return `${diff} sec pehle`;
+  if (diff < 3600)  return `${Math.floor(diff / 60)} min pehle`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} ghante pehle`;
+  return `${Math.floor(diff / 86400)} din pehle`;
+};
 
 const QUICK_ACTIONS = [
-  { Icon: Users,    label: 'Users Manage',      color: '#2563EB', bg: '#EAF2FF' },
-  { Icon: Store,    label: 'Sellers Manage',    color: '#1A6B3C', bg: '#E8F5EE' },
-  { Icon: FileText, label: 'Reports',           color: '#7C3AED', bg: '#F3EEFF' },
-  { Icon: Settings, label: 'Platform Settings', color: '#555555', bg: '#F0F0F0' },
-  { Icon: Bell,     label: 'Notif Send',        color: '#E65100', bg: '#FFF3E0' },
-  { Icon: Download, label: 'Data Export',       color: '#0D9488', bg: '#CCFBF1' },
+  { Icon: Users,    label: 'Users Manage',      color: '#2563EB', bg: '#EAF2FF', tab: null   },
+  { Icon: Store,    label: 'Sellers Manage',    color: '#1A6B3C', bg: '#E8F5EE', tab: 'sellers'  },
+  { Icon: FileText, label: 'Reports',           color: '#7C3AED', bg: '#F3EEFF', tab: null   },
+  { Icon: Settings, label: 'Platform Settings', color: '#555555', bg: '#F0F0F0', tab: 'settings' },
+  { Icon: Bell,     label: 'Notif Send',        color: '#E65100', bg: '#FFF3E0', tab: null   },
+  { Icon: Download, label: 'Data Export',       color: '#0D9488', bg: '#CCFBF1', tab: null   },
 ];
 
 const NAV_TABS_DEF = [
@@ -58,22 +41,6 @@ const NAV_TABS_DEF = [
   { id: 'orders',    Icon: ShoppingBag,     label: 'Orders'    },
   { id: 'disputes',  Icon: AlertTriangle,   label: 'Disputes'  },
   { id: 'settings',  Icon: Settings,        label: 'Settings'  },
-];
-
-
-const ALL_ORDERS = [
-  { id: 'MED-2024-093', customer: 'Geeta Kumari', store: 'Ram Medical Store',  amount: '₹567',   status: 'pending',    time: 'Aaj, 2:30 PM'  },
-  { id: 'MED-2024-092', customer: 'Mohan Lal',    store: 'Shyam Medical',      amount: '₹1,200', status: 'processing', time: 'Aaj, 1:45 PM'  },
-  { id: 'MED-2024-091', customer: 'Sunita Devi',  store: 'City Medical',       amount: '₹234',   status: 'processing', time: 'Aaj, 12:20 PM' },
-  { id: 'MED-2024-090', customer: 'Priya Singh',  store: 'Arogya Medical',     amount: '₹892',   status: 'delivered',  time: 'Aaj, 11:05 AM' },
-  { id: 'MED-2024-089', customer: 'Ramesh Kumar', store: 'Ram Medical Store',  amount: '₹450',   status: 'delivered',  time: 'Kal, 4:30 PM'  },
-  { id: 'MED-2024-088', customer: 'Raj Kumar',    store: 'City Medical Store', amount: '₹320',   status: 'cancelled',  time: 'Kal, 10:00 AM' },
-];
-
-const ALL_DISPUTES_INIT = [
-  { id: 'D-089', customer: 'Ramesh Kumar', seller: 'Arogya Medical Hall', issue: 'Wrong medicine delivered', amount: '450', status: 'open'        },
-  { id: 'D-088', customer: 'Priya Singh',  seller: 'City Medical Store',  issue: 'Delivery nahi hua',        amount: '892', status: 'in-progress'  },
-  { id: 'D-087', customer: 'Mohan Lal',   seller: 'Ram Medical Store',   issue: 'Medicine expired thi',     amount: '234', status: 'resolved'     },
 ];
 
 
@@ -290,6 +257,41 @@ function DisputeTabCard({ d, onResolve }) {
   );
 }
 
+// ─── Commission Request Card (delegated approval) ──────────────
+function CommissionRequestCard({ req, onApprove, onReject }) {
+  const [deciding, setDeciding] = useState(false);
+  const pendingText = req.commission_pending_mode === 'tier'
+    ? 'Tier (Margin-Based)'
+    : `Flat${req.commission_pending_rate != null ? ` ${req.commission_pending_rate}%` : ' (rate aap decide karo)'}`;
+
+  const handleApprove = async () => { setDeciding(true); await onApprove(req.id, req.commission_pending_mode, req.commission_pending_rate); };
+  const handleReject  = async () => { setDeciding(true); await onReject(req.id); };
+
+  return (
+    <div style={{ ...s.sellerCard, borderLeftColor: '#E65100' }}>
+      <div style={s.cardTopRow}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={s.sellerName}>{req.store_name}</p>
+          <p style={s.sellerSub}>{req.seller_type === 'wholesaler' ? 'Wholesaler' : 'Retailer'}</p>
+        </div>
+        <StatusBadge status="pending" />
+      </div>
+      <div style={s.infoRow}>
+        <span style={s.infoLabel}>Request:</span>
+        <span style={s.infoVal}>{pendingText}</span>
+      </div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button style={{ ...s.approveBtn, flex: 1, padding: '9px 16px', fontSize: '12px', opacity: deciding ? 0.7 : 1 }} onClick={handleApprove} disabled={deciding}>
+          <CheckCircle size={13} color="#FFFFFF" /> Approve
+        </button>
+        <button style={{ ...s.rejectBtn, flex: 1, padding: '9px 16px', fontSize: '12px', opacity: deciding ? 0.7 : 1 }} onClick={handleReject} disabled={deciding}>
+          <X size={13} color="#DC3545" /> Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── DB mappers ───────────────────────────────────────────────
 const mapDispute = (d, i) => ({
   id:       `D-${String(d.id).slice(0, 8).toUpperCase()}`,
@@ -304,7 +306,7 @@ const mapDispute = (d, i) => ({
 
 const mapOrderCard = (order) => ({
   id:       order.order_number || String(order.id).slice(0, 8).toUpperCase(),
-  customer: order.customer_name || 'Customer',
+  customer: order.users?.name || 'Customer',
   store:    order.sellers?.store_name || 'Store',
   amount:   `₹${(order.final_amount || 0).toLocaleString('en-IN')}`,
   status:   order.status,
@@ -327,10 +329,17 @@ export default function AdminPanel() {
   const navigate = useNavigate();
   const { handleLogout: authLogout } = useAuth();
 
+  // Logged-in admin's own identity (medsetu_user, set by AuthContext at SIGNED_IN).
+  const adminUser = (() => {
+    try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; }
+  })();
+  const adminEmail  = adminUser.email || 'admin@medsetu.in';
+  const adminInitial = adminEmail[0]?.toUpperCase() || 'A';
+
   // ── DB-driven state ──────────────────────────────────────────
   const [stats, setStats] = useState({
     totalUsers: 0, activeSellers: 0, pendingSellers: 0,
-    todayOrders: 0, todayGMV: 0, openDisputes: 0,
+    todayOrders: 0, todayGMV: 0, openDisputes: 0, totalCommission: 0,
   });
   const [pendingSellers,  setPendingSellers]  = useState([]);
   const [allDbSellers,    setAllDbSellers]    = useState([]);
@@ -343,14 +352,28 @@ export default function AdminPanel() {
   const [activeTab,     setActiveTab]    = useState('dashboard');
   const [sellerFilter,  setSellerFilter] = useState('sab');
   const [orderFilter,   setOrderFilter]  = useState('sab');
-  const [allDisputes,   setAllDisputes]  = useState(ALL_DISPUTES_INIT);
+  const [allDisputes,   setAllDisputes]  = useState([]);
   const [disputeFilter, setDisputeFilter]= useState('open');
   const [notifications, setNotifications]= useState([]);
   const [notifOpen,     setNotifOpen]    = useState(false);
+  const [commissionDelegated,  setCommissionDelegated]  = useState(false);
+  const [pendingCommRequests,  setPendingCommRequests]  = useState([]);
+  const [weekBars,      setWeekBars]     = useState([]);
+  const [districtStats, setDistrictStats]= useState([]);
+  const [topMeds,       setTopMeds]      = useState([]);
+  const [activity,      setActivity]     = useState([]);
 
   // ── Fetch ────────────────────────────────────────────────────
   const fetchAdminData = async () => {
     try {
+      // Commission approval requests — only relevant if SuperAdmin delegated it.
+      const delegated = await fetchCommissionDelegation();
+      setCommissionDelegated(delegated);
+      if (delegated) {
+        const { data: pendingComm } = await fetchPendingCommissionRequests();
+        setPendingCommRequests(pendingComm);
+      }
+
       const { count: userCount } = await supabase
         .from('users').select('*', { count: 'exact', head: true });
 
@@ -360,24 +383,96 @@ export default function AdminPanel() {
       setPendingSellers(pending);
       setAllDbSellers(sellers || []);
 
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('*, sellers(store_name)')
-        .gte('created_at', today.toISOString())
-        .order('created_at', { ascending: false });
-      setAllOrders(orders || []);
+      // District Coverage — real seller counts per district, top 5.
+      const byDistrict = {};
+      (sellers || []).forEach((s) => {
+        const name = s.district || 'Other';
+        byDistrict[name] = (byDistrict[name] || 0) + 1;
+      });
+      const districtList = Object.entries(byDistrict)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+      const maxDistrictCount = districtList[0]?.count || 1;
+      setDistrictStats(districtList.map((d, i) => ({
+        ...d,
+        pct:   Math.round((d.count / maxDistrictCount) * 100),
+        color: DISTRICT_COLORS[i % DISTRICT_COLORS.length],
+      })));
 
-      const gmv = orders?.reduce((sum, o) => sum + (o.final_amount || 0), 0) || 0;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+
+      // Orders tab — latest 100 orders regardless of date (was wrongly
+      // scoped to "today" before, despite the tab being titled "Saare Orders").
+      const { data: fullOrders } = await supabase
+        .from('orders')
+        .select('*, sellers(store_name), users(name)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      setAllOrders(fullOrders || []);
+
+      // Today-only slice for the dashboard's "Aaj Ke Orders" / GMV stats.
+      const { data: todayOrders } = await supabase
+        .from('orders')
+        .select('final_amount, status, created_at')
+        .gte('created_at', today.toISOString());
+      const gmv = (todayOrders || []).reduce((sum, o) => sum + (o.final_amount || 0), 0);
+
+      // Platform Overview chart — real order counts for the last 7 calendar days.
+      const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 6);
+      const { data: weekOrders } = await supabase
+        .from('orders')
+        .select('created_at')
+        .gte('created_at', weekAgo.toISOString());
+      const dayBuckets = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(today); d.setDate(d.getDate() - i);
+        dayBuckets.push({ key: d.toDateString(), day: d.toLocaleDateString('en-IN', { weekday: 'short' }), val: 0 });
+      }
+      (weekOrders || []).forEach((o) => {
+        const key = new Date(o.created_at).toDateString();
+        const bucket = dayBuckets.find((b) => b.key === key);
+        if (bucket) bucket.val += 1;
+      });
+      setWeekBars(dayBuckets);
+
+      // Top Medicines — most-ordered items in the last 30 days.
+      const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
+      const { data: recentItems } = await supabase
+        .from('order_items')
+        .select('name, created_at')
+        .gte('created_at', monthAgo.toISOString());
+      const medCounts = {};
+      (recentItems || []).forEach((it) => {
+        const name = it.name || 'Unknown';
+        medCounts[name] = (medCounts[name] || 0) + 1;
+      });
+      setTopMeds(
+        Object.entries(medCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([name, count]) => `${name} — ${count} orders`)
+      );
+
+      // Total platform commission (all-time, delivered orders) — same
+      // query SuperAdminPanel#loadStats uses for its revenue figure.
+      const { data: commData } = await supabase
+        .from('orders')
+        .select('commission_amount')
+        .eq('status', 'delivered')
+        .not('commission_amount', 'is', null);
+      const totalCommission = (commData || []).reduce((sum, o) => sum + (o.commission_amount || 0), 0);
 
       // Fetch disputes (table may not exist — fail silently)
       let openDisputeCount = 0;
+      let dbDisputesRaw = [];
       try {
         const { data: dbDisputes } = await supabase
           .from('disputes')
           .select('*, users(name), sellers(store_name)')
           .order('created_at', { ascending: false });
         if (dbDisputes && dbDisputes.length > 0) {
+          dbDisputesRaw = dbDisputes;
           const mappedAll  = dbDisputes.map(mapDispute);
           const openOnly   = mappedAll.filter((d) => d.status === 'open');
           openDisputeCount = openOnly.length;
@@ -386,13 +481,35 @@ export default function AdminPanel() {
         }
       } catch {}
 
+      // Recent Activity — merged real events from sellers/orders/disputes
+      // already fetched above (no extra queries), newest first, top 5.
+      const activityEvents = [
+        ...active
+          .filter((s) => s.updated_at)
+          .map((s) => ({ color: '#1A6B3C', text: `Seller approved: ${s.store_name}`, ts: s.updated_at })),
+        ...(fullOrders || [])
+          .filter((o) => o.status === 'delivered')
+          .map((o) => ({ color: '#2563EB', text: `Order #${o.order_number || o.id} delivered`, ts: o.updated_at || o.created_at })),
+        ...dbDisputesRaw.map((d) => ({
+          color: d.status === 'open' ? '#DC3545' : '#F59E0B',
+          text: `Dispute #${String(d.id).slice(0, 8).toUpperCase()} ${d.status === 'open' ? 'opened' : d.status}`,
+          ts: d.created_at,
+        })),
+      ]
+        .filter((e) => e.ts)
+        .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+        .slice(0, 5)
+        .map((e) => ({ color: e.color, text: e.text, time: getTimeAgo(e.ts) }));
+      setActivity(activityEvents);
+
       setStats({
-        totalUsers:    userCount  || 0,
-        activeSellers: active.length,
-        pendingSellers:pending.length,
-        todayOrders:   orders?.length || 0,
-        todayGMV:      gmv,
-        openDisputes:  openDisputeCount,
+        totalUsers:      userCount  || 0,
+        activeSellers:   active.length,
+        pendingSellers:  pending.length,
+        todayOrders:     todayOrders?.length || 0,
+        todayGMV:        gmv,
+        openDisputes:    openDisputeCount,
+        totalCommission,
       });
     } catch (err) {
       console.error('Admin fetch:', err);
@@ -433,6 +550,21 @@ export default function AdminPanel() {
     }
   };
 
+  // ── Commission requests — only reachable when SuperAdmin has delegated
+  // approval (commissionDelegated). Same DB logic as SuperAdminPanel, shared
+  // via lib/commission.js.
+  const handleApproveCommission = async (sellerId, pendingMode, pendingRate) => {
+    const { error } = await approveCommissionRequestDb(sellerId, pendingMode, pendingRate);
+    if (error) { alert('Approve nahi hua: ' + error.message); return; }
+    setPendingCommRequests((prev) => prev.filter((r) => r.id !== sellerId));
+  };
+
+  const handleRejectCommission = async (sellerId) => {
+    const { error } = await rejectCommissionRequestDb(sellerId);
+    if (error) { alert('Reject nahi hua: ' + error.message); return; }
+    setPendingCommRequests((prev) => prev.filter((r) => r.id !== sellerId));
+  };
+
   const handleResolve       = (id) => setDisputes((d)  => d.filter((x) => x.id !== id));
   const toggleSetting       = (key)=> setSettings((prev)=> ({ ...prev, [key]: !prev[key] }));
   const handleResolveTab    = (id) => setAllDisputes((prev) => prev.map((d) => d.id === id ? { ...d, status: 'resolved' } : d));
@@ -442,7 +574,8 @@ export default function AdminPanel() {
   const handleBellClick = () => setNotifOpen((prev) => !prev);
   const handleLogout  = async () => { await authLogout(); navigate('/login'); };
 
-  const totalWeek = WEEK_BARS.reduce((a, b) => a + b.val, 0);
+  const totalWeek = weekBars.reduce((a, b) => a + b.val, 0);
+  const maxBar     = Math.max(1, ...weekBars.map((b) => b.val));
 
   const mappedSellers    = allDbSellers.map(mapSellerList);
   const filteredSellers  = sellerFilter === 'sab' ? mappedSellers : mappedSellers.filter((s) => s.status === sellerFilter);
@@ -453,9 +586,6 @@ export default function AdminPanel() {
   // ─── Tab renderers ────────────────────────────────────────
   const renderDashboard = () => (
     <>
-      <div style={{ backgroundColor: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: '10px', padding: '8px 14px', margin: '0 0 4px', fontSize: '12px', color: '#E65100', textAlign: 'center', fontWeight: '600' }}>
-        ⚠️ Kuch data abhi demo hai — real data jald aayega
-      </div>
       <div style={s.hScroll}>
         {[
           { Icon: Users,         val: stats.totalUsers.toLocaleString('en-IN'), label: 'Total Users',    sub: 'Registered users',                        subColor: '#1A6B3C', color: '#1A6B3C', bg: '#E8F5EE' },
@@ -490,41 +620,74 @@ export default function AdminPanel() {
         )}
       </div>
 
+      {commissionDelegated && (
+        <div style={s.section}>
+          <div style={s.sectionHead}>
+            <div style={s.titleRow}>
+              <span style={s.orangeDot} />
+              <span style={s.sectionTitle}>Commission Requests</span>
+            </div>
+            <span style={s.sectionSub}>{pendingCommRequests.length} pending</span>
+          </div>
+          {pendingCommRequests.length === 0 ? (
+            <div style={s.emptyCard}><CheckCircle size={28} color="#1A6B3C" /><p style={s.emptyText}>Koi pending commission request nahi</p></div>
+          ) : (
+            pendingCommRequests.map((req) => (
+              <CommissionRequestCard key={req.id} req={req} onApprove={handleApproveCommission} onReject={handleRejectCommission} />
+            ))
+          )}
+        </div>
+      )}
+
+      {commissionDelegated && (
+        <div style={s.whiteCard}>
+          <MedicineBandsTab />
+        </div>
+      )}
+
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Platform Overview</p>
         <div>
           <div style={s.chartRow}>
-            {WEEK_BARS.map(({ day, val }) => (
-              <div key={day} style={s.barCol}>
+            {weekBars.map(({ key, day, val }) => (
+              <div key={key} style={s.barCol}>
                 <span style={s.barVal}>{val}</span>
                 <div style={s.barTrack}>
-                  <div style={{ ...s.barFill, height: `${Math.round((val / MAX_BAR) * 80)}px` }} />
+                  <div style={{ ...s.barFill, height: `${Math.round((val / maxBar) * 80)}px` }} />
                 </div>
                 <span style={s.barDay}>{day}</span>
               </div>
             ))}
           </div>
-          <p style={s.chartTotal}>This Week: <strong>{totalWeek} orders</strong></p>
+          <p style={s.chartTotal}>Last 7 Days: <strong>{totalWeek} orders</strong></p>
         </div>
         <div>
           <p style={s.subTitle}>District Coverage</p>
-          {DISTRICTS.map(({ name, sellers: cnt, pct, color }) => (
-            <div key={name} style={s.distRow}>
-              <div style={s.distMeta}>
-                <span style={s.distName}>{name}</span>
-                <span style={s.distCount}>{cnt} sellers</span>
+          {districtStats.length === 0 ? (
+            <p style={{ fontSize: '12px', color: '#AAAAAA', margin: 0 }}>Abhi koi seller registered nahi</p>
+          ) : (
+            districtStats.map(({ name, count, pct, color }) => (
+              <div key={name} style={s.distRow}>
+                <div style={s.distMeta}>
+                  <span style={s.distName}>{name}</span>
+                  <span style={s.distCount}>{count} sellers</span>
+                </div>
+                <div style={s.progressTrack}>
+                  <div style={{ ...s.progressFill, width: `${pct}%`, backgroundColor: color }} />
+                </div>
               </div>
-              <div style={s.progressTrack}>
-                <div style={{ ...s.progressFill, width: `${pct}%`, backgroundColor: color }} />
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
         <div>
-          <p style={s.subTitle}>Top Medicines</p>
-          <div style={s.pillRow}>
-            {TOP_MEDS.map((m) => <span key={m} style={s.medPill}>{m}</span>)}
-          </div>
+          <p style={s.subTitle}>Top Medicines (Last 30 Din)</p>
+          {topMeds.length === 0 ? (
+            <p style={{ fontSize: '12px', color: '#AAAAAA', margin: 0 }}>Abhi koi order nahi is period mein</p>
+          ) : (
+            <div style={s.pillRow}>
+              {topMeds.map((m) => <span key={m} style={s.medPill}>{m}</span>)}
+            </div>
+          )}
         </div>
       </div>
 
@@ -545,24 +708,32 @@ export default function AdminPanel() {
 
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Recent Activity</p>
-        <div style={s.timeline}>
-          {ACTIVITY.map(({ color, text, time }, i) => (
-            <div key={i} style={s.timelineRow}>
-              <div style={{ ...s.timelineDot, backgroundColor: color }} />
-              <div style={s.timelineContent}>
-                <p style={s.timelineText}>{text}</p>
-                <p style={s.timelineTime}>{time}</p>
+        {activity.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#AAAAAA', margin: 0 }}>Abhi koi recent activity nahi</p>
+        ) : (
+          <div style={s.timeline}>
+            {activity.map(({ color, text, time }, i) => (
+              <div key={i} style={s.timelineRow}>
+                <div style={{ ...s.timelineDot, backgroundColor: color }} />
+                <div style={s.timelineContent}>
+                  <p style={s.timelineText}>{text}</p>
+                  <p style={s.timelineTime}>{time}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Quick Actions</p>
         <div style={s.actionGrid}>
-          {QUICK_ACTIONS.map(({ Icon, label, color, bg }) => (
-            <button key={label} style={{ ...s.actionBtn, backgroundColor: bg }}>
+          {QUICK_ACTIONS.map(({ Icon, label, color, bg, tab }) => (
+            <button
+              key={label}
+              style={{ ...s.actionBtn, backgroundColor: bg }}
+              onClick={() => tab ? setActiveTab(tab) : alert('Yeh feature jald aayega!')}
+            >
               <Icon size={22} color={color} />
               <span style={{ ...s.actionLabel, color }}>{label}</span>
             </button>
@@ -689,10 +860,11 @@ export default function AdminPanel() {
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Platform Info</p>
         {[
-          ['App Version',    '1.0.0'],
-          ['Total Users',    stats.totalUsers.toLocaleString('en-IN')],
-          ['Active Sellers', stats.activeSellers],
-          ['Aaj Ka GMV',     `₹${stats.todayGMV.toLocaleString('en-IN')}`],
+          ['App Version',        '1.0.0'],
+          ['Total Users',        stats.totalUsers.toLocaleString('en-IN')],
+          ['Active Sellers',     stats.activeSellers],
+          ['Aaj Ka GMV',         `₹${stats.todayGMV.toLocaleString('en-IN')}`],
+          ['Total Commission',   `₹${stats.totalCommission.toLocaleString('en-IN')}`],
         ].map(([label, val]) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #F5F5F5' }}>
             <span style={{ fontSize: '14px', color: '#888888' }}>{label}</span>
@@ -718,7 +890,7 @@ export default function AdminPanel() {
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Admin Profile</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {[['Admin', 'Super Admin'], ['Email', 'admin@medsetu.in']].map(([label, val]) => (
+          {[['Role', 'Admin'], ['Email', adminEmail]].map(([label, val]) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '13px', color: '#888888' }}>{label}</span>
               <span style={{ fontSize: '13px', fontWeight: '700', color: '#1A1A1A' }}>{val}</span>
@@ -740,7 +912,7 @@ export default function AdminPanel() {
         <div style={s.header}>
           <div>
             <p style={s.headerTitle}>MedSetu Admin</p>
-            <p style={s.headerSub}>Super Admin</p>
+            <p style={s.headerSub}>Admin</p>
           </div>
           <div style={s.headerRight}>
             <button style={s.iconBtn} onClick={handleBellClick}>
@@ -749,7 +921,7 @@ export default function AdminPanel() {
                 {unreadCount > 0 && <span style={s.notifBadge}>{unreadCount}</span>}
               </div>
             </button>
-            <div style={s.avatar}><span style={s.avatarLetter}>A</span></div>
+            <div style={s.avatar}><span style={s.avatarLetter}>{adminInitial}</span></div>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getCurrentUser } from '../lib/auth';
 
@@ -6,6 +6,19 @@ const AuthContext = createContext({});
 
 // ── Dev session helpers (sessionStorage) ──────────────────────
 const DEV_KEY = 'medsetu_dev';
+
+// Single source of truth for SuperAdmin identity — checked against the
+// authenticated Supabase session email, independent of any localStorage flag
+// (which Google OAuth logins bypass since the email isn't known pre-redirect).
+export const SUPER_ADMIN_EMAIL = 'kv11081987m@gmail.com';
+
+// Module-level (not React state) — a plain side-channel flag any file can set
+// right before calling supabase.auth.signOut(), so the SIGNED_OUT handler
+// below can tell a real, user-initiated logout apart from a spurious
+// SIGNED_OUT that Supabase's client can emit on its own during a token-
+// refresh hiccup (network blip, multi-tab session contention). Doesn't need
+// to be a React ref since it isn't tied to a single component instance.
+export const intentionalSignOut = { current: false };
 
 export function setDevSession(phone, role) {
   sessionStorage.setItem(DEV_KEY, JSON.stringify({ phone, role }));
@@ -29,10 +42,27 @@ function getSavedRole() {
 
 // ── Provider ───────────────────────────────────────────────────
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null);
+  const [user, setUser]             = useState(null);
   const [devSession, setDevSessionState] = useState(getDevSession);
-  const [userRole, setUserRole] = useState(getSavedRole);
-  const [loading, setLoading]  = useState(true);
+  const [userRole, setUserRole]     = useState(getSavedRole);
+  const [loading, setLoading]       = useState(true);
+  const [authResolved, setAuthResolved] = useState(false);
+
+  // When a user lands via OAuth redirect, the URL has ?code=... (PKCE) or
+  // #access_token=... (implicit). Supabase fires INITIAL_SESSION with null
+  // BEFORE exchanging the code, so we must wait for SIGNED_IN to resolve auth.
+  const pendingOAuthRef = useRef(
+    new URLSearchParams(window.location.search).has('code') ||
+    window.location.hash.includes('access_token=')
+  );
+  const authResolvedRef = useRef(false);
+
+  const markResolved = () => {
+    if (!authResolvedRef.current) {
+      authResolvedRef.current = true;
+      setAuthResolved(true);
+    }
+  };
 
   useEffect(() => {
     // Initial user load — clear stale role if no real session exists
@@ -47,9 +77,12 @@ export function AuthProvider({ children }) {
         }
         setUser(u);
         setLoading(false);
+        // Only resolve here when not waiting for an OAuth code exchange
+        if (!pendingOAuthRef.current) markResolved();
       })
       .catch(() => {
         setLoading(false);
+        if (!pendingOAuthRef.current) markResolved();
       });
 
     // Listen for auth state changes (login / logout / magic link callback)
@@ -59,22 +92,66 @@ export function AuthProvider({ children }) {
         setLoading(false);
 
         if (event === 'SIGNED_OUT') {
-          localStorage.removeItem('medsetu_user');
-          localStorage.removeItem('medsetu_role');
-          localStorage.removeItem('staff_pending_role');
+          if (intentionalSignOut.current) {
+            // Real logout (button click, staff-rejection kick-out) — full cleanup.
+            intentionalSignOut.current = false;
+            localStorage.removeItem('medsetu_user');
+            localStorage.removeItem('medsetu_role');
+            localStorage.removeItem('staff_pending_role');
+          } else {
+            // Spurious SIGNED_OUT nobody asked for — most likely Supabase's
+            // client recovering from a token-refresh hiccup, about to fire a
+            // fresh SIGNED_IN moments later. Do NOT wipe medsetu_role/
+            // medsetu_user: ProtectedRoute's lsLoggedIn fallback (App.jsx)
+            // needs medsetu_user intact to avoid a soft redirect to /login
+            // during this window, and the SIGNED_IN guards below need
+            // medsetu_role intact to recognize "same role, no redirect
+            // needed" instead of hard-reloading like a fresh login.
+            console.warn('[Auth] Unexpected SIGNED_OUT — preserving session state, likely to self-recover.');
+          }
+          markResolved();
           return;
+        }
+
+        // INITIAL_SESSION: resolve immediately unless we're mid-OAuth code exchange
+        if (event === 'INITIAL_SESSION' && !pendingOAuthRef.current) {
+          markResolved();
         }
 
         if (event === 'SIGNED_IN' && session) {
           const emailUser   = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
-          // ── 1. Super Admin ────────────────────────────────────
+          // ── 0. Super Admin — email is the source of truth ─────
+          // Works regardless of entry point (Google OAuth, magic link, any
+          // role tab) since it checks the authenticated session email
+          // directly instead of relying on a localStorage flag that Google
+          // OAuth never sets (email isn't known until after the redirect).
+          if (emailUser.email === SUPER_ADMIN_EMAIL) {
+            const alreadySuperAdmin = localStorage.getItem('medsetu_role') === 'super_admin';
+            localStorage.setItem('medsetu_role', 'super_admin');
+            localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
+            localStorage.removeItem('staff_pending_role');
+            setUserRole('super_admin');
+            markResolved();
+            // Only hard-redirect on a genuinely fresh sign-in. Supabase
+            // re-fires SIGNED_IN for an already-active session (tab focus,
+            // token refresh) — without this guard that repeat event forced
+            // a full-page reload (blink) and yanked the SuperAdmin back to
+            // /super-admin from wherever they currently were, every time.
+            if (!alreadySuperAdmin) {
+              window.location.href = '/super-admin';
+            }
+            return;
+          }
+
+          // ── 1. Super Admin via pendingRole (secondary safety path) ──
           if (pendingRole === 'super_admin') {
             localStorage.setItem('medsetu_role', 'super_admin');
             localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
             localStorage.removeItem('staff_pending_role');
             setUserRole('super_admin');
+            markResolved();
             window.location.href = '/super-admin';
             return;
           }
@@ -95,7 +172,7 @@ export function AuthProvider({ children }) {
                 .maybeSingle();
               if (wl?.role) staffRole = wl.role;
             } catch {}
-          } else if (staffRole === 'seller' || staffRole === 'pharmacist') {
+          } else if (staffRole === 'seller' || staffRole === 'pharmacist' || staffRole === 'admin') {
             // pendingRole set hai — verify whitelist approval
             const { data: wl } = await supabase
               .from('staff_whitelist')
@@ -105,8 +182,10 @@ export function AuthProvider({ children }) {
               .eq('is_approved', true)
               .maybeSingle();
             if (!wl) {
+              intentionalSignOut.current = true;
               await supabase.auth.signOut();
               localStorage.removeItem('staff_pending_role');
+              markResolved();
               alert('❌ Aapka account approved nahi hai.\n\nPehle registration form bharke approval ka wait karo.');
               window.location.href = '/staff-login';
               return;
@@ -114,26 +193,39 @@ export function AuthProvider({ children }) {
           }
 
           if (staffRole && staffRole !== 'customer') {
+            const alreadyThisRole = localStorage.getItem('medsetu_role') === staffRole;
             localStorage.setItem('medsetu_role', staffRole);
             localStorage.removeItem('staff_pending_role');
             setUserRole(staffRole);
 
             try {
-              const { data: existing } = await supabase
+              // Atomic insert-or-skip on email (requires UNIQUE constraint on
+              // users.email) — avoids the check-then-insert race that created
+              // duplicate rows when SIGNED_IN fired more than once.
+              const { error: upsertErr } = await supabase
+                .from('users')
+                .upsert(
+                  { email: emailUser.email, name: emailUser.user_metadata?.full_name || null, role: staffRole, phone: null },
+                  { onConflict: 'email', ignoreDuplicates: true }
+                );
+              if (upsertErr) console.error('[AuthContext] users upsert failed:', upsertErr);
+              const { data: row } = await supabase
                 .from('users').select('*').eq('email', emailUser.email).maybeSingle();
-              if (existing) {
-                localStorage.setItem('medsetu_user', JSON.stringify(existing));
-              } else {
-                const { data: newUser } = await supabase
-                  .from('users')
-                  .insert({ email: emailUser.email, name: emailUser.user_metadata?.full_name || null, role: staffRole })
-                  .select().maybeSingle();
-                if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-              }
-            } catch {}
+              if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
+            } catch (e) {
+              console.error('[AuthContext] users lookup/insert error:', e);
+            }
 
-            const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard' };
-            window.location.href = routes[staffRole] || '/home';
+            markResolved();
+            // Same guard as the SuperAdmin branch above — this is the exact
+            // path that caused Inventory→Home: the whitelist fallback above
+            // re-resolves staffRole on every SIGNED_IN (including repeat
+            // events from tab focus / token refresh, not just fresh logins),
+            // and this used to redirect unconditionally every time.
+            if (!alreadyThisRole) {
+              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', super_admin: '/super-admin' };
+              window.location.href = routes[staffRole] || '/home';
+            }
             return;
           }
 
@@ -144,17 +236,16 @@ export function AuthProvider({ children }) {
             setUserRole('customer');
           }
           try {
-            const { data: existing } = await supabase
+            // Same atomic insert-or-skip pattern as the staff branch above.
+            await supabase
+              .from('users')
+              .upsert({ email: emailUser.email, role: 'customer' }, { onConflict: 'email', ignoreDuplicates: true });
+            const { data: row } = await supabase
               .from('users').select('*').eq('email', emailUser.email).maybeSingle();
-            if (existing) {
-              localStorage.setItem('medsetu_user', JSON.stringify(existing));
-            } else {
-              const { data: newUser } = await supabase
-                .from('users').insert({ email: emailUser.email, role: 'customer' }).select().maybeSingle();
-              if (newUser) localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-            }
+            if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
           } catch {}
 
+          markResolved();
           const currentPath = window.location.pathname;
           const onAuthPage  = ['/login', '/', '/otp', '/onboarding', '/staff-login'].includes(currentPath);
           if (onAuthPage) window.location.href = '/home';
@@ -175,6 +266,7 @@ export function AuthProvider({ children }) {
   };
 
   const handleLogout = async () => {
+    intentionalSignOut.current = true;
     clearDevSession();
     setDevSessionState(null);
     localStorage.removeItem('medsetu_role');
@@ -194,6 +286,7 @@ export function AuthProvider({ children }) {
         userRole,
         setUserRole,
         loading,
+        authResolved,
         applyDevSession,
         handleLogout,
       }}

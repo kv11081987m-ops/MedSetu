@@ -24,27 +24,23 @@ export const verifyStoredOTP = (phone, enteredOTP) => {
 };
 
 export const createOrLoginUser = async (phone) => {
-  const { data: existing } = await supabase
+  // Atomic insert-or-skip on phone (requires UNIQUE constraint on
+  // users.phone) — avoids the check-then-insert race that let duplicate
+  // rows through when this ran more than once for the same user.
+  const { error: upsertErr } = await supabase
+    .from('users')
+    .upsert({ phone, role: 'customer' }, { onConflict: 'phone', ignoreDuplicates: true });
+  if (upsertErr) throw upsertErr;
+
+  const { data: user } = await supabase
     .from('users')
     .select('*')
     .eq('phone', phone)
     .maybeSingle();
 
-  if (existing) {
-    localStorage.setItem('medsetu_user', JSON.stringify(existing));
-    return existing;
-  }
-
-  const { data: newUser, error } = await supabase
-    .from('users')
-    .insert({ phone, role: 'customer' })
-    .select()
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!newUser) throw new Error('User create nahi hua');
-  localStorage.setItem('medsetu_user', JSON.stringify(newUser));
-  return newUser;
+  if (!user) throw new Error('User create nahi hua');
+  localStorage.setItem('medsetu_user', JSON.stringify(user));
+  return user;
 };
 
 export const sendOTP = async (phone) => {

@@ -95,9 +95,9 @@ export default function UserProfile() {
         if (!user?.id) return;
         const { data } = await supabase
           .from('prescriptions')
-          .select('id, doctor_name, hospital_name, prescription_date, notes, image_url')
-          .eq('user_id', user.id)
-          .order('prescription_date', { ascending: false })
+          .select('id, doctor_name, hospital_name, prescribed_date, review_notes, image_url')
+          .eq('customer_id', user.id)
+          .order('prescribed_date', { ascending: false })
           .limit(5);
         if (data) setPrescriptions(data);
       } catch {}
@@ -400,11 +400,11 @@ export default function UserProfile() {
                     <p style={s.rxHosp}>{rx.hospital_name || '—'}</p>
                     <div style={s.rxMeta}>
                       <span style={s.rxDate}>
-                        {rx.prescription_date
-                          ? new Date(rx.prescription_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                        {rx.prescribed_date
+                          ? new Date(rx.prescribed_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
                           : '—'}
                       </span>
-                      {rx.notes && <span style={s.rxMeds}>{rx.notes}</span>}
+                      {rx.review_notes && <span style={s.rxMeds}>{rx.review_notes}</span>}
                     </div>
                   </div>
                   <ChevronRight size={16} color="#CCCCCC" />
@@ -459,8 +459,8 @@ export default function UserProfile() {
                   <button
                     key={lbl}
                     style={{
-                      flex: 1, padding: '8px', border: '1.5px solid',
-                      borderColor: newAddress.label === lbl ? '#1A6B3C' : '#E0E0E0',
+                      flex: 1, padding: '8px',
+                      border: newAddress.label === lbl ? '1.5px solid #1A6B3C' : '1.5px solid #E0E0E0',
                       backgroundColor: newAddress.label === lbl ? '#E8F5EE' : '#FFFFFF',
                       color: newAddress.label === lbl ? '#1A6B3C' : '#888888',
                       borderRadius: '8px', fontSize: '13px', fontWeight: '600',

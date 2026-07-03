@@ -8,57 +8,6 @@ import {
   Banknote, Smartphone, FileText,
 } from 'lucide-react';
 
-// ─── Dummy Orders ─────────────────────────────────────────────
-const ORDERS = [
-  {
-    id: 'MED-2024-015',
-    status: 'delivered',
-    date: 'Aaj, 11:30 AM',
-    store: 'Shri Ram Medical Store',
-    items: ['Paracetamol 500mg', 'Crocin 650mg', 'ORS Powder'],
-    amount: 459.50,
-    payment: 'Cash on Delivery',
-    paymentDone: true,
-    isPrescription: false,
-    refund: null,
-  },
-  {
-    id: 'MED-2024-016',
-    status: 'processing',
-    date: 'Aaj, 10:15 AM',
-    store: 'Arogya Medical Hall',
-    items: ['Azithromycin 500mg', 'Digital BP Machine'],
-    amount: 1384.00,
-    payment: 'UPI — PhonePe',
-    paymentDone: true,
-    isPrescription: false,
-    refund: null,
-  },
-  {
-    id: 'MED-2024-014',
-    status: 'cancelled',
-    date: 'Kal, 3:45 PM',
-    store: 'Gupta Medical Agency',
-    items: ['ORS Powder x3'],
-    amount: 45.00,
-    payment: 'UPI',
-    paymentDone: false,
-    isPrescription: false,
-    refund: 45.00,
-  },
-  {
-    id: 'MED-2024-013',
-    status: 'delivered',
-    date: '2 din pehle',
-    store: 'Shri Ram Medical Store',
-    items: ['Prescription Order'],
-    amount: 892.00,
-    payment: 'Cash on Delivery',
-    paymentDone: true,
-    isPrescription: true,
-    refund: null,
-  },
-];
 
 const FILTERS = ['Sab', 'Delivered', 'Processing', 'Cancelled'];
 
@@ -213,8 +162,7 @@ export default function OrderHistory() {
     }
   };
 
-  // Show DB orders if fetched, else dummy data
-  const allOrders = dbLoading ? ORDERS : (dbOrders.length > 0 ? dbOrders : ORDERS);
+  const allOrders = dbOrders;
 
   const filtered = useMemo(() => {
     const statusKey = FILTER_STATUS[activeFilter];
@@ -309,8 +257,13 @@ export default function OrderHistory() {
             })}
           </div>
 
-          {/* Orders or Empty */}
-          {filtered.length === 0 ? (
+          {/* Orders, Loading, or Empty */}
+          {dbLoading ? (
+            <div style={s.emptyState}>
+              <RefreshCw size={32} color="#1A6B3C" style={{ animation: 'spin 1s linear infinite' }} />
+              <p style={s.emptyTitle}>Orders load ho rahe hain...</p>
+            </div>
+          ) : filtered.length === 0 ? (
             <div style={s.emptyState}>
               <div style={s.emptyIconRing}>
                 <ShoppingBag size={48} color="#CCCCCC" />

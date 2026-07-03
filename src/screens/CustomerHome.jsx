@@ -3,41 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { fetchSellers } from '../lib/api';
 import { useCart } from '../context/CartContext';
 import { supabase } from '../lib/supabase';
+import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import {
   Bell, MapPin, ChevronDown, Search,
   FileText, Clock, Star, CheckCircle,
-  Home, ShoppingBag, User, Pill,
+  Home, ShoppingBag, User, Pill, ShoppingCart,
 } from 'lucide-react';
 
 // ─── Notification helpers ─────────────────────────────────────
-const getNotifTitle = (status) => {
-  switch (status) {
-    case 'pending':          return '⏳ Order Received';
-    case 'confirmed':        return '✅ Order Confirmed';
-    case 'preparing':        return '📦 Order Preparing';
-    case 'out_for_delivery': return '🛵 Out for Delivery';
-    case 'delivered':        return '🎉 Order Delivered!';
-    case 'cancelled':        return '❌ Order Cancelled';
-    default:                 return '📋 Order Update';
-  }
+const NOTIF_COLORS = {
+  order_placed:    '#2563EB',
+  order_accepted:  '#2563EB',
+  order_delivered: '#1A6B3C',
+  order_cancelled: '#DC3545',
+  b2b_order:       '#2563EB',
+  b2b_update:      '#2563EB',
 };
-const getNotifColor = (status) => {
-  switch (status) {
-    case 'delivered':        return '#1A6B3C';
-    case 'cancelled':        return '#DC3545';
-    case 'out_for_delivery': return '#FF8C00';
-    default:                 return '#2563EB';
-  }
-};
-const getTimeAgo = (dateString) => {
-  const diff  = Date.now() - new Date(dateString);
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins  < 60) return `${mins} min pehle`;
-  if (hours < 24) return `${hours} ghante pehle`;
-  return `${days} din pehle`;
-};
+const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 
 // ─── Dummy fallback stores ────────────────────────────────────
 
@@ -115,10 +97,13 @@ function StoreCard({ store, onOrder }) {
   );
 }
 
-function OfferCard({ bg, title, code, btnLabel, onPress }) {
+const OFFER_COLORS = ['#1A6B3C', '#EA6C00', '#0C447C', '#E0A818'];
+
+function OfferCard({ bg, title, sub, code, btnLabel, onPress }) {
   return (
     <div style={{ ...s.offerCard, backgroundColor: bg }}>
       <p style={s.offerTitle}>{title}</p>
+      {sub && <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)', margin: '2px 0 6px' }}>{sub}</p>}
       <div style={s.offerCodeBox}>
         <span style={s.offerCode}>{code}</span>
       </div>
@@ -137,7 +122,8 @@ export default function CustomerHome() {
   const [storesLoading, setStoresLoading]   = useState(true);
   const [showNotif, setShowNotif]     = useState(false);
   const [notifs, setNotifs]           = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [offers, setOffers]           = useState([]);
+  const unreadCount = notifs.filter((n) => !n.is_read).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -171,30 +157,32 @@ export default function CustomerHome() {
           }
         } catch {}
 
-        // Fetch order notifications (only if user has a DB id)
+        // Fetch real notifications (only if user has a DB id)
         const userId = storedUser?.id;
         if (userId) {
           try {
-            const { data } = await supabase
-              .from('orders')
-              .select('id, order_number, status, created_at, sellers(store_name)')
-              .eq('customer_id', userId)
-              .order('created_at', { ascending: false })
-              .limit(10);
-            if (!cancelled && data) {
-              const mapped = data.map((order) => ({
-                id:      order.id,
-                title:   getNotifTitle(order.status),
-                message: `${order.sellers?.store_name || 'Store'} — #${order.order_number || order.id}`,
-                time:    getTimeAgo(order.created_at),
-                read:    false,
-                color:   getNotifColor(order.status),
-              }));
-              setNotifs(mapped);
-              setUnreadCount(mapped.length);
-            }
+            const { data } = await fetchUserNotifications(userId);
+            if (!cancelled) setNotifs(data);
           } catch {}
         }
+
+        // Fetch active offers
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const { data: offerData, error: offerErr } = await supabase
+            .from('offers')
+            .select('*')
+            .eq('active', true)
+            .order('created_at', { ascending: false });
+          if (!offerErr && !cancelled) {
+            const valid = (offerData || []).filter((o) => {
+              const okFrom = !o.valid_from || o.valid_from <= today;
+              const okTill = !o.valid_till || o.valid_till >= today;
+              return okFrom && okTill;
+            });
+            setOffers(valid);
+          }
+        } catch {}
 
       } catch (err) {
         console.error('CustomerHome init error:', err);
@@ -224,6 +212,23 @@ export default function CustomerHome() {
             <img src="/logo.png" alt="MedSetu Logo" style={{ height: '30px', width: 'auto', display: 'block' }} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button style={s.iconBtn} aria-label="Cart" onClick={() => navigate('/checkout')}>
+              <div style={{ position: 'relative' }}>
+                <ShoppingCart size={22} color="#1A1A1A" />
+                {cartCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: '-5px', right: '-7px',
+                    minWidth: '16px', height: '16px', borderRadius: '8px',
+                    backgroundColor: '#EF4444', color: '#FFFFFF',
+                    fontSize: '10px', fontWeight: '700',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 3px', lineHeight: 1,
+                  }}>
+                    {cartCount > 9 ? '9+' : cartCount}
+                  </span>
+                )}
+              </div>
+            </button>
             <button style={s.iconBtn} aria-label="Notifications" onClick={() => { setShowNotif(true); }}>
               <div style={{ position: 'relative' }}>
                 <Bell size={22} color="#1A1A1A" />
@@ -283,7 +288,7 @@ export default function CustomerHome() {
                   <StoreCard
                     key={store?.id || store?.name || `store-${idx}`}
                     store={store}
-                    onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
+                    onOrder={() => navigate('/medicine-search')}
                   />
                 ))}
               </div>
@@ -311,28 +316,27 @@ export default function CustomerHome() {
             </div>
           </div>
 
-          {/* Offers */}
-          <div style={s.section}>
-            <div style={s.sectionHeader}>
-              <span style={s.sectionTitle}>Offers</span>
+          {/* Offers — sirf tab dikhe jab active offers ho */}
+          {offers.length > 0 && (
+            <div style={s.section}>
+              <div style={s.sectionHeader}>
+                <span style={s.sectionTitle}>Offers</span>
+              </div>
+              <div style={s.horizontalScroll}>
+                {offers.map((o, i) => (
+                  <OfferCard
+                    key={o.id}
+                    bg={OFFER_COLORS[i % OFFER_COLORS.length]}
+                    title={o.title}
+                    sub={o.discount_type === 'percentage' ? `${o.discount_value}% OFF` : `₹${o.discount_value} OFF`}
+                    code={o.promo_code}
+                    btnLabel="Order Karo"
+                    onPress={() => navigate('/medicine-search')}
+                  />
+                ))}
+              </div>
             </div>
-            <div style={s.horizontalScroll}>
-              <OfferCard
-                bg="#1A6B3C"
-                title="Pehle Order Pe 10% Discount!"
-                code="FIRST10"
-                btnLabel="Abhi Order Karo"
-                onPress={() => navigate('/medicine-search')}
-              />
-              <OfferCard
-                bg="#EA6C00"
-                title="Free Delivery — ₹299 se upar"
-                code="FREEDEL"
-                btnLabel="Order Karo"
-                onPress={() => navigate('/medicine-search')}
-              />
-            </div>
-          </div>
+          )}
 
           {/* Bottom spacer for nav bar */}
           <div style={{ height: '80px' }} />
@@ -354,18 +358,6 @@ export default function CustomerHome() {
                     color={isActive ? '#1A6B3C' : '#AAAAAA'}
                     strokeWidth={isActive ? 2.5 : 1.8}
                   />
-                  {id === 'orders' && cartCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: '-5px', right: '-7px',
-                      minWidth: '16px', height: '16px', borderRadius: '8px',
-                      backgroundColor: '#EF4444', color: '#FFFFFF',
-                      fontSize: '10px', fontWeight: '700',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      padding: '0 3px', lineHeight: 1,
-                    }}>
-                      {cartCount > 9 ? '9+' : cartCount}
-                    </span>
-                  )}
                 </div>
                 <span style={{
                   ...s.navLabel,
@@ -388,7 +380,14 @@ export default function CustomerHome() {
               <div style={s.notifHeader}>
                 <span style={s.notifTitle}>Notifications</span>
                 {unreadCount > 0 && (
-                  <button style={s.markAllBtn} onClick={() => { setUnreadCount(0); setNotifs((prev) => prev.map((n) => ({ ...n, read: true }))); }}>
+                  <button
+                    style={s.markAllBtn}
+                    onClick={() => {
+                      const userId = notifs[0]?.user_id;
+                      setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+                      markAllNotificationsRead(userId);
+                    }}
+                  >
                     Sab Read Karo
                   </button>
                 )}
@@ -403,18 +402,23 @@ export default function CustomerHome() {
                   {notifs.map((n) => (
                     <div
                       key={n.id}
-                      style={{ ...s.notifRow, backgroundColor: n.read ? '#FFFFFF' : '#F0FBF4' }}
-                      onClick={() => setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))}
+                      style={{ ...s.notifRow, backgroundColor: n.is_read ? '#FFFFFF' : '#F0FBF4' }}
+                      onClick={() => {
+                        setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
+                        if (!n.is_read) markNotificationRead(n.id);
+                        setShowNotif(false);
+                        if (n.ref_id) navigate('/order-tracking', { state: { orderId: n.ref_id } });
+                      }}
                     >
-                      <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: (n.color || '#2563EB') + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: n.color || '#2563EB' }} />
+                      <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: getNotifColor(n.type) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: getNotifColor(n.type) }} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ ...s.notifRowTitle, fontWeight: n.read ? '500' : '700' }}>{n.title}</p>
-                        <p style={s.notifRowSub}>{n.message}</p>
-                        <p style={s.notifRowTime}>{n.time}</p>
+                        <p style={{ ...s.notifRowTitle, fontWeight: n.is_read ? '500' : '700' }}>{n.title}</p>
+                        <p style={s.notifRowSub}>{n.body}</p>
+                        <p style={s.notifRowTime}>{formatNotifTime(n.created_at)}</p>
                       </div>
-                      {!n.read && <span style={s.unreadDot} />}
+                      {!n.is_read && <span style={s.unreadDot} />}
                     </div>
                   ))}
                 </div>

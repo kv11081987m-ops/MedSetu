@@ -68,10 +68,32 @@ export async function fetchSellers(district = 'Deoria') {
   return { data: data || [], error };
 }
 
+// ── Fetch wholesalers by district ─────────────────────────────
+export async function fetchWholesalers(district = 'Deoria') {
+  const { data, error } = await supabase
+    .from('sellers')
+    .select('*')
+    .eq('district', district)
+    .eq('seller_type', 'wholesaler')
+    .order('rating', { ascending: false });
+
+  return { data: data || [], error };
+}
+
 // ── Search medicines — 3 sections: branded / generic / janaushadhi ──
+// Only medicines stocked by at least one seller are shown.
+// TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
 export async function searchMedicines(query) {
   const empty = { branded: [], generic: [], janaushadhi: [] };
   if (!query || query.length < 2) return empty;
+
+  const { data: invData } = await supabase
+    .from('seller_inventory')
+    .select('medicine_id')
+    .eq('is_available', true)
+    .gt('stock_quantity', 0);
+  const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
+  if (availableIds.length === 0) return empty;
 
   const filter =
     `name.ilike.%${query}%,` +
@@ -81,13 +103,13 @@ export async function searchMedicines(query) {
   const [janRes, genericRes, brandedRes] = await Promise.all([
     supabase.from('master_medicines').select('*').or(filter)
       .eq('is_active', true).eq('source', 'janaushadhi').gt('mrp_max', 0)
-      .order('mrp_max', { ascending: true }).limit(5),
+      .in('id', availableIds).order('mrp_max', { ascending: true }).limit(5),
     supabase.from('master_medicines').select('*').or(filter)
       .eq('is_active', true).eq('is_generic', true).neq('source', 'janaushadhi').gt('mrp_max', 0)
-      .order('mrp_max', { ascending: true }).limit(5),
+      .in('id', availableIds).order('mrp_max', { ascending: true }).limit(5),
     supabase.from('master_medicines').select('*').or(filter)
       .eq('is_active', true).eq('is_generic', false).gt('mrp_max', 0)
-      .order('mrp_max', { ascending: false }).limit(5),
+      .in('id', availableIds).order('mrp_max', { ascending: false }).limit(5),
   ]);
 
   return {
@@ -117,13 +139,39 @@ export function getRatePerDose(med) {
   return { perDose: price.toFixed(2), unit: 'unit', total: 1 };
 }
 
+// ── Sellers stocking a specific medicine (medicine-first order flow) ──
+export async function fetchSellersForMedicine(medicineId) {
+  if (!medicineId) return [];
+  const { data, error } = await supabase
+    .from('seller_inventory')
+    .select('selling_price, stock_quantity, reserved_quantity, sellers(id, store_name, address, phone, rating, is_open, seller_type)')
+    .eq('medicine_id', medicineId)
+    .eq('is_available', true)
+    .order('selling_price', { ascending: true });
+  if (error) { console.error('fetchSellersForMedicine error:', error); return []; }
+  return (data || [])
+    .map((row) => ({ ...row, available: (row.stock_quantity || 0) - (row.reserved_quantity || 0) }))
+    .filter((row) => row.available > 0 && row.sellers?.seller_type === 'retailer');
+}
+
 // ── Fetch popular medicines (for home/search landing) ─────────
+// Only medicines stocked by at least one seller are shown.
+// TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
 export async function fetchPopularMedicines(limit = 12) {
+  const { data: invData } = await supabase
+    .from('seller_inventory')
+    .select('medicine_id')
+    .eq('is_available', true)
+    .gt('stock_quantity', 0);
+  const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
+  if (availableIds.length === 0) return { data: [], error: null };
+
   const { data, error } = await supabase
     .from('master_medicines')
     .select('*')
     .eq('is_active', true)
     .gt('mrp_max', 0)
+    .in('id', availableIds)
     .order('mrp_max', { ascending: true })
     .limit(limit);
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, HelpCircle, Info, Upload, Camera, Image,
   FileText, CheckCircle, X, AlertCircle, Stethoscope,
@@ -46,6 +46,7 @@ function SuccessScreen({ rxNumber, onTrack, onHome }) {
 // ─── Main Screen ──────────────────────────────────────────────
 export default function PrescriptionUpload() {
   const navigate = useNavigate();
+  const location = useLocation();
   const fileInputRef = useRef(null);
 
   const [file, setFile]           = useState(null);
@@ -54,6 +55,7 @@ export default function PrescriptionUpload() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rxNumber, setRxNumber]   = useState('');
+  const [uploadedUrl, setUploadedUrl] = useState('');
   const [activeTab, setActiveTab] = useState('');
   const [delivery, setDelivery]   = useState('home');
   const [selectedStore, setSelectedStore] = useState('');
@@ -111,10 +113,9 @@ export default function PrescriptionUpload() {
     setSubmitting(true);
     try {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-      const storeId = realStores.find((st) => st.store_name === selectedStore)?.id || null;
 
-      // Upload file to Supabase Storage
-      let imageUrl = file.name;
+      // Upload file to Supabase Storage — unique per customer + timestamp,
+      // so two uploads never overwrite/guess each other's path.
       const fileExt = file.name.split('.').pop();
       const filePath = `${user?.id || 'anonymous'}/rx_${Date.now()}.${fileExt}`;
 
@@ -123,26 +124,24 @@ export default function PrescriptionUpload() {
         .upload(filePath, file, { cacheControl: '3600', upsert: false });
 
       if (uploadError) {
-        console.warn('Storage upload failed:', uploadError.message);
-        // Storage bucket not set up yet — save filename only
-      } else {
-        const { data: urlData } = supabase.storage
-          .from('prescriptions')
-          .getPublicUrl(filePath);
-        imageUrl = urlData.publicUrl;
+        alert('Prescription upload nahi hui: ' + uploadError.message);
+        return;
       }
+
+      const { data: urlData } = supabase.storage
+        .from('prescriptions')
+        .getPublicUrl(filePath);
+      const imageUrl = urlData.publicUrl;
 
       const { data, error } = await supabase
         .from('prescriptions')
         .insert({
           customer_id:       user?.id            || null,
-          seller_id:         storeId,
           doctor_name:       form.doctor         || null,
-          prescription_date: form.date           || null,
-          notes:             form.medicines      || null,
+          prescribed_date:   form.date           || null,
+          review_notes:      form.medicines      || null,
           status:            'pending',
           image_url:         imageUrl,
-          delivery_type:     delivery,
         })
         .select()
         .maybeSingle();
@@ -151,6 +150,7 @@ export default function PrescriptionUpload() {
 
       const rx = 'RX-' + (data?.id ? String(data.id).slice(0, 8).toUpperCase() : Date.now());
       setRxNumber(rx);
+      setUploadedUrl(imageUrl);
       setSubmitted(true);
     } catch (err) {
       alert('Submit nahi hua: ' + err.message);
@@ -172,7 +172,11 @@ export default function PrescriptionUpload() {
           </div>
           <SuccessScreen
             rxNumber={rxNumber}
-            onTrack={() => navigate('/orders')}
+            onTrack={() => {
+              const returnTo = location.state?.returnTo;
+              if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
+              else navigate('/orders');
+            }}
             onHome={() => navigate('/home')}
           />
         </div>

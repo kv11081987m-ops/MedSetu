@@ -1,0 +1,51 @@
+{
+  "packageId": "com.medsetu.twa",
+  "host": "med-setu.vercel.app",
+  "name": "MedSetu",
+  "launcherName": "MedSetu",
+  "display": "standalone",
+  "themeColor": "#1A6B3C",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#FFFFFF",
+  "enableNotifications": true,
+  "startUrl": "/login",
+  "iconUrl": "https://med-setu.vercel.app/logo.png",
+  "maskableIconUrl": "https://med-setu.vercel.app/logo.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "\"D:\\apk Files\\MedSetu apk\\MedSetu - main folder\\signing.keystore\"",
+    "alias": "my-key-alias"
+  },
+  "appVersionName": "2",
+  "appVersionCode": 2,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://med-setu.vercel.app/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://med-setu.vercel.app/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "2"
+}

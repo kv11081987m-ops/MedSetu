@@ -87,7 +87,9 @@ export default function OTPScreen() {
         const result = await verifyFirebaseOTP(code);
         if (result.success) {
           applyDevSession(phone, 'customer');
-          await createOrLoginUser(phone);
+          const u = await createOrLoginUser(phone);
+          console.log('[DEBUG LOGIN] createOrLoginUser returned:', u);
+          console.log('[DEBUG LOGIN] localStorage medsetu_user:', localStorage.getItem('medsetu_user'));
           navigate('/home', { replace: true });
         } else {
           setError(result.error);
@@ -103,10 +105,13 @@ export default function OTPScreen() {
           return;
         }
         applyDevSession(phone, 'customer');
-        await createOrLoginUser(phone);
+        const u = await createOrLoginUser(phone);
+        console.log('[DEBUG LOGIN] createOrLoginUser returned:', u);
+        console.log('[DEBUG LOGIN] localStorage medsetu_user:', localStorage.getItem('medsetu_user'));
         navigate('/home', { replace: true });
       }
     } catch (err) {
+      console.error('[DEBUG LOGIN] error:', err);
       setError('Login mein dikkat: ' + err.message);
     } finally {
       setLoading(false);
@@ -180,7 +185,7 @@ export default function OTPScreen() {
               autoFocus={i === 0}
               style={{
                 ...styles.otpBox,
-                borderColor:     digit ? '#1A6B3C' : '#E0E0E0',
+                border:          digit ? '2px solid #1A6B3C' : '2px solid #E0E0E0',
                 backgroundColor: digit ? '#E8F5EE' : '#FFFFFF',
               }}
             />
@@ -238,7 +243,7 @@ const styles = {
   devBanner: { fontSize: '13px', color: '#92400E', backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', padding: '10px 14px', borderRadius: '10px', lineHeight: '1.6' },
   otpRow: { display: 'flex', gap: '10px', justifyContent: 'center' },
   otpBox: {
-    width: '48px', height: '56px', borderRadius: '10px', border: '2px solid',
+    width: '48px', height: '56px', borderRadius: '10px', border: '2px solid #E0E0E0',
     textAlign: 'center', fontSize: '24px', fontWeight: '700', color: '#1A1A1A',
     outline: 'none', transition: 'border-color 0.15s ease, background-color 0.15s ease', fontFamily: 'inherit',
   },

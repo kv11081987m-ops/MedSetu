@@ -27,6 +27,9 @@ import SellerRegister      from './screens/SellerRegister';
 import PharmacistRegister  from './screens/PharmacistRegister';
 import SuperAdminPanel     from './screens/SuperAdminPanel';
 import MedicineImport      from './screens/MedicineImport';
+import WholesalerLocator   from './screens/WholesalerLocator';
+import WholesalerInventory from './screens/WholesalerInventory';
+import B2BCheckout        from './screens/B2BCheckout';
 
 // Fire connection test once on module load (dev only)
 if (import.meta.env.DEV) testSupabaseConnection();
@@ -59,21 +62,22 @@ function roleHome(role) {
   if (role === 'seller')      return '/seller-dashboard';
   if (role === 'admin')       return '/admin';
   if (role === 'pharmacist')  return '/pharmacist';
+  if (role === 'super_admin') return '/super-admin';
   return '/home';
 }
 
 // ── Protected Route ───────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
-  const { isAuthenticated, loading, userRole } = useAuth();
+  const { isAuthenticated, userRole, authResolved } = useAuth();
 
-  // Synchronous localStorage fallback so we never hang on a blank page
-  const lsUser    = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
+  // Synchronous fallback for dev sessions (sessionStorage bypass)
+  const lsUser     = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
   const devSession = (() => { try { return JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null'); } catch { return null; } })();
   const lsLoggedIn = !!(lsUser?.id || lsUser?.phone || lsUser?.email || devSession);
 
-  // Show loader only briefly; if localStorage says no user, go to login immediately
-  if (loading && !lsLoggedIn) return <Navigate to="/login" replace />;
-  if (loading) return <LoadingScreen />;
+  // Block ALL routing until auth check completes — prevents "customer flash"
+  // during OAuth redirects where userRole is briefly 'customer' (default).
+  if (!authResolved) return <LoadingScreen />;
   if (!isAuthenticated && !lsLoggedIn) return <Navigate to="/login" replace />;
   if (allowedRoles && !allowedRoles.includes(userRole)) {
     return <Navigate to={roleHome(userRole)} replace />;
@@ -83,17 +87,18 @@ function ProtectedRoute({ children, allowedRoles }) {
 
 // ── Redirect if already logged in ────────────────────────────
 function PublicOnlyRoute({ children }) {
-  const { isAuthenticated, loading, userRole } = useAuth();
-  if (loading) return <LoadingScreen />;
+  const { isAuthenticated, userRole, authResolved } = useAuth();
+  if (!authResolved) return <LoadingScreen />;
   if (isAuthenticated) return <Navigate to={roleHome(userRole)} replace />;
   return children;
 }
 
 // ── Super Admin Route ─────────────────────────────────────────
 function SuperAdminRoute({ children }) {
-  const role  = localStorage.getItem('medsetu_role');
-  const user  = (() => { try { return JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch { return {}; } })();
-  const isSA  = role === 'super_admin';
+  const { authResolved } = useAuth();
+  const role = localStorage.getItem('medsetu_role');
+  const isSA = role === 'super_admin';
+  if (!authResolved) return <LoadingScreen />;
   if (!isSA) return <Navigate to="/login" replace />;
   return children;
 }
@@ -153,6 +158,9 @@ function AppRoutes() {
         {/* ── Seller / Staff (protected) ── */}
         <Route path="/seller-dashboard" element={<ProtectedRoute allowedRoles={['seller']}><SellerDashboard /></ProtectedRoute>} />
         <Route path="/inventory"        element={<ProtectedRoute allowedRoles={['seller']}><InventoryManagement /></ProtectedRoute>} />
+        <Route path="/wholesalers"          element={<ProtectedRoute allowedRoles={['seller']}><WholesalerLocator /></ProtectedRoute>} />
+        <Route path="/wholesaler-inventory" element={<ProtectedRoute allowedRoles={['seller']}><WholesalerInventory /></ProtectedRoute>} />
+        <Route path="/b2b-checkout"         element={<ProtectedRoute allowedRoles={['seller']}><B2BCheckout /></ProtectedRoute>} />
         <Route path="/pharmacist"       element={<ProtectedRoute allowedRoles={['pharmacist']}><PharmacistPanel /></ProtectedRoute>} />
         <Route path="/admin"            element={<ProtectedRoute allowedRoles={['admin']}><AdminPanel /></ProtectedRoute>} />
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { SUPER_ADMIN_EMAIL } from '../context/AuthContext';
 
 const ROLES = [
   { id: 'admin',      label: 'Admin' },
@@ -21,8 +22,6 @@ const REDIRECT_ROUTE = {
   seller:      '/seller-dashboard',
   super_admin: '/super-admin',
 };
-
-const SUPER_ADMIN_EMAIL = 'kv11081987m@gmail.com';
 
 export default function StaffLogin() {
   const navigate = useNavigate();
@@ -173,7 +172,7 @@ export default function StaffLogin() {
             <>
               <div>
                 <p style={s.label}>Email ID</p>
-                <div style={{ ...s.inputRow, borderColor: emailFocus ? '#1A6B3C' : error ? '#e53935' : '#E0E0E0' }}>
+                <div style={{ ...s.inputRow, border: emailFocus ? '1.5px solid #1A6B3C' : error ? '1.5px solid #e53935' : '1.5px solid #E0E0E0' }}>
                   <div style={s.iconBox}>
                     <Mail size={16} color="#888888" />
                   </div>
@@ -244,7 +243,7 @@ const s = {
 
   roleRow:       { display: 'flex', gap: '10px' },
   roleBtn:       { flex: 1, padding: '10px 0', borderRadius: '10px', border: '1.5px solid #E0E0E0', backgroundColor: '#FFFFFF', fontSize: '14px', fontWeight: '600', color: '#888888', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s ease' },
-  roleBtnActive: { borderColor: '#1A6B3C', color: '#1A6B3C', backgroundColor: '#F0FDF4' },
+  roleBtnActive: { border: '1.5px solid #1A6B3C', color: '#1A6B3C', backgroundColor: '#F0FDF4' },
 
   registerBtn: {
     width: '100%', padding: '12px', background: 'transparent',
@@ -254,7 +253,7 @@ const s = {
 
   card:      { backgroundColor: '#FFFFFF', borderRadius: '20px', padding: '24px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: '16px' },
   label:     { fontSize: '13px', fontWeight: '600', color: '#444444', margin: '0 0 6px' },
-  inputRow:  { display: 'flex', alignItems: 'center', border: '1.5px solid', borderRadius: '10px', overflow: 'hidden', transition: 'border-color 0.2s' },
+  inputRow:  { display: 'flex', alignItems: 'center', border: '1.5px solid #E0E0E0', borderRadius: '10px', overflow: 'hidden', transition: 'border-color 0.2s' },
   iconBox:   { padding: '0 12px', display: 'flex', alignItems: 'center', backgroundColor: '#F5F5F5', alignSelf: 'stretch' },
   textInput: { flex: 1, border: 'none', outline: 'none', padding: '13px 12px', fontSize: '15px', color: '#1A1A1A', backgroundColor: 'transparent', fontFamily: 'inherit' },
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchOrderById, updateOrderStatus } from '../lib/orders';
+import { supabase } from '../lib/supabase';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
   MapPin, Package, IndianRupee, CreditCard, Store,
@@ -39,11 +40,18 @@ const STEPS = [
   },
 ];
 
-const ACTIVE_STEP = 3; // fallback when no real order
+const ACTIVE_STEP = 1; // fallback while loading — show step 1 (not fake "delivery pe hai")
 
 function getActiveStep(status) {
   const map = { pending: 1, confirmed: 2, preparing: 2, out_for_delivery: 3, delivered: 4, cancelled: 4 };
   return map[status] || 1;
+}
+
+function getEtaBanner(status) {
+  if (!status || status === 'pending')                   return { text: 'Store aapke order ko dekh raha hai...', progress: 25 };
+  if (status === 'confirmed' || status === 'preparing')  return { text: '✅ Order accept ho gaya! Store taiyari kar raha hai.', progress: 50 };
+  if (status === 'out_for_delivery')                     return { text: 'Aapka order raaste mein hai', progress: 75 };
+  return { text: 'Order process ho raha hai...', progress: 25 };
 }
 
 function buildSteps(order) {
@@ -64,20 +72,6 @@ const NAV_TABS = [
   { id: 'orders',  Icon: ShoppingBag, label: 'Orders',  route: '/orders' },
   { id: 'profile', Icon: User,        label: 'Profile', route: '/profile' },
 ];
-
-// ─── Bike icon (SVG) ──────────────────────────────────────────
-function BikeIcon({ size = 20, color = '#EA6C00' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="5.5" cy="17.5" r="3.5" />
-      <circle cx="18.5" cy="17.5" r="3.5" />
-      <path d="M15 6h-5L8 11H2" />
-      <path d="M15 6l3 5h1" />
-      <path d="M8 11l2.5 6.5" />
-    </svg>
-  );
-}
 
 // ─── Step circle ──────────────────────────────────────────────
 function StepCircle({ state }) {
@@ -128,12 +122,13 @@ export default function OrderTracking() {
   const [loading,    setLoading]    = useState(true);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
-  const [bikeX, setBikeX]           = useState(0);
   const [activeTab]                 = useState('orders');
 
   useEffect(() => {
+    console.log('[DEBUG TRACK] orderId received:', orderId);
     if (!orderId) { setLoading(false); return; }
     fetchOrderById(orderId).then(({ data, error }) => {
+      console.log('[DEBUG TRACK] fetched order:', data?.id, data?.order_number, data?.status);
       if (!error && data) setOrder(data);
       setLoading(false);
     });
@@ -149,19 +144,21 @@ export default function OrderTracking() {
     setCancelled(true);
   };
 
-  // Subtle bike oscillation — only while in transit
+  // Realtime subscription — instant update when seller changes this order's status.
+  // Depends only on order?.id — recreating on every status change would cause rapid
+  // same-name channel conflict. Subscription stays alive until unmount; harmless after delivery.
   useEffect(() => {
-    if (activeStep >= 4) return;
-    let dir = 1;
-    const id = setInterval(() => {
-      setBikeX((x) => {
-        const next = x + dir * 0.4;
-        if (Math.abs(next) > 12) dir *= -1;
-        return next;
-      });
-    }, 60);
-    return () => clearInterval(id);
-  }, [activeStep]);
+    if (!order?.id) return;
+    const channel = supabase
+      .channel(`order-tracking-${order.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${order.id}` },
+        () => { fetchOrderById(order.id).then(({ data }) => { if (data) setOrder(data); }); }
+      )
+      .subscribe((status, err) => console.log('[OrderTracking Realtime]', status, err ?? ''));
+    return () => { supabase.removeChannel(channel); };
+  }, [order?.id]);
 
   if (!loading && !orderId) {
     return (
@@ -171,6 +168,19 @@ export default function OrderTracking() {
         <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Orders page se kisi order ko track karo</p>
         <button style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => navigate('/orders')}>
           Orders Dekho
+        </button>
+      </div>
+    );
+  }
+
+  if (!loading && orderId && !order) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', backgroundColor: '#F5F5F5' }}>
+        <Package size={52} color="#CCCCCC" />
+        <p style={{ fontSize: '16px', fontWeight: '700', color: '#333333', margin: 0 }}>Yeh order nahi mila</p>
+        <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Shayad purana ya delete ho gaya. Order History se dekhein.</p>
+        <button style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => navigate('/orders')}>
+          Order History Dekho
         </button>
       </div>
     );
@@ -222,16 +232,26 @@ export default function OrderTracking() {
         {/* ── Body ── */}
         <div style={s.body}>
 
-          {/* ETA Banner */}
-          <div style={s.etaBanner}>
-            <Clock size={18} color="#FFFFFF" />
-            <div style={{ flex: 1 }}>
-              <p style={s.etaText}>Aapka order 15 min mein pahunchega</p>
-              <div style={s.progressBar}>
-                <div style={s.progressFill} />
+          {/* ETA Banner — conditional on real order status */}
+          {order?.status === 'delivered' ? (
+            <div style={{ ...s.etaBanner, backgroundColor: '#1A6B3C' }}>
+              <CheckCircle size={18} color="#FFFFFF" />
+              <p style={{ ...s.etaText, margin: 0 }}>🎉 Order deliver ho gaya!</p>
+            </div>
+          ) : order?.status === 'cancelled' ? null : (
+            <div style={s.etaBanner}>
+              {/* Seller ne accept kar liya (confirmed+) — checkmark; abhi tak pending hai to clock */}
+              {order?.status && order.status !== 'pending'
+                ? <CheckCircle size={18} color="#FFFFFF" />
+                : <Clock size={18} color="#FFFFFF" />}
+              <div style={{ flex: 1 }}>
+                <p style={s.etaText}>{getEtaBanner(order?.status).text}</p>
+                <div style={s.progressBar}>
+                  <div style={{ ...s.progressFill, width: `${getEtaBanner(order?.status).progress}%` }} />
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Stepper */}
           <div style={s.card}>
@@ -317,54 +337,6 @@ export default function OrderTracking() {
               </div>
             </div>
           )}
-
-          {/* Live Map */}
-          <div style={s.mapContainer}>
-            {/* Grid lines */}
-            <svg style={s.mapSvg} width="100%" height="100%">
-              {[15,30,45,60,75,90].map((x) => (
-                <line key={`v${x}`} x1={`${x}%`} y1="0" x2={`${x}%`} y2="100%"
-                  stroke="#C8E6C9" strokeWidth="1" />
-              ))}
-              {[25,50,75].map((y) => (
-                <line key={`h${y}`} x1="0" y1={`${y}%`} x2="100%" y2={`${y}%`}
-                  stroke="#C8E6C9" strokeWidth="1" />
-              ))}
-              {/* Road */}
-              <line x1="0" y1="55%" x2="100%" y2="55%"
-                stroke="#B0BEC5" strokeWidth="4" strokeDasharray="10,4" />
-            </svg>
-
-            {/* Live badge */}
-            <div style={s.liveBadge}>
-              <span style={s.liveDot} />
-              Live Tracking
-            </div>
-
-            {/* Home pin */}
-            <div style={s.homePin}>
-              <div style={s.homePinCircle}>
-                <Home size={14} color="#FFFFFF" />
-              </div>
-              <div style={s.pinTail} />
-            </div>
-
-            {/* Bike marker */}
-            <div style={{
-              ...s.bikeMarker,
-              transform: `translateX(${bikeX}px)`,
-            }}>
-              <div style={s.bikeBubble}>
-                <BikeIcon size={18} color="#EA6C00" />
-              </div>
-            </div>
-
-            {/* Distance pill */}
-            <div style={s.distPill}>🛵 1.2 km door hai</div>
-
-            {/* Watermark */}
-            <span style={s.mapWatermark}>🗺️ Map View</span>
-          </div>
 
           {/* Order Summary */}
           <div style={s.card}>
@@ -721,111 +693,6 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-  },
-
-  // Mock map
-  mapContainer: {
-    position: 'relative',
-    height: '180px',
-    backgroundColor: '#E8F5E9',
-    borderRadius: '14px',
-    overflow: 'hidden',
-    border: '1px solid #C8E6C9',
-  },
-  mapSvg: {
-    position: 'absolute',
-    inset: 0,
-    pointerEvents: 'none',
-  },
-  liveBadge: {
-    position: 'absolute',
-    top: '10px',
-    right: '10px',
-    backgroundColor: '#1A6B3C',
-    color: '#FFFFFF',
-    fontSize: '10px',
-    fontWeight: '700',
-    padding: '4px 10px',
-    borderRadius: '20px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px',
-  },
-  liveDot: {
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    backgroundColor: '#FFFFFF',
-    display: 'inline-block',
-    animation: 'pulse 1.2s ease-in-out infinite',
-  },
-  homePin: {
-    position: 'absolute',
-    right: '28%',
-    top: '30%',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    transform: 'translateX(50%)',
-  },
-  homePinCircle: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '50% 50% 50% 4px',
-    backgroundColor: '#1A6B3C',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transform: 'rotate(-45deg)',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-  },
-  pinTail: {
-    width: 0,
-    height: 0,
-    borderLeft: '5px solid transparent',
-    borderRight: '5px solid transparent',
-    borderTop: '6px solid #1A6B3C',
-    marginTop: '-1px',
-  },
-  bikeMarker: {
-    position: 'absolute',
-    left: '32%',
-    top: '44%',
-    transition: 'transform 0.12s ease-out',
-  },
-  bikeBubble: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '50%',
-    backgroundColor: '#FFFFFF',
-    border: '2px solid #EA6C00',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-  },
-  distPill: {
-    position: 'absolute',
-    bottom: '12px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    color: '#FFFFFF',
-    fontSize: '12px',
-    fontWeight: '600',
-    padding: '5px 14px',
-    borderRadius: '20px',
-    whiteSpace: 'nowrap',
-  },
-  mapWatermark: {
-    position: 'absolute',
-    bottom: '10px',
-    right: '10px',
-    fontSize: '10px',
-    color: '#A5D6A7',
-    pointerEvents: 'none',
-    userSelect: 'none',
-    fontWeight: '600',
   },
 
   // Order summary

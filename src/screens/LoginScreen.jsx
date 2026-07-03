@@ -128,6 +128,8 @@ export default function LoginScreen() {
           Staff Login
         </span>
       </div>
+
+      <div id="recaptcha-container" />
     </div>
   );
 }

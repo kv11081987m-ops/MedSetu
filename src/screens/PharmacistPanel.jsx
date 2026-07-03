@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import {
   Bell, Phone, CheckCircle, FileText, Clock,
   MapPin, AlertTriangle, X, Search, ZoomIn,
@@ -39,8 +40,8 @@ const mapRxCard = (rx) => ({
   medicines:rx.medicines_list || [`${rx.medicines_count || 1} medicine(s) prescribed`],
   doctor:   rx.doctor_name   || 'Doctor',
   hospital: rx.hospital_name || 'Hospital',
-  date:     rx.prescription_date
-    ? new Date(rx.prescription_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  date:     rx.prescribed_date
+    ? new Date(rx.prescribed_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : '—',
   checks:   [{ ok: true, text: 'Prescription uploaded' }],
   status:   rx.status || 'pending',
@@ -54,13 +55,6 @@ const CALL_HISTORY = [
 ];
 
 const LOOKUP_CHIPS = ['Schedule H', 'Schedule X', 'OTC Medicines', 'Drug Interactions'];
-
-const INIT_NOTIFS = [
-  { id: 1, dotColor: '#E65100', title: 'Naya call request:', subtitle: 'Rahul Kumar, Deoria',   time: '5 min pehle',    read: false },
-  { id: 2, dotColor: '#2563EB', title: 'Rx submitted:',      subtitle: 'Sunita Devi (Rx #089)', time: '18 min pehle',   read: false },
-  { id: 3, dotColor: '#888888', title: 'Call completed:',    subtitle: 'Meena Devi',            time: '45 min pehle',   read: true  },
-  { id: 4, dotColor: '#888888', title: 'Rx approved:',       subtitle: 'Rahul Kumar',           time: '1 ghanta pehle', read: true  },
-];
 
 const NAV_TABS = [
   { id: 'dashboard', Icon: LayoutDashboard, label: 'Dashboard'  },
@@ -253,7 +247,7 @@ export default function PharmacistPanel() {
   const [activeTab, setActiveTab]           = useState('dashboard');
   const [callFilter, setCallFilter]         = useState('sab');
   const [rxFilter,  setRxFilter]            = useState('pending');
-  const [notifications, setNotifications]   = useState(INIT_NOTIFS);
+  const [notifications, setNotifications]   = useState([]);
   const [notifOpen, setNotifOpen]           = useState(false);
 
   // ── Load availability (localStorage first, then DB) ──────────
@@ -294,6 +288,11 @@ export default function PharmacistPanel() {
   useEffect(() => {
     Promise.all([fetchPrescriptions(), fetchCallQueue()])
       .finally(() => setLoading(false));
+
+    try {
+      const myUserId = JSON.parse(localStorage.getItem('medsetu_user') || '{}')?.id;
+      if (myUserId) fetchUserNotifications(myUserId).then(({ data }) => setNotifications(data));
+    } catch {}
   }, []);
 
   // ── Derived state ────────────────────────────────────────────
@@ -311,10 +310,9 @@ export default function PharmacistPanel() {
       .from('orders')
       .update({ pharmacist_verified: true, status: 'confirmed' })
       .eq('id', orderId);
-    if (!error) {
-      setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
-      setCompletedCallIds((prev) => new Set([...prev, orderId]));
-    }
+    if (error) { console.error('handleCallAction error:', error); return; }
+    setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
+    setCompletedCallIds((prev) => new Set([...prev, orderId]));
   };
 
   const handleRejectCall = async (orderId) => {
@@ -322,17 +320,17 @@ export default function PharmacistPanel() {
       .from('orders')
       .update({ pharmacist_verified: false, status: 'cancelled' })
       .eq('id', orderId);
-    if (!error) {
-      setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
-    }
+    if (error) { console.error('handleRejectCall error:', error); return; }
+    setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
   };
 
   const handleRxApprove = async (dbId) => {
     const { error } = await supabase
       .from('prescriptions')
-      .update({ status: 'approved', verified_at: new Date().toISOString() })
+      .update({ status: 'approved', reviewed_at: new Date().toISOString() })
       .eq('id', dbId);
-    if (!error) setPrescriptions((prev) => prev.filter((rx) => rx.id !== dbId));
+    if (error) { console.error('handleRxApprove error:', error); return; }
+    setPrescriptions((prev) => prev.filter((rx) => rx.id !== dbId));
   };
 
   const handleRxReject = async (dbId) => {
@@ -340,7 +338,8 @@ export default function PharmacistPanel() {
       .from('prescriptions')
       .update({ status: 'rejected' })
       .eq('id', dbId);
-    if (!error) setPrescriptions((prev) => prev.filter((rx) => rx.id !== dbId));
+    if (error) { console.error('handleRxReject error:', error); return; }
+    setPrescriptions((prev) => prev.filter((rx) => rx.id !== dbId));
   };
 
   const handleMoreInfo = (displayId) => {
@@ -367,8 +366,12 @@ export default function PharmacistPanel() {
   const saveNotes = () => { setNotesSaved(true); setTimeout(() => setNotesSaved(false), 2000); };
   const handleLogout = async () => { await authLogout(); navigate('/login'); };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-  const markAllRead = () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const markAllRead = () => {
+    const myUserId = notifications[0]?.user_id;
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    markAllNotificationsRead(myUserId);
+  };
   const handleBellClick = () => setNotifOpen((prev) => !prev);
 
   const getFilteredCalls = () => {
@@ -664,29 +667,36 @@ export default function PharmacistPanel() {
                 </div>
               </div>
 
-              {notifications.map((n) => (
-                <div
-                  key={n.id}
-                  style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '10px',
-                    padding: '10px 8px', borderBottom: '1px solid #F5F5F5',
-                    borderRadius: '8px', marginBottom: '2px',
-                    backgroundColor: n.read ? '#FFFFFF' : '#F0FAF5',
-                  }}
-                >
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: n.dotColor, flexShrink: 0, marginTop: '5px' }} />
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A', margin: 0 }}>
-                      {n.title} <span style={{ color: '#1A6B3C' }}>{n.subtitle}</span>
-                    </p>
-                    <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0' }}>{n.time}</p>
-                  </div>
+              {notifications.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+                  <p style={{ fontSize: '24px', margin: '0 0 8px' }}>🔔</p>
+                  <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 4px' }}>Abhi koi notification nahi</p>
+                  <p style={{ fontSize: '12px', color: '#AAAAAA', margin: 0 }}>Naye updates yahan dikhenge</p>
                 </div>
-              ))}
-
-              <button style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: '12px', background: 'none', border: 'none', color: '#1A6B3C', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>
-                Aur dekho →
-              </button>
+              ) : (
+                notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      padding: '10px 8px', borderBottom: '1px solid #F5F5F5',
+                      borderRadius: '8px', marginBottom: '2px', cursor: 'pointer',
+                      backgroundColor: n.is_read ? '#FFFFFF' : '#F0FAF5',
+                    }}
+                    onClick={() => {
+                      setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
+                      if (!n.is_read) markNotificationRead(n.id);
+                    }}
+                  >
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: n.is_read ? '#CCCCCC' : '#1A6B3C', flexShrink: 0, marginTop: '5px' }} />
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: '13px', fontWeight: n.is_read ? '500' : '700', color: '#1A1A1A', margin: 0 }}>{n.title}</p>
+                      <p style={{ fontSize: '12px', color: '#555555', margin: '2px 0 0' }}>{n.body}</p>
+                      <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0' }}>{formatNotifTime(n.created_at)}</p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </>
         )}

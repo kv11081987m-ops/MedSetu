@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { intentionalSignOut } from '../context/AuthContext';
+import {
+  approveCommissionRequest as approveCommissionRequestDb,
+  rejectCommissionRequest  as rejectCommissionRequestDb,
+} from '../lib/commission';
+import MedicineBandsTab from './MedicineBandsTab';
 
 const TABS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: '🏠' },
@@ -8,6 +14,7 @@ const TABS = [
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
   { id: 'offers',       label: 'Offers',        icon: '🎁' },
+  { id: 'bands',        label: 'Bands',         icon: '🏷️' },
   { id: 'settings',     label: 'Settings',      icon: '⚙️' },
 ];
 
@@ -22,15 +29,18 @@ export default function SuperAdminPanel() {
   const [sellerFilter,      setSellerFilter]       = useState('pending');
   const [pendingPharmacists,setPendingPharmacists] = useState([]);
   const [admins,            setAdmins]             = useState([]);
-  const [stats,             setStats]              = useState({ pendingSellers: 0, activeSellers: 0, pendingPharmacists: 0, totalOrders: 0 });
-  const [loadingSellers,    setLoadingSellers]     = useState(false);
-  const [loadingPharmacists,setLoadingPharmacists] = useState(false);
+  const [stats,             setStats]              = useState({ pendingSellers: 0, activeSellers: 0, pendingPharmacists: 0, totalOrders: 0, totalCommission: 0 });
+  const [loadingSellers,      setLoadingSellers]      = useState(false);
+  const [loadingPharmacists,  setLoadingPharmacists]  = useState(false);
+  const [sellerCommissions,   setSellerCommissions]   = useState([]);
 
   // ── Settings state ────────────────────────────────────────
   const [settings, setSettings] = useState({
     newRegistrations: true, homeDelivery: true,
     pharmacistCalls: true, maintenanceMode: false,
-    commission: 5, deliveryCharge: 30,
+    commission: 5, deliveryCharge: 30, freeDeliveryThreshold: 500,
+    commissionDelegatedToAdmin: false,
+    tierHighRate: 20, tierModRate: 10, tierLowRate: 5,
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -48,20 +58,120 @@ export default function SuperAdminPanel() {
 
   useEffect(() => {
     loadStats();
+    loadSellerCommissions();
     loadSellers();
     loadPharmacists();
     loadAdmins();
+    loadSettings();
+    loadOffers();
+  }, []);
+
+  // Realtime: refresh stats whenever any order changes (delivered → commission updated)
+  useEffect(() => {
+    const channel = supabase
+      .channel('superadmin-orders')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        () => { loadStats(); loadSellerCommissions(); }
+      )
+      // Commission change requests write to sellers, not orders — watch it
+      // too so a new pending request shows up live without a manual refresh.
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sellers' },
+        () => { loadSellerCommissions(); }
+      )
+      .subscribe((status, err) => console.log('[SuperAdmin Realtime]', status, err ?? ''));
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   // ── Data loaders ──────────────────────────────────────────
   const loadStats = async () => {
-    const [{ count: ps }, { count: as }, { count: pp }, { count: to }] = await Promise.all([
+    const [{ count: ps }, { count: as }, { count: pp }, { count: to }, { data: commData }] = await Promise.all([
       supabase.from('seller_registrations').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('sellers').select('*', { count: 'exact', head: true }),
       supabase.from('staff_whitelist').select('*', { count: 'exact', head: true }).eq('role', 'pharmacist').eq('is_approved', false),
       supabase.from('orders').select('*', { count: 'exact', head: true }),
+      supabase.from('orders').select('commission_amount').eq('status', 'delivered').not('commission_amount', 'is', null),
     ]);
-    setStats({ pendingSellers: ps || 0, activeSellers: as || 0, pendingPharmacists: pp || 0, totalOrders: to || 0 });
+    const totalCommission = (commData || []).reduce((sum, o) => sum + (o.commission_amount || 0), 0);
+    setStats({ pendingSellers: ps || 0, activeSellers: as || 0, pendingPharmacists: pp || 0, totalOrders: to || 0, totalCommission });
+  };
+
+  const loadSellerCommissions = async () => {
+    const [{ data: sellerRows }, { data: orderRows }] = await Promise.all([
+      supabase.from('sellers').select('id, store_name, seller_type, commission_mode, commission_flat_rate, commission_status, commission_pending_mode, commission_pending_rate'),
+      supabase.from('orders')
+        .select('seller_id, commission_amount, final_amount, delivery_charge')
+        .eq('status', 'delivered')
+        .not('commission_amount', 'is', null),
+    ]);
+    const byId = {};
+    (orderRows || []).forEach((o) => {
+      if (!o.seller_id) return;
+      if (!byId[o.seller_id]) byId[o.seller_id] = { sales: 0, commission: 0 };
+      byId[o.seller_id].sales      += (o.final_amount || 0) - (o.delivery_charge || 0);
+      byId[o.seller_id].commission += (o.commission_amount || 0);
+    });
+    // Show every active seller (retailer + wholesaler) so a rate can be set
+    // before they ever have a delivered order — not just those with sales.
+    setSellerCommissions(
+      (sellerRows || []).map((s) => ({
+        id:          s.id,
+        name:        s.store_name,
+        type:        s.seller_type || 'retailer',
+        mode:        s.commission_mode || 'flat',
+        rate:        s.commission_flat_rate,
+        status:      s.commission_status || 'active',
+        pendingMode: s.commission_pending_mode,
+        pendingRate: s.commission_pending_rate,
+        sales:  parseFloat((byId[s.id]?.sales     || 0).toFixed(2)),
+        earned: parseFloat((byId[s.id]?.commission || 0).toFixed(2)),
+      }))
+    );
+  };
+
+  // ── Commission rate write path ─────────────────────────────
+  // Sets a seller's commission mode + (for flat mode) rate. Blank rate input
+  // clears it back to null, which falls through to the platform default in
+  // markDelivered. Tier mode ignores rate entirely — tier rates are global,
+  // read from platform_settings.
+  const saveSellerCommission = async (sellerId, mode, rawRate) => {
+    const update = { commission_mode: mode };
+    if (mode === 'flat') {
+      const trimmed = String(rawRate ?? '').trim();
+      const rate = trimmed === '' ? null : Number(trimmed);
+      if (rate !== null && (Number.isNaN(rate) || rate < 0 || rate > 100)) {
+        alert('Rate 0-100 ke beech ek number hona chahiye');
+        return;
+      }
+      update.commission_flat_rate = rate;
+    }
+    const { error } = await supabase
+      .from('sellers')
+      .update(update)
+      .eq('id', sellerId);
+    if (error) { alert('Commission setting save nahi hui: ' + error.message); return; }
+    await loadSellerCommissions();
+  };
+
+  // ── Seller-requested commission change: approve/reject ────────
+  // This is separate from saveSellerCommission above — that's SuperAdmin's
+  // own direct authority (no approval needed for their own changes). This
+  // path only applies commission_pending_mode/rate that a SELLER requested.
+  // The actual DB reads/writes live in lib/commission.js, shared with
+  // AdminPanel.jsx so both panels apply the exact same approve/reject rules.
+  const approveCommissionRequest = async (sellerId, pendingMode, pendingRate) => {
+    const { error } = await approveCommissionRequestDb(sellerId, pendingMode, pendingRate);
+    if (error) { alert('Approve nahi hua: ' + error.message); return; }
+    await loadSellerCommissions();
+  };
+
+  const rejectCommissionRequest = async (sellerId) => {
+    const { error } = await rejectCommissionRequestDb(sellerId);
+    if (error) { alert('Reject nahi hua: ' + error.message); return; }
+    await loadSellerCommissions();
   };
 
   const loadSellers = async () => {
@@ -84,6 +194,39 @@ export default function SuperAdminPanel() {
     setAdmins(data || []);
   };
 
+  const loadOffers = async () => {
+    const { data, error } = await supabase
+      .from('offers')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { console.error('loadOffers error:', error); return; }
+    setOffers(data || []);
+  };
+
+  const loadSettings = async () => {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) { console.error('loadSettings error:', error); return; }
+    if (data) {
+      setSettings({
+        newRegistrations: data.new_registrations,
+        homeDelivery:     data.home_delivery,
+        pharmacistCalls:  data.pharmacist_calls,
+        maintenanceMode:  data.maintenance_mode,
+        commission:            data.commission,
+        deliveryCharge:        data.delivery_charge,
+        freeDeliveryThreshold: data.free_delivery_threshold ?? 500,
+        commissionDelegatedToAdmin: data.commission_approval_delegated_to_admin || false,
+        tierHighRate: data.tier_high_rate ?? 20,
+        tierModRate:  data.tier_mod_rate  ?? 10,
+        tierLowRate:  data.tier_low_rate  ?? 5,
+      });
+    }
+  };
+
   // ── Seller actions ────────────────────────────────────────
   const approveSeller = async (registrationId) => {
     const reg = pendingSellers.find((s) => s.id === registrationId);
@@ -101,6 +244,8 @@ export default function SuperAdminPanel() {
           district:        reg.district,
           drug_license:    reg.drug_license_number,
           pharmacist_name: reg.pharmacist_name,
+          seller_type:     reg.seller_type || 'retailer',
+          commission_mode: reg.commission_mode || 'flat',
           is_verified:     true,
           is_open:         false,
         })
@@ -240,6 +385,7 @@ export default function SuperAdminPanel() {
 
   // ── Logout ────────────────────────────────────────────────
   const handleLogout = async () => {
+    intentionalSignOut.current = true;
     localStorage.removeItem('medsetu_role');
     localStorage.removeItem('medsetu_user');
     await supabase.auth.signOut().catch(() => {});
@@ -268,7 +414,14 @@ export default function SuperAdminPanel() {
 
       {/* ── Content ── */}
       <div style={s.content}>
-        {activeTab === 'dashboard'   && <TabDashboard stats={stats} allSellers={allSellers} />}
+        {activeTab === 'dashboard'   && (
+          <TabDashboard
+            stats={stats} allSellers={allSellers} sellerCommissions={sellerCommissions}
+            onSaveCommission={saveSellerCommission}
+            onApproveRequest={approveCommissionRequest}
+            onRejectRequest={rejectCommissionRequest}
+          />
+        )}
         {activeTab === 'sellers'     && (
           <TabSellers
             sellers={filteredSellers} filter={sellerFilter} setFilter={setSellerFilter}
@@ -287,7 +440,8 @@ export default function SuperAdminPanel() {
             onAdd={addAdmin} onRemove={removeAdmin} PERMISSIONS={PERMISSIONS}
           />
         )}
-        {activeTab === 'offers'      && <TabOffers offers={offers} setOffers={setOffers} offerForm={offerForm} setOfferForm={setOfferForm} />}
+        {activeTab === 'offers'      && <TabOffers offers={offers} setOffers={setOffers} offerForm={offerForm} setOfferForm={setOfferForm} loadOffers={loadOffers} />}
+        {activeTab === 'bands'       && <MedicineBandsTab />}
         {activeTab === 'settings'    && (
           <TabSettings
             settings={settings} setSettings={setSettings}
@@ -319,15 +473,22 @@ export default function SuperAdminPanel() {
 // ══════════════════════════════════════════════════════════════
 // TAB: Dashboard
 // ══════════════════════════════════════════════════════════════
-function TabDashboard({ stats, allSellers }) {
+function TabDashboard({ stats, allSellers, sellerCommissions, onSaveCommission, onApproveRequest, onRejectRequest }) {
+  const [commFilter, setCommFilter] = useState('all'); // 'all' | 'pending'
   const statCards = [
     { label: 'Pending Sellers',      value: stats.pendingSellers,      color: '#F59E0B' },
-    { label: 'Active Sellers',        value: stats.activeSellers,        color: '#10B981' },
-    { label: 'Pending Pharmacists',   value: stats.pendingPharmacists,   color: '#3B82F6' },
-    { label: 'Total Orders',          value: stats.totalOrders,          color: '#8B5CF6' },
+    { label: 'Active Sellers',       value: stats.activeSellers,       color: '#10B981' },
+    { label: 'Pending Pharmacists',  value: stats.pendingPharmacists,  color: '#3B82F6' },
+    { label: 'Total Orders',         value: stats.totalOrders,         color: '#8B5CF6' },
+    { label: 'Platform Commission',  value: '₹' + stats.totalCommission.toLocaleString('en-IN'), color: '#059669' },
   ];
 
   const recent = [...allSellers].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+
+  const pendingCommCount   = sellerCommissions.filter((s) => s.status === 'pending').length;
+  const visibleCommissions = commFilter === 'pending'
+    ? sellerCommissions.filter((s) => s.status === 'pending')
+    : sellerCommissions;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -336,10 +497,10 @@ function TabDashboard({ stats, allSellers }) {
         <p style={{ fontSize: '13px', color: '#888', margin: 0 }}>Super Admin Dashboard</p>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         {statCards.map(({ label, value, color }) => (
-          <div key={label} style={{ ...s.statCard, borderTopColor: color, minWidth: '130px' }}>
-            <p style={{ fontSize: '24px', fontWeight: '800', color, margin: '0 0 4px' }}>{value}</p>
+          <div key={label} style={{ ...s.statCard, borderTopColor: color }}>
+            <p style={{ fontSize: '22px', fontWeight: '800', color, margin: '0 0 4px' }}>{value}</p>
             <p style={{ fontSize: '12px', color: '#888', margin: 0, lineHeight: '1.4' }}>{label}</p>
           </div>
         ))}
@@ -362,6 +523,169 @@ function TabDashboard({ stats, allSellers }) {
             </div>
           ))
         )}
+      </div>
+
+      {/* Seller Commission Breakdown */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <p style={s.sectionTitle}>Seller Commission Breakdown</p>
+          {pendingCommCount > 0 && (
+            <span style={{ fontSize: '11px', fontWeight: '700', color: '#B45309', backgroundColor: '#FEF3C7', padding: '3px 9px', borderRadius: '10px', flexShrink: 0 }}>
+              🔔 {pendingCommCount} Pending
+            </span>
+          )}
+        </div>
+        <p style={{ fontSize: '12px', color: '#888', margin: '0 0 10px' }}>
+          Har seller (retailer + wholesaler) ka apna commission rate set karo
+        </p>
+        {pendingCommCount > 0 && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+            {['all', 'pending'].map((f) => (
+              <button key={f} style={{ ...s.filterChip, ...(commFilter === f ? s.filterChipActive : {}) }} onClick={() => setCommFilter(f)}>
+                {f === 'all' ? 'Sab' : `Pending Requests (${pendingCommCount})`}
+              </button>
+            ))}
+          </div>
+        )}
+        {visibleCommissions.length === 0 ? (
+          <p style={s.emptyText}>{commFilter === 'pending' ? 'Koi pending request nahi' : 'Koi seller nahi'}</p>
+        ) : (
+          visibleCommissions.map((sel) => (
+            <SellerCommissionRow
+              key={sel.id} sel={sel}
+              onSave={onSaveCommission}
+              onApprove={onApproveRequest}
+              onReject={onRejectRequest}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SellerCommissionRow({ sel, onSave, onApprove, onReject }) {
+  const [mode,      setMode]      = useState(sel.mode === 'tier' ? 'tier' : 'flat');
+  const [rateInput, setRateInput] = useState(sel.rate != null ? String(sel.rate) : '');
+  const [saving,    setSaving]    = useState(false);
+  const [deciding,  setDeciding]  = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(sel.id, mode, rateInput);
+    setSaving(false);
+  };
+
+  const handleApprove = async () => {
+    setDeciding(true);
+    await onApprove(sel.id, sel.pendingMode, sel.pendingRate);
+    setDeciding(false);
+  };
+
+  const handleReject = async () => {
+    setDeciding(true);
+    await onReject(sel.id);
+    setDeciding(false);
+  };
+
+  const isPending  = sel.status === 'pending';
+  const badgeText  = mode === 'tier' ? 'Tier' : (sel.rate != null ? `Flat ${sel.rate}%` : 'Flat (default)');
+  const pendingText = sel.pendingMode === 'tier'
+    ? 'Tier (Margin-Based)'
+    : `Flat${sel.pendingRate != null ? ` ${sel.pendingRate}%` : ' (rate SuperAdmin decide karega)'}`;
+
+  return (
+    <div style={{ ...s.activityItem, flexDirection: 'column', alignItems: 'flex-start', gap: '8px', ...(isPending ? { border: '1.5px solid #F59E0B' } : {}) }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: 0 }}>{sel.name}</p>
+          <span style={{
+            fontSize: '9px', fontWeight: '700', padding: '2px 6px', borderRadius: '4px',
+            backgroundColor: sel.type === 'wholesaler' ? '#0C447C' : '#F26C0A',
+            color: '#FFFFFF', letterSpacing: '0.5px',
+          }}>
+            {sel.type === 'wholesaler' ? 'WHOLESALER' : 'RETAILER'}
+          </span>
+          {isPending && (
+            <span style={{ fontSize: '9px', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#F59E0B', color: '#FFFFFF', letterSpacing: '0.5px' }}>
+              🔔 PENDING
+            </span>
+          )}
+        </div>
+        <span style={{
+          fontSize: '11px', fontWeight: '600', padding: '2px 8px', borderRadius: '8px',
+          backgroundColor: mode === 'tier' ? '#EAF2FF' : (sel.rate != null ? '#E8F5EE' : '#F5F5F5'),
+          color:           mode === 'tier' ? '#0C447C' : (sel.rate != null ? '#1A6B3C' : '#888'),
+        }}>
+          {badgeText}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
+        <div>
+          <p style={{ fontSize: '11px', color: '#888', margin: '0 0 2px' }}>Sales</p>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: 0 }}>₹{sel.sales.toLocaleString('en-IN')}</p>
+        </div>
+        <div>
+          <p style={{ fontSize: '11px', color: '#888', margin: '0 0 2px' }}>Commission</p>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#059669', margin: 0 }}>₹{sel.earned.toLocaleString('en-IN')}</p>
+        </div>
+        <div>
+          <p style={{ fontSize: '11px', color: '#888', margin: '0 0 2px' }}>Seller Net</p>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#2563EB', margin: 0 }}>₹{(sel.sales - sel.earned).toLocaleString('en-IN')}</p>
+        </div>
+      </div>
+
+      {/* Seller-requested change — approve/reject */}
+      {isPending && (
+        <div style={{ width: '100%', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '10px', padding: '10px 12px' }}>
+          <p style={{ fontSize: '12px', color: '#92400E', margin: '0 0 8px' }}>
+            Seller ne request kiya hai: <strong>{pendingText}</strong>
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={{ ...s.approveBtn, flex: 1, opacity: deciding ? 0.7 : 1 }} onClick={handleApprove} disabled={deciding}>
+              {deciding ? '...' : 'Approve'}
+            </button>
+            <button style={{ ...s.rejectBtn, flex: 1, opacity: deciding ? 0.7 : 1 }} onClick={handleReject} disabled={deciding}>
+              {deciding ? '...' : 'Reject'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+        {['flat', 'tier'].map((m) => (
+          <button
+            key={m}
+            style={{ ...s.filterChip, ...(mode === m ? s.filterChipActive : {}), flex: 1, textAlign: 'center' }}
+            onClick={() => setMode(m)}
+          >
+            {m === 'flat' ? 'Flat' : 'Tier'}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+        {mode === 'flat' ? (
+          <input
+            style={{ ...s.inputSm, flex: 1, padding: '8px 10px' }}
+            type="number" min="0" max="100" step="0.1"
+            placeholder="Blank = platform default"
+            value={rateInput}
+            onChange={(e) => setRateInput(e.target.value)}
+          />
+        ) : (
+          <p style={{ flex: 1, fontSize: '12px', color: '#888', margin: 0 }}>
+            Tier rates global hain — item ke margin ke hisaab se auto decide honge
+          </p>
+        )}
+        <button
+          style={{ ...s.approveBtn, padding: '8px 14px', opacity: saving ? 0.7 : 1 }}
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
       </div>
     </div>
   );
@@ -391,7 +715,16 @@ function TabSellers({ sellers, filter, setFilter, loading, onApprove, onReject }
         <div key={reg.id} style={{ ...s.regCard, borderLeftColor: reg.status === 'pending' ? '#F59E0B' : reg.status === 'approved' ? '#10B981' : '#EF4444' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <p style={{ fontSize: '16px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 2px' }}>{reg.store_name}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                <p style={{ fontSize: '16px', fontWeight: '700', color: '#1A1A1A', margin: 0 }}>{reg.store_name}</p>
+                <span style={{
+                  fontSize: '10px', fontWeight: '700', padding: '2px 7px', borderRadius: '4px',
+                  backgroundColor: reg.seller_type === 'wholesaler' ? '#0C447C' : '#F26C0A',
+                  color: '#FFFFFF', letterSpacing: '0.5px', flexShrink: 0,
+                }}>
+                  {reg.seller_type === 'wholesaler' ? 'WHOLESALER' : 'RETAILER'}
+                </span>
+              </div>
               <p style={{ fontSize: '13px', color: '#555', margin: '0 0 2px' }}>{reg.owner_name}</p>
               <p style={{ fontSize: '12px', color: '#888', margin: 0 }}>{reg.district} · {reg.pincode}</p>
             </div>
@@ -527,21 +860,51 @@ function TabAdmins({ admins, adminForm, setAdminForm, onAdd, onRemove, PERMISSIO
 // ══════════════════════════════════════════════════════════════
 // TAB: Offers
 // ══════════════════════════════════════════════════════════════
-function TabOffers({ offers, setOffers, offerForm, setOfferForm }) {
+function TabOffers({ offers, setOffers, offerForm, setOfferForm, loadOffers }) {
   const setField = (field) => (e) => setOfferForm((p) => ({ ...p, [field]: e.target.value }));
 
-  const addOffer = () => {
+  const addOffer = async () => {
     if (!offerForm.title || !offerForm.promoCode || !offerForm.discountValue) {
       alert('Title, promo code, aur discount value zaroori hai');
       return;
     }
-    const newOffer = { ...offerForm, id: Date.now(), active: true, uses: 0 };
-    setOffers((p) => [...p, newOffer]);
+    const { error } = await supabase
+      .from('offers')
+      .insert({
+        title:          offerForm.title,
+        discount_type:  offerForm.discountType,
+        discount_value: Number(offerForm.discountValue),
+        promo_code:     offerForm.promoCode.toUpperCase(),
+        min_order:      Number(offerForm.minOrder) || 0,
+        max_uses:       Number(offerForm.maxUses) || 0,
+        applicable_on:  offerForm.applicableOn || 'all',
+        valid_from:     offerForm.validFrom || null,
+        valid_till:     offerForm.validTill || null,
+        active:         true,
+      })
+      .select();
+    if (error) {
+      console.error('addOffer error:', error);
+      if (error.code === '23505') alert('Yeh promo code pehle se hai, doosra chuniye');
+      else alert('Offer save nahi hua: ' + (error.message || 'error'));
+      return;
+    }
+    await loadOffers();
     setOfferForm({ title: '', discountType: 'percentage', discountValue: '', promoCode: '', minOrder: '', validFrom: '', validTill: '', applicableOn: 'all', maxUses: '' });
+    alert('Offer ban gaya!');
   };
 
-  const toggleOffer = (id) => setOffers((p) => p.map((o) => o.id === id ? { ...o, active: !o.active } : o));
-  const deleteOffer = (id) => setOffers((p) => p.filter((o) => o.id !== id));
+  const toggleOffer = async (id, currentActive) => {
+    const { error } = await supabase.from('offers').update({ active: !currentActive }).eq('id', id);
+    if (error) { alert('Toggle nahi hua: ' + error.message); return; }
+    await loadOffers();
+  };
+
+  const deleteOffer = async (id) => {
+    const { error } = await supabase.from('offers').delete().eq('id', id);
+    if (error) { alert('Delete nahi hua: ' + error.message); return; }
+    await loadOffers();
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -583,11 +946,11 @@ function TabOffers({ offers, setOffers, offerForm, setOfferForm }) {
               <div>
                 <p style={{ fontSize: '15px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 2px' }}>{o.title}</p>
                 <p style={{ fontSize: '12px', color: '#888', margin: 0 }}>
-                  {o.promoCode} · {o.discountValue}{o.discountType === 'percentage' ? '%' : '₹'} off · Valid till {o.validTill || '—'}
+                  {o.promo_code} · {o.discount_value}{o.discount_type === 'percentage' ? '%' : '₹'} off · Valid till {o.valid_till || '—'}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <button style={{ ...s.filterChip, ...(o.active ? s.filterChipActive : {}) }} onClick={() => toggleOffer(o.id)}>
+                <button style={{ ...s.filterChip, ...(o.active ? s.filterChipActive : {}) }} onClick={() => toggleOffer(o.id, o.active)}>
                   {o.active ? 'Active' : 'Inactive'}
                 </button>
                 <button style={s.removeBtn} onClick={() => deleteOffer(o.id)}>Del</button>
@@ -609,9 +972,30 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
 
   const saveSettings = async () => {
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 800));
+    const { error } = await supabase
+      .from('platform_settings')
+      .update({
+        new_registrations: settings.newRegistrations,
+        home_delivery:     settings.homeDelivery,
+        pharmacist_calls:  settings.pharmacistCalls,
+        maintenance_mode:  settings.maintenanceMode,
+        commission:               Number(settings.commission),
+        delivery_charge:          Number(settings.deliveryCharge),
+        free_delivery_threshold:  Number(settings.freeDeliveryThreshold),
+        commission_approval_delegated_to_admin: settings.commissionDelegatedToAdmin,
+        tier_high_rate: Number(settings.tierHighRate),
+        tier_mod_rate:  Number(settings.tierModRate),
+        tier_low_rate:  Number(settings.tierLowRate),
+        updated_at:               new Date().toISOString(),
+      })
+      .eq('id', 1);
     setSaving(false);
-    alert('Settings save ho gayi!');
+    if (error) {
+      console.error('saveSettings error:', error);
+      alert('Settings save nahi hui: ' + (error.message || 'error'));
+    } else {
+      alert('Settings save ho gayi!');
+    }
   };
 
   const TOGGLES = [
@@ -646,6 +1030,46 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
         <input style={s.inputSm} type="number" min="0" max="100" value={settings.commission} onChange={(e) => setSettings((p) => ({ ...p, commission: e.target.value }))} />
         <label style={{ fontSize: '13px', color: '#555', display: 'block', margin: '12px 0 4px' }}>Delivery Charge (₹)</label>
         <input style={s.inputSm} type="number" min="0" value={settings.deliveryCharge} onChange={(e) => setSettings((p) => ({ ...p, deliveryCharge: e.target.value }))} />
+        <label style={{ fontSize: '13px', color: '#555', display: 'block', margin: '12px 0 4px' }}>Free Delivery Above (₹)</label>
+        <input style={s.inputSm} type="number" min="0" value={settings.freeDeliveryThreshold} onChange={(e) => setSettings((p) => ({ ...p, freeDeliveryThreshold: e.target.value }))} />
+        <p style={{ fontSize: '11px', color: '#888', margin: '4px 0 0' }}>Is amount se zyada order pe delivery free hogi (0 = hamesha charge lagega)</p>
+
+        <div style={{ padding: '14px 0 0', marginTop: '12px', borderTop: '1px solid #F0F0F0' }}>
+          <p style={{ fontSize: '13px', color: '#555', margin: '0 0 2px' }}>Tier Commission Band Rates</p>
+          <p style={{ fontSize: '11px', color: '#888', margin: '0 0 10px' }}>
+            Har medicine ka band (Bands tab mein set hota hai) is rate se commission decide karta hai. Unclassified medicine seller ke flat rate se calculate hoti hai.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+            <div>
+              <label style={{ fontSize: '12px', color: '#DC2626', fontWeight: '700', display: 'block', marginBottom: '4px' }}>High (%)</label>
+              <input style={s.inputSm} type="number" min="0" max="100" step="0.1" value={settings.tierHighRate} onChange={(e) => setSettings((p) => ({ ...p, tierHighRate: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', color: '#D97706', fontWeight: '700', display: 'block', marginBottom: '4px' }}>Moderate (%)</label>
+              <input style={s.inputSm} type="number" min="0" max="100" step="0.1" value={settings.tierModRate} onChange={(e) => setSettings((p) => ({ ...p, tierModRate: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', color: '#059669', fontWeight: '700', display: 'block', marginBottom: '4px' }}>Low (%)</label>
+              <input style={s.inputSm} type="number" min="0" max="100" step="0.1" value={settings.tierLowRate} onChange={(e) => setSettings((p) => ({ ...p, tierLowRate: e.target.value }))} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 0', marginTop: '12px', borderTop: '1px solid #F0F0F0' }}>
+          <div style={{ flex: 1, paddingRight: '12px' }}>
+            <p style={{ fontSize: '14px', color: '#333', margin: 0 }}>Commission Approval Admin Ko De</p>
+            <p style={{ fontSize: '11px', color: '#888', margin: '2px 0 0' }}>
+              On karne pe Admin bhi commission requests approve/reject kar sakega
+            </p>
+          </div>
+          <div
+            style={{ width: '48px', height: '26px', borderRadius: '13px', backgroundColor: settings.commissionDelegatedToAdmin ? '#1A6B3C' : '#ccc', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+            onClick={() => toggle('commissionDelegatedToAdmin')}
+          >
+            <div style={{ position: 'absolute', top: '3px', left: settings.commissionDelegatedToAdmin ? '25px' : '3px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+          </div>
+        </div>
+
         <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: saving ? 0.7 : 1 }} onClick={saveSettings} disabled={saving}>
           {saving ? 'Save Ho Raha Hai...' : 'Save Karo'}
         </button>
@@ -694,7 +1118,7 @@ const s = {
 
   regCard:   { backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', borderLeft: '4px solid #E0E0E0' },
   filterChip: { padding: '6px 14px', borderRadius: '20px', border: '1.5px solid #E0E0E0', backgroundColor: '#FAFAFA', fontSize: '13px', fontWeight: '600', color: '#888', cursor: 'pointer', fontFamily: 'inherit' },
-  filterChipActive: { borderColor: '#1A6B3C', backgroundColor: '#F0FDF4', color: '#1A6B3C' },
+  filterChipActive: { border: '1.5px solid #1A6B3C', backgroundColor: '#F0FDF4', color: '#1A6B3C' },
   expandBtn:  { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '12px', fontWeight: '600', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' },
   docsBox:    { backgroundColor: '#F9FAFB', borderRadius: '8px', padding: '10px', marginTop: '8px' },
   approveBtn: { padding: '10px 16px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },

@@ -18,7 +18,9 @@ const STEP_TITLES = [
 
 const INITIAL_FORM = {
   ownerName: '', mobile: '', email: '', aadharNumber: '',
+  sellerType: '',
   storeName: '', address: '', district: '', city: '', pincode: '', mapsLink: '',
+  commissionMode: 'flat',
   drugLicenseNumber: '', drugLicenseExpiry: '', pharmacistName: '', pharmacistRegNumber: '',
   bankName: '', accountNumber: '', ifscCode: '', upiId: '',
 };
@@ -49,6 +51,7 @@ export default function SellerRegister() {
       if (!/^\d{12}$/.test(formData.aadharNumber))             e.aadharNumber = '12-digit Aadhar daalo';
     }
     if (step === 2) {
+      if (!formData.sellerType)       e.sellerType = 'Seller type chunna zaroori hai';
       if (!formData.storeName.trim()) e.storeName = 'Dukaan ka naam zaroori hai';
       if (!formData.address.trim())   e.address   = 'Address zaroori hai';
       if (!formData.district)         e.district  = 'District select karo';
@@ -105,6 +108,8 @@ export default function SellerRegister() {
         city:                    formData.city,
         pincode:                 formData.pincode,
         maps_link:               formData.mapsLink || null,
+        seller_type:             formData.sellerType,
+        commission_mode:         formData.commissionMode || 'flat',
         drug_license_number:     formData.drugLicenseNumber,
         drug_license_expiry:     formData.drugLicenseExpiry,
         drug_license_image_url:  drugLicenseUrl,
@@ -159,6 +164,7 @@ export default function SellerRegister() {
               formData={formData} set={set} errors={errors}
               drugLicenseFile={drugLicenseFile}   setDrugLicenseFile={setDrugLicenseFile}
               pharmacistCertFile={pharmacistCertFile} setPharmacistCertFile={setPharmacistCertFile}
+              sellerType={formData.sellerType}
             />
           )}
           {step === 4 && (
@@ -208,6 +214,42 @@ function Step1({ formData, set, errors }) {
 function Step2({ formData, set, errors }) {
   return (
     <>
+      <Field label="Aap kis type ke seller hain? *" error={errors.sellerType}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {[
+            { value: 'retailer',    title: 'Retailer (Medical Store)', desc: 'Customers ko dawai bechte hain' },
+            { value: 'wholesaler',  title: 'Wholesaler',               desc: 'Sirf retailers aur licensed buyers ko bechte hain' },
+          ].map(({ value, title, desc }) => {
+            const chosen = formData.sellerType === value;
+            return (
+              <label
+                key={value}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 14px',
+                  border: `2px solid ${chosen ? '#1A6B3C' : '#E0E0E0'}`,
+                  borderRadius: '10px', cursor: 'pointer',
+                  backgroundColor: chosen ? '#F0FDF4' : '#FAFAFA',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="sellerType"
+                  value={value}
+                  checked={chosen}
+                  onChange={set('sellerType')}
+                  style={{ marginTop: '2px', accentColor: '#1A6B3C', flexShrink: 0 }}
+                />
+                <div>
+                  <p style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: chosen ? '#1A6B3C' : '#1A1A1A' }}>{title}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#888' }}>{desc}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </Field>
+
       <Field label="Dukaan Ka Naam *" error={errors.storeName}>
         <input style={inp} value={formData.storeName} onChange={set('storeName')} placeholder="Dukaan ka naam" />
       </Field>
@@ -231,12 +273,51 @@ function Step2({ formData, set, errors }) {
       <Field label="Google Maps Link (optional)" error={errors.mapsLink}>
         <input style={inp} value={formData.mapsLink} onChange={set('mapsLink')} placeholder="https://maps.google.com/..." />
       </Field>
+
+      <Field label="Platform Commission Kaisे Lagegi?">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {[
+            { value: 'flat', title: 'Flat Commission', desc: 'Har medicine pe ek fix % platform commission' },
+            { value: 'tier', title: 'Tier (Margin-Based)', desc: 'Medicine ke margin ke hisaab se commission (kam margin = kam commission)' },
+          ].map(({ value, title, desc }) => {
+            const chosen = formData.commissionMode === value;
+            return (
+              <label
+                key={value}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 14px',
+                  border: `2px solid ${chosen ? '#1A6B3C' : '#E0E0E0'}`,
+                  borderRadius: '10px', cursor: 'pointer',
+                  backgroundColor: chosen ? '#F0FDF4' : '#FAFAFA',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="commissionMode"
+                  value={value}
+                  checked={chosen}
+                  onChange={set('commissionMode')}
+                  style={{ marginTop: '2px', accentColor: '#1A6B3C', flexShrink: 0 }}
+                />
+                <div>
+                  <p style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: chosen ? '#1A6B3C' : '#1A1A1A' }}>{title}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#888' }}>{desc}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '6px 0 0' }}>
+          Exact rate approval ke baad Super Admin set karega. Kuch na chuno to Flat default rahega.
+        </p>
+      </Field>
     </>
   );
 }
 
 // ── Step 3 — Legal Documents ──────────────────────────────────
-function Step3({ formData, set, errors, drugLicenseFile, setDrugLicenseFile, pharmacistCertFile, setPharmacistCertFile }) {
+function Step3({ formData, set, errors, drugLicenseFile, setDrugLicenseFile, pharmacistCertFile, setPharmacistCertFile, sellerType }) {
   const drugLicenseRef    = useRef(null);
   const pharmacistCertRef = useRef(null);
 
@@ -249,7 +330,12 @@ function Step3({ formData, set, errors, drugLicenseFile, setDrugLicenseFile, pha
 
   return (
     <>
-      <Field label="Drug License Number *" error={errors.drugLicenseNumber}>
+      <Field
+        label={sellerType === 'wholesaler'
+          ? 'Wholesale Drug License Number (Form 20B/21B) *'
+          : 'Retail Drug License Number (Form 20/21) *'}
+        error={errors.drugLicenseNumber}
+      >
         <input style={inp} value={formData.drugLicenseNumber} onChange={set('drugLicenseNumber')} placeholder="UP-DL-XXXX-XXXXX" />
       </Field>
       <Field label="Drug License Expiry Date *" error={errors.drugLicenseExpiry}>

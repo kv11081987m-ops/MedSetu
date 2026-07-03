@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
-  Search, Home, ShoppingBag, User, RefreshCw,
+  Search, Home, ShoppingBag, User, RefreshCw, ChevronDown,
 } from 'lucide-react';
-import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose } from '../lib/api';
+import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine } from '../lib/api';
 
 const INITIAL_RECENT = [
   'Paracetamol 500mg', 'BP Machine', 'Crocin 650mg', 'ORS Powder',
@@ -16,19 +16,62 @@ const filterKey = { Tablets: 'tablet', Syrup: 'syrup', Equipment: 'equipment', I
 
 // ─── MedicineCard ─────────────────────────────────────────────
 function MedicineCard({ medicine, type }) {
-  const navigate = useNavigate();
   const { addToCart } = useCart();
   const med      = mapMedicine(medicine);
   const rateInfo = getRatePerDose(medicine);
+  const [expanded,      setExpanded]      = useState(false);
+  const [showStores,    setShowStores]    = useState(false);
+  const [sellers,       setSellers]       = useState([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+  const [addedSeller,   setAddedSeller]   = useState(null);
+  const [addLoading,    setAddLoading]    = useState(false);
 
   const borderColor = type === 'janaushadhi' ? '#1A6B3C'
                     : type === 'generic'      ? '#2563EB'
                     : '#FF8C00';
 
+  const handleStoresToggle = async () => {
+    if (showStores) { setShowStores(false); return; }
+    setShowStores(true);
+    if (sellers.length > 0) return;
+    setStoresLoading(true);
+    const data = await fetchSellersForMedicine(med.id);
+    setSellers(data);
+    setStoresLoading(false);
+  };
+
+  const handleAddFromSeller = (s) => {
+    addToCart(
+      { ...med, price: s.selling_price, quantity: 1 },
+      { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
+    );
+    setAddedSeller(s.sellers?.id);
+    setTimeout(() => setAddedSeller(null), 2000);
+  };
+
+  const handleQuickAdd = async () => {
+    if (addLoading || addedSeller) return;
+    let sellerList = sellers;
+    if (sellerList.length === 0) {
+      setAddLoading(true);
+      sellerList = await fetchSellersForMedicine(med.id);
+      setSellers(sellerList);
+      setAddLoading(false);
+    }
+    if (sellerList.length === 0) return;
+    const cheapest = sellerList[0];
+    addToCart(
+      { ...med, price: cheapest.selling_price, quantity: 1 },
+      { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
+    );
+    setAddedSeller(cheapest.sellers?.id);
+    setTimeout(() => setAddedSeller(null), 2000);
+  };
+
   return (
     <div style={{ background: '#fff', borderRadius: '12px', padding: '14px 16px', marginBottom: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderLeft: `3px solid ${borderColor}` }}>
 
-      {/* Name / brand / salt + price */}
+      {/* Name / brand / salt + MRP */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontWeight: '600', fontSize: '14px', color: '#1A1A1A', margin: '0 0 2px', lineHeight: '1.3' }}>{med.name}</p>
@@ -36,6 +79,7 @@ function MedicineCard({ medicine, type }) {
           {med.salt   && <p style={{ color: '#888', fontSize: '11px', margin: 0 }}>{med.salt.substring(0, 60)}</p>}
         </div>
         <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
+          <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>MRP</p>
           <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
         </div>
       </div>
@@ -62,20 +106,86 @@ function MedicineCard({ medicine, type }) {
         )}
       </div>
 
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: '8px' }}>
+      {/* Actions */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+
+        {/* Store + Add buttons */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={handleStoresToggle}
+            style={{ flex: 1, padding: '9px', background: showStores ? '#E8F4FF' : '#0C447C', border: 'none', borderRadius: '8px', color: showStores ? '#0C447C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
+          >
+            Store
+            <ChevronDown size={13} color={showStores ? '#0C447C' : '#fff'} style={{ transition: 'transform 0.2s', transform: showStores ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+          </button>
+          <button
+            onClick={handleQuickAdd}
+            style={{ flex: 1, padding: '9px', background: addedSeller ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '8px', color: addedSeller ? '#1A6B3C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+          >
+            {addLoading ? '...' : addedSeller ? 'Added ✓' : 'Add'}
+          </button>
+        </div>
+
+        {/* Seller list */}
+        {showStores && (
+          <div style={{ borderTop: '1px solid #F0F0F0', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {storesLoading ? (
+              <p style={{ fontSize: '12px', color: '#888', textAlign: 'center', padding: '8px 0', margin: 0 }}>Stores dhundh rahe hain...</p>
+            ) : sellers.length === 0 ? (
+              <p style={{ fontSize: '12px', color: '#888', textAlign: 'center', padding: '8px 0', margin: 0 }}>Yeh medicine kisi store mein abhi available nahi</p>
+            ) : (
+              sellers.map((s, i) => {
+                const store   = s.sellers || {};
+                const isOpen  = store.is_open;
+                const isAdded = addedSeller === store.id;
+                return (
+                  <div key={store.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: '#F8F8F8', borderRadius: '8px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 3px' }}>{store.store_name || 'Store'}</p>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.selling_price}</span>
+                        {store.rating && <span style={{ fontSize: '11px', color: '#F59E0B' }}>★ {store.rating}</span>}
+                        <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 6px', borderRadius: '99px', fontWeight: '500' }}>
+                          {isOpen ? 'Open' : 'Closed'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0' }}>{s.available} units available</p>
+                    </div>
+                    <button
+                      onClick={() => isOpen && !isAdded && handleAddFromSeller(s)}
+                      style={{ padding: '6px 14px', background: isAdded ? '#E8F5EE' : isOpen ? '#1A6B3C' : '#CCCCCC', border: 'none', borderRadius: '6px', color: isAdded ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: isOpen ? 'pointer' : 'not-allowed', fontFamily: 'inherit', flexShrink: 0, marginLeft: '10px' }}
+                    >
+                      {isAdded ? 'Added ✓' : 'Add'}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Detail accordion — unchanged */}
         <button
-          onClick={() => navigate('/medicine-detail', { state: { medicine } })}
-          style={{ flex: 1, padding: '8px', background: '#fff', border: `1.5px solid ${borderColor}`, borderRadius: '8px', color: borderColor, fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
+          onClick={() => setExpanded((p) => !p)}
+          style={{ width: '100%', padding: '6px', background: 'transparent', border: 'none', color: '#999', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
         >
-          Detail Dekho
+          Detail
+          <ChevronDown size={13} color="#999" style={{ transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }} />
         </button>
-        <button
-          onClick={() => { addToCart({ ...med, price: med.price || 0 }, null); navigate('/checkout'); }}
-          style={{ flex: 1, padding: '8px', background: borderColor, border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
-        >
-          Order Karo
-        </button>
+
+        {expanded && (
+          <div style={{ borderTop: '1px solid #F0F0F0', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            {med.salt        && <DetailRow label="Salt"      value={med.salt} />}
+            {med.brand       && <DetailRow label="Brand"     value={med.brand} />}
+            {medicine.unit   && <DetailRow label="Pack"      value={medicine.unit} />}
+            {medicine.dosage_form && <DetailRow label="Form" value={medicine.dosage_form} />}
+            {(med.price || med.mrp) && <DetailRow label="MRP" value={`₹${med.price || med.mrp}`} />}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+              {medicine.is_generic             && <span style={badge('#E8F5E9', '#1A6B3C')}>✓ Generic</span>}
+              {medicine.source==='janaushadhi' && <span style={badge('#E8F5E9', '#1A6B3C')}>🏥 Jan Aushadhi</span>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -84,6 +194,15 @@ function MedicineCard({ medicine, type }) {
 const badge = (bg, color) => ({
   background: bg, color, fontSize: '10px', padding: '2px 8px', borderRadius: '99px', fontWeight: '500',
 });
+
+function DetailRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+      <span style={{ fontSize: '11px', color: '#AAAAAA', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: '11px', color: '#444444', textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
 
 // ─── Section header ───────────────────────────────────────────
 function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
@@ -104,8 +223,53 @@ function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
 }
 
 // ─── PopularCard ──────────────────────────────────────────────
-function PopularCard({ item, onAdd }) {
+function PopularCard({ item }) {
+  const { addToCart } = useCart();
+  const [showStores,    setShowStores]    = useState(false);
+  const [sellers,       setSellers]       = useState([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+  const [addedSeller,   setAddedSeller]   = useState(null);
+  const [addLoading,    setAddLoading]    = useState(false);
   const isEquip = item.type === 'equipment';
+
+  const handleStoresToggle = async () => {
+    if (showStores) { setShowStores(false); return; }
+    setShowStores(true);
+    if (sellers.length > 0) return;
+    setStoresLoading(true);
+    const data = await fetchSellersForMedicine(item.id);
+    setSellers(data);
+    setStoresLoading(false);
+  };
+
+  const handleAddFromSeller = (s) => {
+    addToCart(
+      { ...item, price: s.selling_price, quantity: 1 },
+      { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
+    );
+    setAddedSeller(s.sellers?.id);
+    setTimeout(() => setAddedSeller(null), 2000);
+  };
+
+  const handleQuickAdd = async () => {
+    if (addLoading || addedSeller) return;
+    let sellerList = sellers;
+    if (sellerList.length === 0) {
+      setAddLoading(true);
+      sellerList = await fetchSellersForMedicine(item.id);
+      setSellers(sellerList);
+      setAddLoading(false);
+    }
+    if (sellerList.length === 0) return;
+    const cheapest = sellerList[0];
+    addToCart(
+      { ...item, price: cheapest.selling_price, quantity: 1 },
+      { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
+    );
+    setAddedSeller(cheapest.sellers?.id);
+    setTimeout(() => setAddedSeller(null), 2000);
+  };
+
   return (
     <div style={s.popCard}>
       <div style={{ ...s.popIconBox, backgroundColor: isEquip ? '#EAF2FF' : '#E8F5EE' }}>
@@ -115,16 +279,62 @@ function PopularCard({ item, onAdd }) {
       <p style={s.popSalt}>{item.salt}</p>
       <div style={s.popFooter}>
         <span style={s.popPrice}>₹{item.price}</span>
-        <button style={s.addBtn} onClick={() => onAdd(item)}>Add</button>
       </div>
+      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+        <button
+          onClick={handleStoresToggle}
+          style={{ flex: 1, padding: '6px', background: showStores ? '#E8F4FF' : '#0C447C', border: 'none', borderRadius: '6px', color: showStores ? '#0C447C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+        >
+          Store
+          <ChevronDown size={12} color={showStores ? '#0C447C' : '#fff'} style={{ transition: 'transform 0.2s', transform: showStores ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+        </button>
+        <button
+          onClick={handleQuickAdd}
+          style={{ flex: 1, padding: '6px', background: addedSeller ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '6px', color: addedSeller ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+        >
+          {addLoading ? '...' : addedSeller ? '✓' : 'Add'}
+        </button>
+      </div>
+
+      {showStores && (
+        <div style={{ marginTop: '8px', borderTop: '1px solid #F0F0F0', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {storesLoading ? (
+            <p style={{ fontSize: '11px', color: '#888', textAlign: 'center', margin: 0 }}>Loading...</p>
+          ) : sellers.length === 0 ? (
+            <p style={{ fontSize: '11px', color: '#888', textAlign: 'center', margin: 0 }}>Koi store available nahi</p>
+          ) : (
+            sellers.map((s, i) => {
+              const store   = s.sellers || {};
+              const isOpen  = store.is_open;
+              const isAdded = addedSeller === store.id;
+              return (
+                <div key={store.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', background: '#F0F8F4', borderRadius: '6px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: '11px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{store.store_name || 'Store'}</p>
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.selling_price}</span>
+                      <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 5px', borderRadius: '99px', fontWeight: '500' }}>{isOpen ? 'Open' : 'Closed'}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => isOpen && !isAdded && handleAddFromSeller(s)}
+                    style={{ padding: '4px 10px', background: isAdded ? '#E8F5EE' : isOpen ? '#1A6B3C' : '#CCCCCC', border: 'none', borderRadius: '5px', color: isAdded ? '#1A6B3C' : '#fff', fontSize: '11px', fontWeight: '600', cursor: isOpen ? 'pointer' : 'not-allowed', fontFamily: 'inherit', flexShrink: 0, marginLeft: '6px' }}
+                  >
+                    {isAdded ? '✓' : 'Add'}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Main Screen ──────────────────────────────────────────────
 export default function MedicineSearch() {
-  const navigate    = useNavigate();
-  const { addToCart } = useCart();
+  const navigate = useNavigate();
   const inputRef    = useRef(null);
   const debounceRef = useRef(null);
 
@@ -265,19 +475,17 @@ export default function MedicineSearch() {
                   <TrendingUp size={14} color="#1A6B3C" />
                   <span style={s.sectionTitle}>Popular Medicines</span>
                 </div>
-                <div style={s.popGrid}>
-                  {applyFilter(popularMeds).map(item => (
-                    <PopularCard
-                      key={item.id}
-                      item={item}
-                      onAdd={it => {
-                        addToRecent(it.name);
-                        addToCart({ ...it, price: it.price ?? 0 }, null);
-                        navigate('/checkout');
-                      }}
-                    />
-                  ))}
-                </div>
+                {applyFilter(popularMeds).length === 0 ? (
+                  <p style={{ fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '16px 0', margin: 0 }}>
+                    🌱 Jald hi naye medicines available honge
+                  </p>
+                ) : (
+                  <div style={s.popGrid}>
+                    {applyFilter(popularMeds).map(item => (
+                      <PopularCard key={item.id} item={item} />
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           ) : searchLoading ? (
@@ -340,8 +548,11 @@ export default function MedicineSearch() {
             /* ── No Results ── */
             <div style={s.emptyState}>
               <p style={{ fontSize: '48px', margin: 0 }}>🔍</p>
-              <p style={s.emptyTitle}>Koi result nahi mila</p>
-              <p style={s.emptySubtitle}>"{query}" ke liye koi medicine nahi mili</p>
+              <p style={s.emptyTitle}>"{query}" abhi available nahi</p>
+              <p style={s.emptySubtitle}>
+                Yeh medicine abhi kisi store mein available nahi hai.{'\n'}
+                Hum lagatar naye stores jod rahe hain — baad mein dobara dekhein.
+              </p>
               <button style={s.prescBtn} onClick={() => navigate('/prescription')}>
                 Prescription Upload Karo
               </button>

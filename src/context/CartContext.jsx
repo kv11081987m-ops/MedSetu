@@ -1,11 +1,29 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
 const CartContext = createContext(null);
 
 export function CartProvider({ children }) {
-  const [cartItems, setCartItems] = useState([]);
-  const [cartSellerId, setCartSellerId] = useState(null);
-  const [cartSellerName, setCartSellerName] = useState('');
+  const [cartItems, setCartItems] = useState(() => {
+    try {
+      const saved = localStorage.getItem('medsetu_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [cartSellerId, setCartSellerId] = useState(() => {
+    try { return localStorage.getItem('medsetu_cart_seller') || null; } catch { return null; }
+  });
+  const [cartSellerName, setCartSellerName] = useState(() => {
+    try { return localStorage.getItem('medsetu_cart_seller_name') || ''; } catch { return ''; }
+  });
+
+  // ── Persist cart to localStorage on every change ─────────────
+  useEffect(() => {
+    try {
+      localStorage.setItem('medsetu_cart', JSON.stringify(cartItems));
+      localStorage.setItem('medsetu_cart_seller', cartSellerId || '');
+      localStorage.setItem('medsetu_cart_seller_name', cartSellerName || '');
+    } catch (e) { console.error('cart save error:', e); }
+  }, [cartItems, cartSellerId, cartSellerName]);
 
   // ── Add to cart ──────────────────────────────────────────────
   // seller = { id, name } — enforces single-seller cart
@@ -62,12 +80,17 @@ export function CartProvider({ children }) {
     setCartItems([]);
     setCartSellerId(null);
     setCartSellerName('');
+    try {
+      localStorage.removeItem('medsetu_cart');
+      localStorage.removeItem('medsetu_cart_seller');
+      localStorage.removeItem('medsetu_cart_seller_name');
+    } catch { /* ignore */ }
   }, []);
 
-  const cartTotal = cartItems.reduce(
+  const cartTotal = (cartItems || []).reduce(
     (sum, i) => sum + (i.price ?? i.selling_price ?? 0) * i.quantity, 0
   );
-  const cartCount = cartItems.reduce((sum, i) => sum + i.quantity, 0);
+  const cartCount = (cartItems || []).reduce((sum, i) => sum + i.quantity, 0);
 
   return (
     <CartContext.Provider value={{
