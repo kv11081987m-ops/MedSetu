@@ -295,6 +295,26 @@ export default function PharmacistPanel() {
     } catch {}
   }, []);
 
+  // Realtime — new notification INSERT updates the bell instantly.
+  // Purely additive on top of the fetch-on-mount above.
+  useEffect(() => {
+    let myUserId;
+    try { myUserId = JSON.parse(localStorage.getItem('medsetu_user') || '{}')?.id; } catch {}
+    if (!myUserId) return;
+
+    const channel = supabase
+      .channel(`notifs-${myUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myUserId}` },
+        (payload) => {
+          setNotifications((prev) => prev.some((n) => n.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   // ── Derived state ────────────────────────────────────────────
   const allCalls = callQueue.map((order) => ({
     ...mapCallCard(order),

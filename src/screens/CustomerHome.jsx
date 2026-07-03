@@ -195,6 +195,26 @@ export default function CustomerHome() {
     return () => { cancelled = true; };
   }, [navigate]);
 
+  // Realtime — new notification INSERT updates the bell instantly.
+  // Purely additive on top of the fetch-on-mount above.
+  useEffect(() => {
+    let myUserId;
+    try { myUserId = JSON.parse(localStorage.getItem('medsetu_user') || '{}')?.id; } catch {}
+    if (!myUserId) return;
+
+    const channel = supabase
+      .channel(`notifs-${myUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myUserId}` },
+        (payload) => {
+          setNotifs((prev) => prev.some((n) => n.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const NAV_TABS = [
     { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
     { id: 'search',  Icon: Search,      label: 'Search',  route: '/medicine-search' },
@@ -288,7 +308,7 @@ export default function CustomerHome() {
                   <StoreCard
                     key={store?.id || store?.name || `store-${idx}`}
                     store={store}
-                    onOrder={() => navigate('/medicine-search')}
+                    onOrder={(st) => navigate('/store-inventory', { state: { sellerId: st.id, storeName: st.name } })}
                   />
                 ))}
               </div>

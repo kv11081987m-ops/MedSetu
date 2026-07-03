@@ -5,7 +5,7 @@ import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
   Search, Home, ShoppingBag, User, RefreshCw, ChevronDown,
 } from 'lucide-react';
-import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine } from '../lib/api';
+import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp } from '../lib/api';
 
 const INITIAL_RECENT = [
   'Paracetamol 500mg', 'BP Machine', 'Crocin 650mg', 'ORS Powder',
@@ -345,6 +345,11 @@ export default function MedicineSearch() {
   const [popularMeds, setPopularMeds] = useState([]);
   const [searchResults, setSearchResults] = useState({ branded: [], generic: [], janaushadhi: [] });
   const [searchLoading, setSearchLoading] = useState(false);
+  const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
+
+  useEffect(() => {
+    fetchSupportWhatsapp().then(setSupportWhatsapp);
+  }, []);
 
   useEffect(() => {
     fetchPopularMedicines(12).then(({ data }) => {
@@ -558,7 +563,7 @@ export default function MedicineSearch() {
               </button>
               <button style={s.pharmacistBtn} onClick={() => {
                 const msg = encodeURIComponent('Namaste, mujhe medicine ke baare mein poochna tha. Kya aap help kar sakte hain?');
-                window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+                window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');
               }}>
                 Pharmacist Se Poochho
               </button>

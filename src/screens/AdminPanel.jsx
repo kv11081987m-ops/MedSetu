@@ -349,7 +349,6 @@ export default function AdminPanel() {
 
   // ── UI state ─────────────────────────────────────────────────
   const [disputes,      setDisputes]     = useState([]);
-  const [settings,      setSettings]     = useState({ registrations: true, delivery: true, pharmCall: true, maintenance: false });
   // Tab lives in the URL (?tab=) so a reload keeps you where you were —
   // falls back to 'dashboard' silently if the query param is missing or
   // names a tab that doesn't exist.
@@ -577,7 +576,6 @@ export default function AdminPanel() {
   };
 
   const handleResolve       = (id) => setDisputes((d)  => d.filter((x) => x.id !== id));
-  const toggleSetting       = (key)=> setSettings((prev)=> ({ ...prev, [key]: !prev[key] }));
   const handleResolveTab    = (id) => setAllDisputes((prev) => prev.map((d) => d.id === id ? { ...d, status: 'resolved' } : d));
 
   const unreadCount   = notifications.filter((n) => !n.read).length;
@@ -751,26 +749,6 @@ export default function AdminPanel() {
           ))}
         </div>
       </div>
-
-      <div style={s.whiteCard}>
-        <p style={s.sectionTitle}>Quick Settings</p>
-        {[
-          { key: 'registrations', label: 'Naye Registrations' },
-          { key: 'delivery',      label: 'Home Delivery'       },
-          { key: 'pharmCall',     label: 'Pharmacist Call'     },
-          { key: 'maintenance',   label: 'Maintenance Mode'    },
-        ].map(({ key, label }) => {
-          const on = settings[key];
-          return (
-            <div key={key} style={s.toggleRow}>
-              <span style={s.toggleLabel}>{label}</span>
-              <button style={{ ...s.toggleTrack, backgroundColor: on ? '#1A6B3C' : '#CCCCCC' }} onClick={() => toggleSetting(key)}>
-                <span style={{ ...s.toggleThumb, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
     </>
   );
 
@@ -848,25 +826,6 @@ export default function AdminPanel() {
   const renderSettings = () => (
     <>
       <p style={s.tabTitle}>Platform Settings</p>
-
-      <div style={s.whiteCard}>
-        {[
-          { key: 'registrations', label: 'Naye Registrations' },
-          { key: 'delivery',      label: 'Home Delivery'       },
-          { key: 'pharmCall',     label: 'Pharmacist Call'     },
-          { key: 'maintenance',   label: 'Maintenance Mode'    },
-        ].map(({ key, label }) => {
-          const on = settings[key];
-          return (
-            <div key={key} style={s.toggleRow}>
-              <span style={s.toggleLabel}>{label}</span>
-              <button style={{ ...s.toggleTrack, backgroundColor: on ? '#1A6B3C' : '#CCCCCC' }} onClick={() => toggleSetting(key)}>
-                <span style={{ ...s.toggleThumb, transform: on ? 'translateX(20px)' : 'translateX(0)' }} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
 
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Platform Info</p>
@@ -1167,11 +1126,6 @@ const s = {
   actionGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
   actionBtn:  { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 8px', borderRadius: '12px', border: 'none', cursor: 'pointer', fontFamily: 'inherit' },
   actionLabel: { fontSize: '12px', fontWeight: '700', textAlign: 'center' },
-
-  toggleRow:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #F5F5F5' },
-  toggleLabel: { fontSize: '14px', fontWeight: '500', color: '#1A1A1A' },
-  toggleTrack: { width: '44px', height: '26px', borderRadius: '13px', border: 'none', cursor: 'pointer', position: 'relative', transition: 'background-color 0.3s ease', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: '3px', left: '3px', width: '20px', height: '20px', borderRadius: '10px', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'transform 0.3s ease' },
 
   dangerOutlineBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',

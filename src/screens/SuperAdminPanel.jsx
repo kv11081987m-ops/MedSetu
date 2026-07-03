@@ -52,6 +52,7 @@ export default function SuperAdminPanel() {
     commission: 5, deliveryCharge: 30, freeDeliveryThreshold: 500,
     commissionDelegatedToAdmin: false,
     tierHighRate: 20, tierModRate: 10, tierLowRate: 5,
+    supportWhatsapp: '919196103234',
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -234,6 +235,7 @@ export default function SuperAdminPanel() {
         tierHighRate: data.tier_high_rate ?? 20,
         tierModRate:  data.tier_mod_rate  ?? 10,
         tierLowRate:  data.tier_low_rate  ?? 5,
+        supportWhatsapp: data.support_whatsapp || '919196103234',
       });
     }
   };
@@ -997,6 +999,7 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
         tier_high_rate: Number(settings.tierHighRate),
         tier_mod_rate:  Number(settings.tierModRate),
         tier_low_rate:  Number(settings.tierLowRate),
+        support_whatsapp: settings.supportWhatsapp,
         updated_at:               new Date().toISOString(),
       })
       .eq('id', 1);
@@ -1044,6 +1047,9 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
         <label style={{ fontSize: '13px', color: '#555', display: 'block', margin: '12px 0 4px' }}>Free Delivery Above (₹)</label>
         <input style={s.inputSm} type="number" min="0" value={settings.freeDeliveryThreshold} onChange={(e) => setSettings((p) => ({ ...p, freeDeliveryThreshold: e.target.value }))} />
         <p style={{ fontSize: '11px', color: '#888', margin: '4px 0 0' }}>Is amount se zyada order pe delivery free hogi (0 = hamesha charge lagega)</p>
+        <label style={{ fontSize: '13px', color: '#555', display: 'block', margin: '12px 0 4px' }}>Support WhatsApp Number</label>
+        <input style={s.inputSm} type="tel" placeholder="91XXXXXXXXXX" value={settings.supportWhatsapp} onChange={(e) => setSettings((p) => ({ ...p, supportWhatsapp: e.target.value }))} />
+        <p style={{ fontSize: '11px', color: '#888', margin: '4px 0 0' }}>Customer app mein "Pharmacist Se Poochho" / order help WhatsApp links yahi number use karte hain</p>
 
         <div style={{ padding: '14px 0 0', marginTop: '12px', borderTop: '1px solid #F0F0F0' }}>
           <p style={{ fontSize: '13px', color: '#555', margin: '0 0 2px' }}>Tier Commission Band Rates</p>

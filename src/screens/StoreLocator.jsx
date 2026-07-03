@@ -320,7 +320,7 @@ export default function StoreLocator() {
                 <StoreCard
                   key={store.id}
                   store={store}
-                  onOrder={(st) => navigate('/medicine-search', { state: { store: st } })}
+                  onOrder={(st) => navigate('/store-inventory', { state: { sellerId: st.id, storeName: st.name } })}
                   onCall={(ph) => window.open(`tel:${ph}`)}
                 />
               ))

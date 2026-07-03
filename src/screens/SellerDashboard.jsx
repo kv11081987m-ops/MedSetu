@@ -514,6 +514,26 @@ export default function SellerDashboard() {
     } catch {}
   }, []);
 
+  // Realtime — new notification INSERT updates the bell instantly.
+  // Purely additive on top of the fetch-on-mount above.
+  useEffect(() => {
+    let myUserId;
+    try { myUserId = JSON.parse(localStorage.getItem('medsetu_user') || '{}')?.id; } catch {}
+    if (!myUserId) return;
+
+    const channel = supabase
+      .channel(`notifs-${myUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myUserId}` },
+        (payload) => {
+          setNotifs((prev) => prev.some((n) => n.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   useEffect(() => {
     if (sellerData?.id && activeTab === 'orders') {
       fetchAllOrders(sellerData.id, orderFilter);
@@ -582,30 +602,40 @@ export default function SellerDashboard() {
   };
 
   const acceptOrder = async (orderId) => {
+    const acceptedOrder = pendingOrders.find((o) => o.id === orderId);
+    if (!acceptedOrder || !sellerData?.id) return;
+
+    // Reserve stock FIRST — an order must never be confirmed if its
+    // items can't actually be fulfilled (A38 fix: this is atomic and
+    // race-safe against a concurrent accept on the last unit).
+    const reserveResult = await reserveStock(sellerData.id, acceptedOrder.order_items || []);
+    if (!reserveResult.success) {
+      alert(reserveResult.message);
+      await fetchAllOrders(sellerData.id, orderFilter);
+      return;
+    }
+
     const { error } = await supabase
       .from('orders').update({ status: 'confirmed' }).eq('id', orderId);
     if (!error) {
       setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
       setTodayStats((prev) => ({ ...prev, pendingCount: Math.max(0, prev.pendingCount - 1) }));
 
-      const acceptedOrder = pendingOrders.find((o) => o.id === orderId);
-      if (acceptedOrder && sellerData?.id) {
-        await reserveStock(sellerData.id, acceptedOrder.order_items || []);
-      }
-      if (acceptedOrder) {
-        const isB2B = acceptedOrder.buyer_type === 'retailer';
-        getOrderRecipientUserId(acceptedOrder)
-          .then((uid) => uid && createNotification(
-            uid, 'Order Accept! ✅',
-            isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
-            isB2B ? 'b2b_update' : 'order_accepted', orderId
-          ))
-          .catch((err) => console.warn('[notify accept]', err));
-      }
-      if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
+      const isB2B = acceptedOrder.buyer_type === 'retailer';
+      getOrderRecipientUserId(acceptedOrder)
+        .then((uid) => uid && createNotification(
+          uid, 'Order Accept! ✅',
+          isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
+          isB2B ? 'b2b_update' : 'order_accepted', orderId
+        ))
+        .catch((err) => console.warn('[notify accept]', err));
+
+      await fetchAllOrders(sellerData.id, orderFilter);
     } else {
       console.error('acceptOrder failed:', error);
       alert('Order accept nahi hua: ' + (error.message || 'Unknown error'));
+      // Order confirm hi nahi hua — abhi-abhi reserve ki gayi stock wapas karo.
+      await releaseStock(sellerData.id, acceptedOrder.order_items || []);
     }
   };
 
@@ -672,9 +702,14 @@ export default function SellerDashboard() {
       const earning = parseFloat((subtotal - commAmt).toFixed(2));
       await supabase.from('orders').update({ commission_rate: rateToStore, commission_amount: commAmt, seller_earning: earning }).eq('id', orderId);
     }
-    // Existing stock deduction (unchanged)
+    // Stock deduction — order is already delivered at this point, so a
+    // failure here can't block the flow, but the seller needs to know
+    // their inventory count may now be off.
     if (rawOrder && sellerData?.id) {
-      await deductStock(sellerData.id, rawOrder.order_items || []);
+      const deductResult = await deductStock(sellerData.id, rawOrder.order_items || []);
+      if (!deductResult.success) {
+        alert('Order deliver ho gaya, par in items ka stock count update nahi ho paya: ' + deductResult.failures.join(', ') + '. Inventory manually check kar lein.');
+      }
     }
     if (orderForComm) {
       const isB2B = orderForComm.buyer_type === 'retailer';
@@ -694,7 +729,10 @@ export default function SellerDashboard() {
     if (error) { console.error('cancelConfirmedOrder failed:', error); return; }
     const rawOrder = allOrders.find((o) => o.id === orderId);
     if (rawOrder && sellerData?.id) {
-      await releaseStock(sellerData.id, rawOrder.order_items || []);
+      const releaseResult = await releaseStock(sellerData.id, rawOrder.order_items || []);
+      if (!releaseResult.success) {
+        alert('Order cancel ho gaya, par in items ka reserved stock release nahi ho paya: ' + releaseResult.failures.join(', ') + '. Inventory manually check kar lein.');
+      }
     }
     if (rawOrder) {
       getOrderRecipientUserId(rawOrder)
@@ -1078,11 +1116,6 @@ export default function SellerDashboard() {
               </div>
               <IndianRupee size={32} color="#1A6B3C" strokeWidth={1.5} />
             </div>
-
-            <button style={s.withdrawBtn}>
-              <IndianRupee size={16} color="#FFFFFF" />
-              Withdrawal Request Karo
-            </button>
           </>}
 
           {/* ══ PROFILE TAB ═══════════════════════════════════ */}
@@ -1455,7 +1488,6 @@ const s = {
   monthlyCard:      { backgroundColor: '#E8F5EE', borderRadius: '14px', padding: '18px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   monthlyLabel:     { fontSize: '12px', color: '#1A6B3C', fontWeight: '600', margin: '0 0 4px' },
   monthlyVal:       { fontSize: '22px', fontWeight: '800', color: '#1A6B3C', margin: 0 },
-  withdrawBtn:      { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '15px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '14px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 
   // Profile tab
   profileCard:        { backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' },

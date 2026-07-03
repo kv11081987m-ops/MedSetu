@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { fetchOrders, mapOrder, updateOrderStatus } from '../lib/orders';
 import {
   ArrowLeft, SlidersHorizontal, Search, CheckCircle,
-  Clock, XCircle, RefreshCw, Star, ChevronRight,
+  Clock, XCircle, RefreshCw, ChevronRight,
   ShoppingBag, MapPin, Home, User, RotateCcw,
   Banknote, Smartphone, FileText,
 } from 'lucide-react';
@@ -98,10 +98,6 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
               <RotateCcw size={13} color="#1A6B3C" />
               Dobara Order Karo
             </button>
-            <button style={s.btnOrangeOutlined}>
-              <Star size={13} color="#E65100" />
-              Review Karo
-            </button>
             <button style={s.btnTextGray} onClick={() => onDetail(order)}>
               Detail Dekho
             </button>
@@ -113,9 +109,6 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
             <button style={s.btnGreenOutlined} onClick={() => onReorder(order)}>
               <RotateCcw size={13} color="#1A6B3C" />
               Dobara Order Karo
-            </button>
-            <button style={s.btnBlueText}>
-              Refund Status
             </button>
           </>
         )}
@@ -659,20 +652,6 @@ const s = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
-  btnOrangeOutlined: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px',
-    padding: '8px 12px',
-    backgroundColor: '#FFFFFF',
-    color: '#E65100',
-    border: '1.5px solid #E65100',
-    borderRadius: '10px',
-    fontSize: '12px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
   btnTextGray: {
     background: 'none',
     border: 'none',
@@ -685,16 +664,6 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     gap: '4px',
-  },
-  btnBlueText: {
-    background: 'none',
-    border: 'none',
-    color: '#2563EB',
-    fontSize: '12px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    padding: '8px 4px',
   },
 
   // Empty state

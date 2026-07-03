@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchOrderById, updateOrderStatus } from '../lib/orders';
+import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
@@ -123,6 +124,11 @@ export default function OrderTracking() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
   const [activeTab]                 = useState('orders');
+  const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
+
+  useEffect(() => {
+    fetchSupportWhatsapp().then(setSupportWhatsapp);
+  }, []);
 
   useEffect(() => {
     console.log('[DEBUG TRACK] orderId received:', orderId);
@@ -330,7 +336,7 @@ export default function OrderTracking() {
                 )}
                 <button style={s.msgCircle} onClick={() => {
                   const msg = encodeURIComponent('Namaste, mera order kahan hai?');
-                  window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+                  window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');
                 }}>
                   <MessageCircle size={17} color="#2563EB" />
                 </button>
@@ -371,7 +377,7 @@ export default function OrderTracking() {
               </button>
               <button style={s.helpBtnBlue} onClick={() => {
                 const msg = encodeURIComponent('Namaste, mujhe apne order ke baare mein poochna tha. Kya aap help kar sakte hain?');
-                window.open(`https://wa.me/919196103234?text=${msg}`, '_blank');
+                window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');
               }}>
                 <MessageCircle size={15} color="#2563EB" />
                 Support Se Baat Karo

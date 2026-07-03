@@ -97,6 +97,12 @@ export const fetchWholesalerInventory = async (sellerId) => {
   return data || [];
 };
 
+// Same query as fetchWholesalerInventory (nothing in the join is actually
+// B2B-specific — that lives entirely in the caller's UI/framing), kept as
+// its own named export so the customer-facing screen doesn't read as
+// "borrowing" a wholesaler function.
+export const fetchStoreInventory = fetchWholesalerInventory;
+
 export const removeFromInventory = async (inventoryId) => {
   const { error } = await supabase
     .from('seller_inventory')
@@ -130,87 +136,79 @@ export const reduceInventoryStock = async (sellerId, items) => {
   }
 };
 
-// ── Reserve stock on order ACCEPT (2-stage buffer) ────────────
-export const reserveStock = async (sellerId, items) => {
+// ── Release reserve on confirmed-order CANCEL — also used internally
+// to roll back partial reservations (see reserveStock below).
+export const releaseStock = async (sellerId, items) => {
+  const failures = [];
   for (const item of items) {
     const medId = item.medicine_id || item.id;
     const qty   = item.quantity ?? item.qty ?? 0;
     if (!medId || qty <= 0) continue;
 
-    const { data: row, error: selErr } = await supabase
-      .from('seller_inventory')
-      .select('id, stock_quantity, reserved_quantity')
-      .eq('seller_id', sellerId)
-      .eq('medicine_id', medId)
-      .maybeSingle();
-    if (selErr) { console.error('reserveStock SELECT error:', selErr); continue; }
-    if (!row) continue;
-
-    const currentReserved = row.reserved_quantity || 0;
-    const available       = (row.stock_quantity   || 0) - currentReserved;
-    if (available < qty) {
-      console.warn(`reserveStock: low available for medicine ${medId} — available: ${available}, requested: ${qty}`);
+    const { data, error } = await supabase.rpc('release_stock', {
+      p_seller_id: sellerId, p_medicine_id: medId, p_qty: qty,
+    });
+    if (error || !data) {
+      console.error('release_stock RPC error:', error);
+      failures.push(item.name || item.medicine_name || 'Medicine');
     }
-    const newReserved = Math.min(row.stock_quantity || 0, currentReserved + qty);
-    const newAvailable = (row.stock_quantity || 0) - newReserved;
-    const { error: updErr } = await supabase
-      .from('seller_inventory')
-      .update({ reserved_quantity: newReserved, is_available: newAvailable > 0 })
-      .eq('id', row.id);
-    if (updErr) console.error('reserveStock UPDATE error:', updErr);
   }
+  return { success: failures.length === 0, failures };
+};
+
+// ── Reserve stock on order ACCEPT (2-stage buffer) ────────────
+// Atomic per item via the reserve_stock DB function — a concurrent
+// accept on the last unit can't oversell, since the function's UPDATE
+// only matches while enough stock is actually still available. If any
+// item in a multi-item order fails, everything already reserved for
+// earlier items in this same call is released back before returning,
+// so a partial accept never leaves half an order reserved.
+export const reserveStock = async (sellerId, items) => {
+  const reservedSoFar = [];
+  for (const item of items) {
+    const medId = item.medicine_id || item.id;
+    const qty   = item.quantity ?? item.qty ?? 0;
+    if (!medId || qty <= 0) continue;
+
+    const { data, error } = await supabase.rpc('reserve_stock', {
+      p_seller_id: sellerId, p_medicine_id: medId, p_qty: qty,
+    });
+    const result = data?.[0];
+
+    if (error || !result?.success) {
+      if (error) console.error('reserve_stock RPC error:', error);
+      if (reservedSoFar.length) await releaseStock(sellerId, reservedSoFar);
+      const name = item.name || item.medicine_name || 'Medicine';
+      const available = result?.available ?? 0;
+      return {
+        success: false,
+        message: error
+          ? 'Stock check fail hui — dobara try karo'
+          : `Stock kam hai — ${name} ke sirf ${available} unit bache hain`,
+      };
+    }
+    reservedSoFar.push({ medicine_id: medId, quantity: qty, name: item.name || item.medicine_name });
+  }
+  return { success: true };
 };
 
 // ── Deduct stock on DELIVERED (actual deduct + clear reserve) ──
 export const deductStock = async (sellerId, items) => {
+  const failures = [];
   for (const item of items) {
     const medId = item.medicine_id || item.id;
     const qty   = item.quantity ?? item.qty ?? 0;
     if (!medId || qty <= 0) continue;
 
-    const { data: row, error: selErr } = await supabase
-      .from('seller_inventory')
-      .select('id, stock_quantity, reserved_quantity')
-      .eq('seller_id', sellerId)
-      .eq('medicine_id', medId)
-      .maybeSingle();
-    if (selErr) { console.error('deductStock SELECT error:', selErr); continue; }
-    if (!row) continue;
-
-    const newStock    = Math.max(0, (row.stock_quantity    || 0) - qty);
-    const newReserved = Math.max(0, (row.reserved_quantity || 0) - qty);
-    const { error: updErr } = await supabase
-      .from('seller_inventory')
-      .update({ stock_quantity: newStock, reserved_quantity: newReserved, is_available: (newStock - newReserved) > 0 })
-      .eq('id', row.id);
-    if (updErr) console.error('deductStock UPDATE error:', updErr);
+    const { data, error } = await supabase.rpc('deduct_stock', {
+      p_seller_id: sellerId, p_medicine_id: medId, p_qty: qty,
+    });
+    if (error || !data) {
+      console.error('deduct_stock RPC error:', error);
+      failures.push(item.name || item.medicine_name || 'Medicine');
+    }
   }
-};
-
-// ── Release reserve on confirmed-order CANCEL ─────────────────
-export const releaseStock = async (sellerId, items) => {
-  for (const item of items) {
-    const medId = item.medicine_id || item.id;
-    const qty   = item.quantity ?? item.qty ?? 0;
-    if (!medId || qty <= 0) continue;
-
-    const { data: row, error: selErr } = await supabase
-      .from('seller_inventory')
-      .select('id, stock_quantity, reserved_quantity')
-      .eq('seller_id', sellerId)
-      .eq('medicine_id', medId)
-      .maybeSingle();
-    if (selErr) { console.error('releaseStock SELECT error:', selErr); continue; }
-    if (!row) continue;
-
-    const newReserved  = Math.max(0, (row.reserved_quantity || 0) - qty);
-    const newAvailable = (row.stock_quantity || 0) - newReserved;
-    const { error: updErr } = await supabase
-      .from('seller_inventory')
-      .update({ reserved_quantity: newReserved, is_available: newAvailable > 0 })
-      .eq('id', row.id);
-    if (updErr) console.error('releaseStock UPDATE error:', updErr);
-  }
+  return { success: failures.length === 0, failures };
 };
 
 // ── B2B Lot Auto-Add: retailer confirms receipt of a delivered order ──

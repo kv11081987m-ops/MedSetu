@@ -56,6 +56,18 @@ export function mapMedicine(row) {
   };
 }
 
+// ── Support WhatsApp number (platform_settings) ─────────────────
+// Falls back to the old hardcoded number if the column/row isn't there.
+const FALLBACK_SUPPORT_WHATSAPP = '919196103234';
+export async function fetchSupportWhatsapp() {
+  const { data } = await supabase
+    .from('platform_settings')
+    .select('support_whatsapp')
+    .eq('id', 1)
+    .maybeSingle();
+  return data?.support_whatsapp || FALLBACK_SUPPORT_WHATSAPP;
+}
+
 // ── Fetch sellers by district ──────────────────────────────────
 export async function fetchSellers(district = 'Deoria') {
   const { data, error } = await supabase
