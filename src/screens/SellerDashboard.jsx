@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Bell, Store, ShoppingBag, Clock, IndianRupee,
   AlertTriangle, User, Phone, CheckCircle, X, Check,
@@ -21,6 +21,10 @@ const QUICK_ACTIONS = [
   { label: 'Settings',     Icon: Settings,  iconColor: '#555555', bg: '#F0F0F0', tab: 'profile' },
   { label: 'Medicine Add', Icon: Plus,      iconColor: '#EA6C00', bg: '#FFF3E8', route: '/inventory' },
 ];
+
+// In-panel tabs only — 'inventory'/'buy' in NAV_TABS below are route
+// navigations (to /inventory, /wholesalers), never an activeTab value.
+const VALID_TABS = ['home', 'orders', 'earnings', 'profile'];
 
 const STATUS_LABEL = { pending: 'Pending', confirmed: 'Confirmed', delivered: 'Delivered', cancelled: 'Cancelled' };
 const STATUS_COLOR = { pending: '#E65100', confirmed: '#2563EB', delivered: '#1A6B3C', cancelled: '#888888' };
@@ -363,10 +367,21 @@ function EditStoreModal({ seller, onSave, onClose }) {
 // ─── Main Screen ──────────────────────────────────────────────
 export default function SellerDashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { handleLogout } = useAuth();
 
   const [storeOpen,   setStoreOpen]   = useState(false);
-  const [activeTab,   setActiveTab]   = useState('home');
+  // Tab lives in the URL (?tab=) so a reload keeps you where you were —
+  // falls back to 'home' silently if the query param is missing or names
+  // a tab that doesn't exist (or a route-nav entry like 'inventory'/'buy').
+  const [activeTab, setActiveTabState] = useState(() => {
+    const fromUrl = searchParams.get('tab');
+    return VALID_TABS.includes(fromUrl) ? fromUrl : 'home';
+  });
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
   const [orderFilter, setOrderFilter] = useState('sab');
   const [showNotif,   setShowNotif]   = useState(false);
   const [notifs,      setNotifs]      = useState([]);

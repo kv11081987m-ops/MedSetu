@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
@@ -327,6 +327,7 @@ const mapSellerList = (s) => ({
 // ─── Main Screen ──────────────────────────────────────────────
 export default function AdminPanel() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { handleLogout: authLogout } = useAuth();
 
   // Logged-in admin's own identity (medsetu_user, set by AuthContext at SIGNED_IN).
@@ -349,7 +350,17 @@ export default function AdminPanel() {
   // ── UI state ─────────────────────────────────────────────────
   const [disputes,      setDisputes]     = useState([]);
   const [settings,      setSettings]     = useState({ registrations: true, delivery: true, pharmCall: true, maintenance: false });
-  const [activeTab,     setActiveTab]    = useState('dashboard');
+  // Tab lives in the URL (?tab=) so a reload keeps you where you were —
+  // falls back to 'dashboard' silently if the query param is missing or
+  // names a tab that doesn't exist.
+  const [activeTab, setActiveTabState] = useState(() => {
+    const fromUrl = searchParams.get('tab');
+    return NAV_TABS_DEF.some((t) => t.id === fromUrl) ? fromUrl : 'dashboard';
+  });
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
   const [sellerFilter,  setSellerFilter] = useState('sab');
   const [orderFilter,   setOrderFilter]  = useState('sab');
   const [allDisputes,   setAllDisputes]  = useState([]);

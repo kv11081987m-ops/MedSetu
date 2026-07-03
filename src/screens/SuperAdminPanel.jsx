@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { intentionalSignOut } from '../context/AuthContext';
 import {
@@ -22,8 +22,19 @@ const SELLER_FILTER_OPTS = ['pending', 'approved', 'rejected', 'all'];
 
 export default function SuperAdminPanel() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [activeTab,         setActiveTab]         = useState('dashboard');
+  // Tab lives in the URL (?tab=) so a reload keeps you where you were —
+  // falls back to 'dashboard' silently if the query param is missing or
+  // names a tab that doesn't exist.
+  const [activeTab, setActiveTabState] = useState(() => {
+    const fromUrl = searchParams.get('tab');
+    return TABS.some((t) => t.id === fromUrl) ? fromUrl : 'dashboard';
+  });
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
   const [pendingSellers,    setPendingSellers]     = useState([]);
   const [allSellers,        setAllSellers]         = useState([]);
   const [sellerFilter,      setSellerFilter]       = useState('pending');

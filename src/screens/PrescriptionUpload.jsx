@@ -15,7 +15,9 @@ const NAV_TABS = [
 ];
 
 // ─── Success Screen ───────────────────────────────────────────
-function SuccessScreen({ rxNumber, onTrack, onHome }) {
+// returnTo present = came from checkout mid-order — primary action must
+// carry prescriptionUrl back, not drop the customer at /orders.
+function SuccessScreen({ rxNumber, returnTo, onPrimary, onHome }) {
   return (
     <div style={s.successWrap}>
       <div style={s.successIconRing}>
@@ -31,9 +33,12 @@ function SuccessScreen({ rxNumber, onTrack, onHome }) {
         <strong>30 min mein</strong> call karenge aur
         order confirm karenge.
       </p>
-      <button style={s.trackBtn} onClick={onTrack}>
+      {returnTo && (
+        <p style={s.returnMsg}>Prescription attach ho gayi — ab order poora karein</p>
+      )}
+      <button style={s.trackBtn} onClick={onPrimary}>
         <ShoppingBag size={16} color="#FFFFFF" />
-        Order Track Karo
+        {returnTo ? 'Checkout Par Wapas Jao' : 'Order Track Karo'}
       </button>
       <button style={s.homeBtn} onClick={onHome}>
         <Home size={16} color="#1A6B3C" />
@@ -160,11 +165,21 @@ export default function PrescriptionUpload() {
   };
 
   if (submitted) {
+    const returnTo = location.state?.returnTo;
+    const goToPrimary = () => {
+      if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
+      else navigate('/orders');
+    };
     return (
       <div style={s.wrapper}>
         <div style={s.screen}>
           <div style={s.header}>
-            <button style={s.iconBtn} onClick={() => navigate('/home')}>
+            <button style={s.iconBtn} onClick={() => {
+              // Success screen back-arrow — same rule as the primary button
+              // below: don't let ANY exit from this screen drop the URL.
+              if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
+              else navigate('/home');
+            }}>
               <ArrowLeft size={22} color="#1A1A1A" />
             </button>
             <span style={s.headerTitle}>Prescription Upload</span>
@@ -172,11 +187,8 @@ export default function PrescriptionUpload() {
           </div>
           <SuccessScreen
             rxNumber={rxNumber}
-            onTrack={() => {
-              const returnTo = location.state?.returnTo;
-              if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
-              else navigate('/orders');
-            }}
+            returnTo={returnTo}
+            onPrimary={goToPrimary}
             onHome={() => navigate('/home')}
           />
         </div>
@@ -535,6 +547,7 @@ const s = {
   orderIdLabel:    { fontSize: '11px', color: '#888888', textTransform: 'uppercase', letterSpacing: '0.5px' },
   orderId:         { fontSize: '18px', fontWeight: '800', color: '#1A6B3C' },
   successMsg:      { fontSize: '14px', color: '#555555', textAlign: 'center', lineHeight: '1.6', margin: 0 },
+  returnMsg:       { fontSize: '13px', fontWeight: '600', color: '#1A6B3C', backgroundColor: '#F0FDF4', padding: '8px 14px', borderRadius: '10px', textAlign: 'center', margin: 0 },
   trackBtn:        { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '15px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '14px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', marginTop: '8px' },
   homeBtn:         { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '15px', backgroundColor: '#FFFFFF', color: '#1A6B3C', border: '1.5px solid #1A6B3C', borderRadius: '14px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 
