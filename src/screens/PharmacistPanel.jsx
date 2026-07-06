@@ -87,7 +87,7 @@ function FilterChips({ options, active, onChange }) {
 }
 
 // ─── Call Card ────────────────────────────────────────────────
-function CallCard({ call, onCall, onReject }) {
+function CallCard({ call, onCall, onReject, busy }) {
   const isCompleted = call.status === 'completed';
   return (
     <div style={{ ...s.callCard, borderLeftColor: call.urgent ? '#DC3545' : '#E65100' }}>
@@ -148,11 +148,11 @@ function CallCard({ call, onCall, onReject }) {
         </div>
       ) : (
         <div style={s.callBtns}>
-          <button style={s.callBtn} onClick={() => onCall(call)}>
-            <Phone size={14} color="#FFFFFF" /> Call Karo
+          <button style={{ ...s.callBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCall(call)}>
+            <Phone size={14} color="#FFFFFF" /> {busy ? '...' : 'Call Karo'}
           </button>
-          <button style={s.rejectBtn} onClick={() => onReject(call.id)}>
-            <X size={14} color="#DC3545" /> Reject
+          <button style={{ ...s.rejectBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onReject(call.id)}>
+            <X size={14} color="#DC3545" /> {busy ? '...' : 'Reject'}
           </button>
         </div>
       )}
@@ -236,6 +236,8 @@ export default function PharmacistPanel() {
   const [callQueue,       setCallQueue]       = useState([]);
   const [prescriptions,   setPrescriptions]   = useState([]);
   const [completedCallIds,setCompletedCallIds]= useState(new Set());
+  // Double-submit guard — same shape as SellerDashboard's busyOrderIds.
+  const [busyCallIds, setBusyCallIds] = useState(new Set());
   const [loading,         setLoading]         = useState(true);
 
   // ── UI state (unchanged) ─────────────────────────────────────
@@ -325,7 +327,17 @@ export default function PharmacistPanel() {
   const pendingRx    = allRx.filter((r) => r.status === 'pending');
 
   // ── Handlers ─────────────────────────────────────────────────
-  const handleCallAction = async (orderId) => {
+  const withCallBusy = async (orderId, fn) => {
+    if (busyCallIds.has(orderId)) return;
+    setBusyCallIds((prev) => new Set(prev).add(orderId));
+    try {
+      await fn();
+    } finally {
+      setBusyCallIds((prev) => { const next = new Set(prev); next.delete(orderId); return next; });
+    }
+  };
+
+  const handleCallActionImpl = async (orderId) => {
     // RPC, not a plain UPDATE — confirming here must reserve stock the same
     // way a seller's own accept does; a pharmacist session can't call
     // reserve_stock directly (owning-seller-only RLS on seller_inventory).
@@ -338,8 +350,9 @@ export default function PharmacistPanel() {
     setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
     setCompletedCallIds((prev) => new Set([...prev, orderId]));
   };
+  const handleCallAction = (orderId) => withCallBusy(orderId, () => handleCallActionImpl(orderId));
 
-  const handleRejectCall = async (orderId) => {
+  const handleRejectCallImpl = async (orderId) => {
     const { error } = await supabase
       .from('orders')
       .update({ pharmacist_verified: false, status: 'cancelled' })
@@ -347,6 +360,7 @@ export default function PharmacistPanel() {
     if (error) { console.error('handleRejectCall error:', error); return; }
     setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
   };
+  const handleRejectCall = (orderId) => withCallBusy(orderId, () => handleRejectCallImpl(orderId));
 
   const handleRxApprove = async (dbId) => {
     const { error } = await supabase
@@ -441,7 +455,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {pendingCalls.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} busy={busyCallIds.has(call.id)} />
             ))}
           </div>
         )}
@@ -536,7 +550,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {displayed.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} busy={busyCallIds.has(call.id)} />
             ))}
           </div>
         )}

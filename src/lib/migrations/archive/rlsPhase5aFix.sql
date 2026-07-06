@@ -1,5 +1,9 @@
 -- ══════════════════════════════════════════════════
 -- MedSetu — RLS Phase 5a Fix / Diagnostic
+-- ARCHIVED / SUPERSEDED — 014_rlsPhase5a.sql re-ran clean after this
+-- patch was applied, so its content (both helpers + the two users
+-- policies) is now redundant with that file. Kept for history only —
+-- do not run this file on its own.
 -- Run this in Supabase SQL Editor
 -- Does NOT change the intended design (the users SELECT/UPDATE
 -- policies already specify is_active_superadmin() OR ... in

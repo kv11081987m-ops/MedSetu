@@ -1,6 +1,10 @@
 -- ================================================================
 -- MedSetu — Supabase Database Schema
--- Run this in Supabase Dashboard → SQL Editor
+-- HISTORICAL — NOT re-runnable. The live schema has moved well past
+-- this snapshot (is_verified, every commission_* column, gst_number,
+-- and more were all added later via ad-hoc ALTER TABLE statements
+-- that were never folded back into this file). Kept for the original
+-- table shapes and comments only — do not execute against a live DB.
 -- ================================================================
 
 -- Enable UUID generation (already available in Supabase)

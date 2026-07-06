@@ -36,6 +36,8 @@ export default function UserProfile() {
   });
   const [orderStats,     setOrderStats]     = useState({ totalOrders: 0, totalSpent: 0 });
   const [prescriptions,  setPrescriptions]  = useState([]);
+  const [addressesError,     setAddressesError]     = useState(false);
+  const [prescriptionsError, setPrescriptionsError] = useState(false);
 
   // ── Fetch user ───────────────────────────────────────────────
   useEffect(() => {
@@ -64,13 +66,16 @@ export default function UserProfile() {
       try {
         const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
         if (!user?.id) return;
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('addresses')
           .select('*')
           .eq('user_id', user.id)
           .order('is_default', { ascending: false });
         if (data) setAddresses(data);
-      } catch {}
+        if (error) setAddressesError(true);
+      } catch {
+        setAddressesError(true);
+      }
     };
     const fetchOrderStats = async () => {
       try {
@@ -93,14 +98,17 @@ export default function UserProfile() {
       try {
         const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
         if (!user?.id) return;
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('prescriptions')
           .select('id, doctor_name, hospital_name, prescribed_date, review_notes, image_url')
           .eq('customer_id', user.id)
           .order('prescribed_date', { ascending: false })
           .limit(5);
         if (data) setPrescriptions(data);
-      } catch {}
+        if (error) setPrescriptionsError(true);
+      } catch {
+        setPrescriptionsError(true);
+      }
     };
     fetchUserProfile();
     fetchAddresses();
@@ -316,7 +324,11 @@ export default function UserProfile() {
               </button>
             </div>
 
-            {addresses.length === 0 ? (
+            {addressesError ? (
+              <p style={{ color: '#DC3545', textAlign: 'center', fontSize: '13px', margin: '8px 0' }}>
+                Addresses load nahi ho paye — dobara try karo
+              </p>
+            ) : addresses.length === 0 ? (
               <p style={{ color: '#666666', textAlign: 'center', fontSize: '13px', margin: '8px 0' }}>
                 Koi address nahi — pehla address add karo
               </p>
@@ -385,7 +397,11 @@ export default function UserProfile() {
                 Sab Dekho
               </button>
             </div>
-            {prescriptions.length === 0 ? (
+            {prescriptionsError ? (
+              <p style={{ color: '#DC3545', fontSize: '13px', textAlign: 'center', margin: '8px 0' }}>
+                Prescriptions load nahi ho payi — dobara try karo
+              </p>
+            ) : prescriptions.length === 0 ? (
               <p style={{ color: '#888888', fontSize: '13px', textAlign: 'center', margin: '8px 0' }}>
                 Koi prescription nahi mili — Upload karo
               </p>

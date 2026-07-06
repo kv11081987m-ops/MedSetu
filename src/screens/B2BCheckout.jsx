@@ -7,7 +7,8 @@ import {
 import { useCart } from '../context/CartContext';
 import { getCurrentSeller } from '../lib/auth';
 import { createOrder, createOrderItems } from '../lib/orders';
-import { createNotification, getSellerUserId } from '../lib/notifications';
+import { getSellerUserId } from '../lib/notifications';
+import { supabase } from '../lib/supabase';
 
 const BLUE = '#0C447C';
 
@@ -223,9 +224,11 @@ export default function B2BCheckout() {
 
       // Notify wholesaler — fire-and-forget, must not block checkout success.
       getSellerUserId(newOrder.seller_id)
-        .then((sellerUserId) => sellerUserId && createNotification(
-          sellerUserId, 'Naya B2B Order 📦', `Retailer se naya purchase order — ${newOrder.order_number}`, 'b2b_order', newOrder.id
-        ))
+        .then((sellerUserId) => sellerUserId && supabase.rpc('create_notification', {
+          p_user_id: sellerUserId, p_title: 'Naya B2B Order 📦',
+          p_body: `Retailer se naya purchase order — ${newOrder.order_number}`,
+          p_type: 'b2b_order', p_ref_id: newOrder.id,
+        }))
         .catch((err) => console.warn('[notify wholesaler]', err));
 
       clearCart();

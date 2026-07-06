@@ -1,8 +1,10 @@
 -- ══════════════════════════════════════════════════
 -- MedSetu — Commission RPC (Hard Case 3)
--- Run this in Supabase SQL Editor
--- Moves markDelivered's commission math server-side so a seller can't
--- tamper with commission_amount/seller_earning from the client.
+-- ARCHIVED / SUPERSEDED — 015_rlsPhase5b.sql's CREATE OR REPLACE of
+-- mark_order_delivered (adds the app.mark_delivered_trusted flag so
+-- the orders sensitive-column trigger can tell the RPC's own UPDATE
+-- apart from a raw client one) is the version actually live. Kept
+-- here for history only — do not run this file on its own.
 -- ══════════════════════════════════════════════════
 
 

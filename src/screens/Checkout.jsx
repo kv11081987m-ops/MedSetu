@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
-import { createNotification, getSellerUserId } from '../lib/notifications';
+import { getSellerUserId } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 
 
@@ -360,8 +360,6 @@ export default function Checkout() {
 
     const storedUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
     const customerId   = storedUser?.id || null;
-    console.log('[DEBUG CHECKOUT] medsetu_user raw:', localStorage.getItem('medsetu_user'));
-    console.log('[DEBUG CHECKOUT] customerId:', customerId);
 
     const orderData = {
       customerId,
@@ -389,8 +387,6 @@ export default function Checkout() {
       }
 
       const newOrder = orderRows[0];
-      console.log('[DEBUG ORDER] full rows:', orderRows);
-      console.log('[DEBUG ORDER] id:', newOrder.id, '| order_number:', newOrder.order_number);
       setOrderDbId(newOrder.id);
 
       const orderItems = items.map((it) => ({
@@ -418,9 +414,11 @@ export default function Checkout() {
 
       // Notify seller — fire-and-forget, must not block checkout success.
       getSellerUserId(newOrder.seller_id)
-        .then((sellerUserId) => sellerUserId && createNotification(
-          sellerUserId, 'Naya Order! 🛒', `Aapko naya order mila — ${newOrder.order_number}`, 'order_placed', newOrder.id
-        ))
+        .then((sellerUserId) => sellerUserId && supabase.rpc('create_notification', {
+          p_user_id: sellerUserId, p_title: 'Naya Order! 🛒',
+          p_body: `Aapko naya order mila — ${newOrder.order_number}`,
+          p_type: 'order_placed', p_ref_id: newOrder.id,
+        }))
         .catch((err) => console.warn('[notify seller]', err));
 
       setOrderId(newOrder.order_number || 'MED-' + Date.now());

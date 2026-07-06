@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase';
 import { getCurrentSeller } from '../lib/auth';
 import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
-import { createNotification, getOrderRecipientUserId, fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import { getOrderRecipientUserId, fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -89,7 +89,7 @@ const mapB2BPurchase = (order) => ({
 });
 
 // ─── Sub-components ───────────────────────────────────────────
-function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed }) {
+function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed, busy }) {
   const statusColor = STATUS_COLOR[order.status] || '#888888';
   const statusBg    = STATUS_BG[order.status]    || '#F5F5F5';
   const statusLabel = STATUS_LABEL[order.status] || order.status;
@@ -137,22 +137,22 @@ function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed })
 
       {order.status === 'pending' && (
         <div style={s.pendBtns}>
-          <button style={s.acceptBtn} onClick={() => onAccept(order._id)}>
-            <CheckCircle size={15} color="#FFFFFF" /> Accept
+          <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onAccept(order._id)}>
+            <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Accept'}
           </button>
-          <button style={s.declineBtn} onClick={() => onDecline(order._id)}>
-            <X size={15} color="#DC3545" /> Decline
+          <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onDecline(order._id)}>
+            <X size={15} color="#DC3545" /> {busy ? '...' : 'Decline'}
           </button>
         </div>
       )}
 
       {order.status === 'confirmed' && (
         <div style={s.pendBtns}>
-          <button style={s.acceptBtn} onClick={() => onDeliver(order._id)}>
-            <CheckCircle size={15} color="#FFFFFF" /> Mark Delivered
+          <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onDeliver(order._id)}>
+            <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Mark Delivered'}
           </button>
-          <button style={s.declineBtn} onClick={() => onCancelConfirmed(order._id)}>
-            <X size={15} color="#DC3545" /> Cancel
+          <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCancelConfirmed(order._id)}>
+            <X size={15} color="#DC3545" /> {busy ? '...' : 'Cancel'}
           </button>
         </div>
       )}
@@ -398,6 +398,21 @@ export default function SellerDashboard() {
   const [b2bPurchases,  setB2bPurchases]  = useState([]);
   const [b2bLoading,    setB2bLoading]    = useState(false);
   const [receivingOrderId, setReceivingOrderId] = useState(null);
+  // Shared double-submit guard for the four order-action buttons
+  // (accept/decline/deliver/cancel-confirmed) — keyed by order id so a
+  // rapid double-tap on one order's button can't fire the handler twice
+  // before the first call's async work (stock reserve/release) resolves.
+  const [busyOrderIds, setBusyOrderIds] = useState(new Set());
+  const isOrderBusy = (id) => busyOrderIds.has(id);
+  const withOrderBusy = async (orderId, fn) => {
+    if (busyOrderIds.has(orderId)) return;
+    setBusyOrderIds((prev) => new Set(prev).add(orderId));
+    try {
+      await fn();
+    } finally {
+      setBusyOrderIds((prev) => { const next = new Set(prev); next.delete(orderId); return next; });
+    }
+  };
   const [rateConfirmItems, setRateConfirmItems] = useState(null); // null = closed, array = open
   const [showEditStore,    setShowEditStore]    = useState(false);
   const [showCommRequest,  setShowCommRequest]  = useState(false);
@@ -591,7 +606,7 @@ export default function SellerDashboard() {
     setShowEditStore(false);
   };
 
-  const acceptOrder = async (orderId) => {
+  const acceptOrderImpl = async (orderId) => {
     const acceptedOrder = pendingOrders.find((o) => o.id === orderId);
     if (!acceptedOrder || !sellerData?.id) return;
 
@@ -613,11 +628,11 @@ export default function SellerDashboard() {
 
       const isB2B = acceptedOrder.buyer_type === 'retailer';
       getOrderRecipientUserId(acceptedOrder)
-        .then((uid) => uid && createNotification(
-          uid, 'Order Accept! ✅',
-          isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
-          isB2B ? 'b2b_update' : 'order_accepted', orderId
-        ))
+        .then((uid) => uid && supabase.rpc('create_notification', {
+          p_user_id: uid, p_title: 'Order Accept! ✅',
+          p_body: isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
+          p_type: isB2B ? 'b2b_update' : 'order_accepted', p_ref_id: orderId,
+        }))
         .catch((err) => console.warn('[notify accept]', err));
 
       await fetchAllOrders(sellerData.id, orderFilter);
@@ -629,7 +644,9 @@ export default function SellerDashboard() {
     }
   };
 
-  const declineOrder = async (orderId) => {
+  const acceptOrder = (orderId) => withOrderBusy(orderId, () => acceptOrderImpl(orderId));
+
+  const declineOrderImpl = async (orderId) => {
     const declinedOrder = pendingOrders.find((o) => o.id === orderId);
     const { error } = await supabase
       .from('orders').update({ status: 'cancelled' }).eq('id', orderId);
@@ -637,7 +654,10 @@ export default function SellerDashboard() {
       setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
       if (declinedOrder) {
         getOrderRecipientUserId(declinedOrder)
-          .then((uid) => uid && createNotification(uid, 'Order Cancel', 'Aapka order cancel ho gaya', 'order_cancelled', orderId))
+          .then((uid) => uid && supabase.rpc('create_notification', {
+            p_user_id: uid, p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
+            p_type: 'order_cancelled', p_ref_id: orderId,
+          }))
           .catch((err) => console.warn('[notify decline]', err));
       }
       if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
@@ -647,7 +667,9 @@ export default function SellerDashboard() {
     }
   };
 
-  const markDelivered = async (orderId) => {
+  const declineOrder = (orderId) => withOrderBusy(orderId, () => declineOrderImpl(orderId));
+
+  const markDeliveredImpl = async (orderId) => {
     // Commission math now happens server-side (mark_order_delivered RPC,
     // SECURITY DEFINER) — a seller can no longer influence
     // commission_amount/seller_earning by tampering with client state.
@@ -668,17 +690,19 @@ export default function SellerDashboard() {
     if (orderForComm) {
       const isB2B = orderForComm.buyer_type === 'retailer';
       getOrderRecipientUserId(orderForComm)
-        .then((uid) => uid && createNotification(
-          uid, 'Order Deliver! 🎉',
-          isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
-          isB2B ? 'b2b_update' : 'order_delivered', orderId
-        ))
+        .then((uid) => uid && supabase.rpc('create_notification', {
+          p_user_id: uid, p_title: 'Order Deliver! 🎉',
+          p_body: isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
+          p_type: isB2B ? 'b2b_update' : 'order_delivered', p_ref_id: orderId,
+        }))
         .catch((err) => console.warn('[notify delivered]', err));
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };
 
-  const cancelConfirmedOrder = async (orderId) => {
+  const markDelivered = (orderId) => withOrderBusy(orderId, () => markDeliveredImpl(orderId));
+
+  const cancelConfirmedOrderImpl = async (orderId) => {
     const { error } = await updateOrderStatus(orderId, 'cancelled');
     if (error) { console.error('cancelConfirmedOrder failed:', error); return; }
     const rawOrder = allOrders.find((o) => o.id === orderId);
@@ -690,11 +714,16 @@ export default function SellerDashboard() {
     }
     if (rawOrder) {
       getOrderRecipientUserId(rawOrder)
-        .then((uid) => uid && createNotification(uid, 'Order Cancel', 'Aapka order cancel ho gaya', 'order_cancelled', orderId))
+        .then((uid) => uid && supabase.rpc('create_notification', {
+          p_user_id: uid, p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
+          p_type: 'order_cancelled', p_ref_id: orderId,
+        }))
         .catch((err) => console.warn('[notify cancel]', err));
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };
+
+  const cancelConfirmedOrder = (orderId) => withOrderBusy(orderId, () => cancelConfirmedOrderImpl(orderId));
 
   // ── B2B Lot Auto-Add: retailer confirms receipt of a delivered order ──
   const handleReceiveLot = async (orderId) => {
@@ -899,7 +928,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {pendingDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1004,7 +1033,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {allDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}

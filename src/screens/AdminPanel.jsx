@@ -170,7 +170,7 @@ function DisputeCard({ d, onResolve }) {
 }
 
 // ─── Seller List Card (sellers tab) ──────────────────────────
-function SellerListCard({ seller, onApprove, onReject }) {
+function SellerListCard({ seller }) {
   const borderColor = seller.status === 'approved' ? '#1A6B3C' : seller.status === 'rejected' ? '#DC3545' : '#E65100';
   return (
     <div style={{ ...s.sellerCard, borderLeftColor: borderColor }}>
@@ -192,16 +192,6 @@ function SellerListCard({ seller, onApprove, onReject }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-        {seller.status === 'pending' && (
-          <>
-            <button style={{ ...s.approveBtn, flex: 'none', padding: '9px 16px', fontSize: '12px' }} onClick={() => onApprove(seller.id)}>
-              <CheckCircle size={13} color="#FFFFFF" /> Approve
-            </button>
-            <button style={{ ...s.rejectBtn, flex: 'none', padding: '9px 16px', fontSize: '12px' }} onClick={() => onReject(seller.id)}>
-              <X size={13} color="#DC3545" /> Reject
-            </button>
-          </>
-        )}
         <button style={{ ...s.detailsBtn, marginLeft: 'auto' }} onClick={() => alert(`Seller: ${seller.store_name}\nOwner: ${seller.owner_name}\nPhone: ${seller.phone}\nDistrict: ${seller.district}`)}>Details Dekho <ChevronRight size={13} /></button>
       </div>
     </div>
@@ -339,10 +329,9 @@ export default function AdminPanel() {
 
   // ── DB-driven state ──────────────────────────────────────────
   const [stats, setStats] = useState({
-    totalUsers: 0, activeSellers: 0, pendingSellers: 0,
+    totalUsers: 0, activeSellers: 0,
     todayOrders: 0, todayGMV: 0, openDisputes: 0, totalCommission: 0,
   });
-  const [pendingSellers,  setPendingSellers]  = useState([]);
   const [allDbSellers,    setAllDbSellers]    = useState([]);
   const [allOrders,       setAllOrders]       = useState([]);
   const [loading,         setLoading]         = useState(true);
@@ -388,9 +377,7 @@ export default function AdminPanel() {
         .from('users').select('*', { count: 'exact', head: true });
 
       const { data: sellers } = await supabase.from('sellers').select('*');
-      const pending = sellers?.filter((s) => !s.is_verified) || [];
-      const active  = sellers?.filter((s) =>  s.is_verified) || [];
-      setPendingSellers(pending);
+      const active = sellers?.filter((s) => s.is_verified) || [];
       setAllDbSellers(sellers || []);
 
       // District Coverage — real seller counts per district, top 5.
@@ -515,7 +502,6 @@ export default function AdminPanel() {
       setStats({
         totalUsers:      userCount  || 0,
         activeSellers:   active.length,
-        pendingSellers:  pending.length,
         todayOrders:     todayOrders?.length || 0,
         todayGMV:        gmv,
         openDisputes:    openDisputeCount,
@@ -531,34 +517,12 @@ export default function AdminPanel() {
   useEffect(() => { fetchAdminData(); }, []);
 
   // ── Handlers ─────────────────────────────────────────────────
-  const approveSeller = async (sellerId) => {
-    const { error } = await supabase
-      .from('sellers').update({ is_verified: true }).eq('id', sellerId);
-    if (!error) {
-      setPendingSellers((prev) => prev.filter((s) => s.id !== sellerId));
-      setAllDbSellers((prev) => prev.map((s) => s.id === sellerId ? { ...s, is_verified: true } : s));
-      setStats((prev) => ({ ...prev, activeSellers: prev.activeSellers + 1, pendingSellers: Math.max(0, prev.pendingSellers - 1) }));
-      alert('Seller approve ho gaya!');
-    }
-  };
-
-  const rejectSeller = async (sellerId) => {
-    const reason = window.prompt('Rejection reason daalo:') || 'Documents incomplete';
-    if (reason === null) return;
-    try {
-      const { error } = await supabase
-        .from('sellers')
-        .update({ is_verified: false, rejection_reason: reason })
-        .eq('id', sellerId);
-      if (error) throw error;
-      setPendingSellers((prev) => prev.filter((s) => s.id !== sellerId));
-      setAllDbSellers((prev) => prev.map((s) => s.id === sellerId ? { ...s, is_verified: false } : s));
-      setStats((prev) => ({ ...prev, pendingSellers: Math.max(0, prev.pendingSellers - 1) }));
-      alert('Seller reject kar diya.\nReason: ' + reason);
-    } catch (err) {
-      alert('Error: ' + err.message);
-    }
-  };
+  // Seller approval lives in SuperAdminPanel (seller_registrations flow) —
+  // that's the only path a real SellerRegister.jsx submission ever goes
+  // through, and it's the only one that also unlocks staff_whitelist login.
+  // A parallel direct sellers.is_verified flip used to live here too, but
+  // nothing ever creates a sellers row with is_verified:false for it to act
+  // on (approveSeller above always inserts is_verified:true) — removed.
 
   // ── Commission requests — only reachable when SuperAdmin has delegated
   // approval (commissionDelegated). Same DB logic as SuperAdminPanel, shared
@@ -598,7 +562,7 @@ export default function AdminPanel() {
       <div style={s.hScroll}>
         {[
           { Icon: Users,         val: stats.totalUsers.toLocaleString('en-IN'), label: 'Total Users',    sub: 'Registered users',                        subColor: '#1A6B3C', color: '#1A6B3C', bg: '#E8F5EE' },
-          { Icon: Store,         val: `${stats.activeSellers} (${stats.pendingSellers} pending)`, label: 'Sellers', sub: 'Verified + pending',            subColor: '#E65100', color: '#2563EB', bg: '#EAF2FF' },
+          { Icon: Store,         val: stats.activeSellers,                     label: 'Sellers', sub: 'Verified',                                       subColor: '#1A6B3C', color: '#2563EB', bg: '#EAF2FF' },
           { Icon: ShoppingBag,   val: stats.todayOrders,                        label: 'Aaj Ke Orders',  sub: 'Today only',                              subColor: '#1A6B3C', color: '#7C3AED', bg: '#F3EEFF' },
           { Icon: IndianRupee,   val: `₹${stats.todayGMV.toLocaleString('en-IN')}`, label: 'Aaj Ka GMV', sub: 'Today revenue',                          subColor: '#1A6B3C', color: '#E65100', bg: '#FFF3E0' },
           { Icon: AlertTriangle, val: stats.openDisputes,                       label: 'Open Disputes',  sub: stats.openDisputes > 0 ? 'Needs attention' : 'All clear', subColor: '#DC3545', color: '#DC3545', bg: '#FFEBEE' },
@@ -610,23 +574,6 @@ export default function AdminPanel() {
             <p style={{ ...s.metricSub, color: subColor }}>{sub}</p>
           </div>
         ))}
-      </div>
-
-      <div style={s.section}>
-        <div style={s.sectionHead}>
-          <div style={s.titleRow}>
-            <span style={s.orangeDot} />
-            <span style={s.sectionTitle}>Seller Approval Pending</span>
-          </div>
-          <span style={s.sectionSub}>{pendingSellers.length} pending</span>
-        </div>
-        {pendingSellers.length === 0 ? (
-          <div style={s.emptyCard}><CheckCircle size={28} color="#1A6B3C" /><p style={s.emptyText}>Koi pending seller nahi! ✅</p></div>
-        ) : (
-          pendingSellers.map(mapSellerList).map((seller) => (
-            <SellerListCard key={seller.id} seller={seller} onApprove={approveSeller} onReject={rejectSeller} />
-          ))
-        )}
       </div>
 
       {commissionDelegated && (
@@ -770,7 +717,7 @@ export default function AdminPanel() {
       ) : (
         <div style={s.section}>
           {filteredSellers.map((seller) => (
-            <SellerListCard key={seller.id} seller={seller} onApprove={approveSeller} onReject={rejectSeller} />
+            <SellerListCard key={seller.id} seller={seller} />
           ))}
         </div>
       )}
@@ -970,7 +917,7 @@ export default function AdminPanel() {
         <nav style={s.bottomNav}>
           {NAV_TABS_DEF.map(({ id, Icon, label }) => {
             const active = activeTab === id;
-            const badge  = id === 'sellers' ? pendingSellers.length : id === 'disputes' ? allDisputes.filter((d) => d.status !== 'resolved').length : 0;
+            const badge  = id === 'disputes' ? allDisputes.filter((d) => d.status !== 'resolved').length : 0;
             return (
               <button key={id} style={s.navTab} onClick={() => setActiveTab(id)}>
                 <div style={{ position: 'relative' }}>

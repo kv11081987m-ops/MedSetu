@@ -97,17 +97,19 @@ function StepCircle({ state }) {
 }
 
 // ─── Cancel dialog ────────────────────────────────────────────
-function CancelDialog({ onConfirm, onClose }) {
+function CancelDialog({ onConfirm, onClose, cancelling }) {
   return (
-    <div style={s.dialogOverlay} onClick={onClose}>
+    <div style={s.dialogOverlay} onClick={cancelling ? undefined : onClose}>
       <div style={s.dialogBox} onClick={(e) => e.stopPropagation()}>
         <div style={s.dialogIcon}>
           <X size={28} color="#EF4444" />
         </div>
         <h3 style={s.dialogTitle}>Kya aap sure hain?</h3>
         <p style={s.dialogSub}>Order cancel hone ke baad wapas nahi aayega</p>
-        <button style={s.dialogCancel} onClick={onConfirm}>Cancel Karo</button>
-        <button style={s.dialogBack}  onClick={onClose}>Wapas Jaao</button>
+        <button style={{ ...s.dialogCancel, opacity: cancelling ? 0.6 : 1 }} disabled={cancelling} onClick={onConfirm}>
+          {cancelling ? 'Cancel ho raha hai...' : 'Cancel Karo'}
+        </button>
+        <button style={s.dialogBack} disabled={cancelling} onClick={onClose}>Wapas Jaao</button>
       </div>
     </div>
   );
@@ -122,6 +124,7 @@ export default function OrderTracking() {
   const [order,      setOrder]      = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [showCancel, setShowCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
   const [activeTab]                 = useState('orders');
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
@@ -131,10 +134,8 @@ export default function OrderTracking() {
   }, []);
 
   useEffect(() => {
-    console.log('[DEBUG TRACK] orderId received:', orderId);
     if (!orderId) { setLoading(false); return; }
     fetchOrderById(orderId).then(({ data, error }) => {
-      console.log('[DEBUG TRACK] fetched order:', data?.id, data?.order_number, data?.status);
       if (!error && data) setOrder(data);
       setLoading(false);
     });
@@ -144,22 +145,28 @@ export default function OrderTracking() {
   const steps      = buildSteps(order);
 
   const handleCancelConfirm = async () => {
-    setShowCancel(false);
+    if (cancelling) return; // guards a double-tap landing before the dialog unmounts
+    setCancelling(true);
     const targetId = order?.id || orderId;
-    if (!targetId) return;
-    // RPC, not a plain UPDATE — a confirmed order has reserved stock that
-    // must be released, and a customer session can't call release_stock
-    // directly (owning-seller-only RLS on seller_inventory).
-    const { data, error } = await supabase.rpc('cancel_order', { p_order_id: targetId });
-    const result = data?.[0];
-    if (error || !result?.success) {
-      alert('Order cancel nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
-      return;
+    if (!targetId) { setCancelling(false); return; }
+    try {
+      // RPC, not a plain UPDATE — a confirmed order has reserved stock that
+      // must be released, and a customer session can't call release_stock
+      // directly (owning-seller-only RLS on seller_inventory).
+      const { data, error } = await supabase.rpc('cancel_order', { p_order_id: targetId });
+      const result = data?.[0];
+      if (error || !result?.success) {
+        alert('Order cancel nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
+        return;
+      }
+      if (result.message && result.message !== 'Order cancel ho gaya') {
+        alert(result.message);
+      }
+      setShowCancel(false);
+      setCancelled(true);
+    } finally {
+      setCancelling(false);
     }
-    if (result.message && result.message !== 'Order cancel ho gaya') {
-      alert(result.message);
-    }
-    setCancelled(true);
   };
 
   // Realtime subscription — instant update when seller changes this order's status.
@@ -431,6 +438,7 @@ export default function OrderTracking() {
           <CancelDialog
             onConfirm={handleCancelConfirm}
             onClose={() => setShowCancel(false)}
+            cancelling={cancelling}
           />
         )}
       </div>

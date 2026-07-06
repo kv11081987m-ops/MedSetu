@@ -1,18 +1,11 @@
 import { supabase } from './supabase';
 
-// Notifications are secondary to the order flow — a failure here must never
-// block accept/deliver/cancel/place. Every call swallows its own errors.
-export const createNotification = async (userId, title, message, type, orderId = null) => {
-  if (!userId) return;
-  try {
-    const { error } = await supabase
-      .from('notifications')
-      .insert({ user_id: userId, title, body: message, type, ref_id: orderId, is_read: false });
-    if (error) console.warn('[createNotification]', error.message);
-  } catch (err) {
-    console.warn('[createNotification]', err.message);
-  }
-};
+// Notification creation now goes through the create_notification()
+// SECURITY DEFINER RPC (notificationRpc.sql) — it validates the recipient
+// is actually the other party on the referenced order, which a plain
+// client-side insert can't enforce. Call sites call supabase.rpc(...)
+// directly; getSellerUserId/getOrderRecipientUserId below are still
+// needed to resolve WHO that recipient is before making that call.
 
 // sellers.user_id exists in the schema but isn't populated by the current
 // registration flow (every live seller row has user_id = null) — so a
