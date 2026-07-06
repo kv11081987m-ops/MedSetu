@@ -35,28 +35,22 @@
 --    anon-key probes in this same session (users/staff_whitelist/
 --    seller_registrations all now return zero rows to anon).
 --
---    The exact policy names as they existed live were not captured
---    before dropping them — the block below reconstructs them using
---    Supabase's well-known default policy-template names (what the
---    Dashboard's no-code policy UI names things when a table is set
---    up via "Enable read access for all users" / "Enable insert for
---    authenticated users only" style templates, which is the most
---    likely origin given these tables predate this whole RLS effort).
---    DROP POLICY IF EXISTS is a no-op if a name doesn't match — this
---    section is for documentation completeness, not a functional
---    requirement (the fix is already confirmed live).
+--    Real names as they existed live, confirmed from the pg_policies
+--    output at the time they were dropped. Kept here purely as a
+--    historical record — DROP POLICY IF EXISTS is a no-op since
+--    they're already gone; no need to re-run this against the DB.
 -- ================================================================
 
-DROP POLICY IF EXISTS "Enable read access for all users"            ON users;
-DROP POLICY IF EXISTS "Enable insert for authenticated users only"   ON users;
+DROP POLICY IF EXISTS "users_select_own" ON users;
+DROP POLICY IF EXISTS "users_update_own" ON users;
 
-DROP POLICY IF EXISTS "Enable read access for all users"            ON staff_whitelist;
-DROP POLICY IF EXISTS "Enable insert for authenticated users only"   ON staff_whitelist;
-DROP POLICY IF EXISTS "Enable update for authenticated users only"   ON staff_whitelist;
+DROP POLICY IF EXISTS "whitelist_select" ON staff_whitelist;
+DROP POLICY IF EXISTS "whitelist_update" ON staff_whitelist;
+DROP POLICY IF EXISTS "whitelist_insert" ON staff_whitelist;
 
-DROP POLICY IF EXISTS "Enable read access for all users"            ON seller_registrations;
-DROP POLICY IF EXISTS "Enable insert for authenticated users only"   ON seller_registrations;
-DROP POLICY IF EXISTS "Enable update for authenticated users only"   ON seller_registrations;
+DROP POLICY IF EXISTS "seller_reg_select" ON seller_registrations;
+DROP POLICY IF EXISTS "seller_reg_update" ON seller_registrations;
+DROP POLICY IF EXISTS "seller_reg_insert" ON seller_registrations;
 
 
 -- ================================================================
