@@ -7,7 +7,7 @@ import { testSupabaseConnection } from './lib/testConnection';
 
 import SplashScreen        from './screens/SplashScreen';
 import OnboardingScreen    from './screens/OnboardingScreen';
-import LoginScreen         from './screens/LoginScreen';
+import UnifiedLogin        from './screens/UnifiedLogin';
 import OTPScreen           from './screens/OTPScreen';
 import CustomerHome        from './screens/CustomerHome';
 import SellerDashboard     from './screens/SellerDashboard';
@@ -140,7 +140,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingScreen />} />
 
         {/* ── Public only (redirect if logged in) ── */}
-        <Route path="/login"       element={<PublicOnlyRoute><LoginScreen /></PublicOnlyRoute>} />
+        <Route path="/login"       element={<PublicOnlyRoute><UnifiedLogin /></PublicOnlyRoute>} />
         <Route path="/otp"         element={<PublicOnlyRoute><OTPScreen /></PublicOnlyRoute>} />
         <Route path="/staff-login" element={<PublicOnlyRoute><StaffLogin /></PublicOnlyRoute>} />
 

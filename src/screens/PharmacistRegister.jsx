@@ -78,7 +78,7 @@ export default function PharmacistRegister() {
     }
   };
 
-  if (submitted) return <SuccessScreen onBack={() => navigate('/staff-login')} />;
+  if (submitted) return <SuccessScreen onBack={() => navigate('/login')} />;
 
   const progress = (step / TOTAL_STEPS) * 100;
 
@@ -88,7 +88,7 @@ export default function PharmacistRegister() {
 
         {/* ── Header ── */}
         <div style={s.header}>
-          <button style={s.backBtn} onClick={step === 1 ? () => navigate('/staff-login') : prevStep}>
+          <button style={s.backBtn} onClick={step === 1 ? () => navigate('/login') : prevStep}>
             <ArrowLeft size={22} color="#1A1A1A" />
           </button>
           <div style={{ flex: 1 }}>
