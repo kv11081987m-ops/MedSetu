@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
-import { getSellerUserId } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 
 
@@ -413,13 +412,15 @@ export default function Checkout() {
       }
 
       // Notify seller — fire-and-forget, must not block checkout success.
-      getSellerUserId(newOrder.seller_id)
-        .then((sellerUserId) => sellerUserId && supabase.rpc('create_notification', {
-          p_user_id: sellerUserId, p_title: 'Naya Order! 🛒',
-          p_body: `Aapko naya order mila — ${newOrder.order_number}`,
-          p_type: 'order_placed', p_ref_id: newOrder.id,
-        }))
-        .catch((err) => console.warn('[notify seller]', err));
+      // Recipient is resolved server-side by the RPC now (SECURITY DEFINER,
+      // bypasses RLS) — the client can't read the seller's own users row
+      // itself anymore (014_rlsPhase5a.sql's users SELECT policy), so it
+      // no longer tries to.
+      supabase.rpc('create_notification', {
+        p_title: 'Naya Order! 🛒',
+        p_body: `Aapko naya order mila — ${newOrder.order_number}`,
+        p_type: 'order_placed', p_ref_id: newOrder.id,
+      }).catch((err) => console.warn('[notify seller]', err));
 
       setOrderId(newOrder.order_number || 'MED-' + Date.now());
       clearCart();

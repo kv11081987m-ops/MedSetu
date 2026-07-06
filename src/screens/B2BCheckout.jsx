@@ -7,7 +7,6 @@ import {
 import { useCart } from '../context/CartContext';
 import { getCurrentSeller } from '../lib/auth';
 import { createOrder, createOrderItems } from '../lib/orders';
-import { getSellerUserId } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 
 const BLUE = '#0C447C';
@@ -223,13 +222,13 @@ export default function B2BCheckout() {
       }
 
       // Notify wholesaler — fire-and-forget, must not block checkout success.
-      getSellerUserId(newOrder.seller_id)
-        .then((sellerUserId) => sellerUserId && supabase.rpc('create_notification', {
-          p_user_id: sellerUserId, p_title: 'Naya B2B Order 📦',
-          p_body: `Retailer se naya purchase order — ${newOrder.order_number}`,
-          p_type: 'b2b_order', p_ref_id: newOrder.id,
-        }))
-        .catch((err) => console.warn('[notify wholesaler]', err));
+      // Recipient resolved server-side by the RPC (see Checkout.jsx's
+      // matching comment for why the client can't do this itself anymore).
+      supabase.rpc('create_notification', {
+        p_title: 'Naya B2B Order 📦',
+        p_body: `Retailer se naya purchase order — ${newOrder.order_number}`,
+        p_type: 'b2b_order', p_ref_id: newOrder.id,
+      }).catch((err) => console.warn('[notify wholesaler]', err));
 
       clearCart();
       setOrderId(newOrder.order_number || String(newOrder.id).slice(0, 8).toUpperCase());

@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase';
 import { getCurrentSeller } from '../lib/auth';
 import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
-import { getOrderRecipientUserId, fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -627,13 +627,11 @@ export default function SellerDashboard() {
       setTodayStats((prev) => ({ ...prev, pendingCount: Math.max(0, prev.pendingCount - 1) }));
 
       const isB2B = acceptedOrder.buyer_type === 'retailer';
-      getOrderRecipientUserId(acceptedOrder)
-        .then((uid) => uid && supabase.rpc('create_notification', {
-          p_user_id: uid, p_title: 'Order Accept! ✅',
-          p_body: isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
-          p_type: isB2B ? 'b2b_update' : 'order_accepted', p_ref_id: orderId,
-        }))
-        .catch((err) => console.warn('[notify accept]', err));
+      supabase.rpc('create_notification', {
+        p_title: 'Order Accept! ✅',
+        p_body: isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
+        p_type: isB2B ? 'b2b_update' : 'order_accepted', p_ref_id: orderId,
+      }).catch((err) => console.warn('[notify accept]', err));
 
       await fetchAllOrders(sellerData.id, orderFilter);
     } else {
@@ -653,12 +651,10 @@ export default function SellerDashboard() {
     if (!error) {
       setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
       if (declinedOrder) {
-        getOrderRecipientUserId(declinedOrder)
-          .then((uid) => uid && supabase.rpc('create_notification', {
-            p_user_id: uid, p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
-            p_type: 'order_cancelled', p_ref_id: orderId,
-          }))
-          .catch((err) => console.warn('[notify decline]', err));
+        supabase.rpc('create_notification', {
+          p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
+          p_type: 'order_cancelled', p_ref_id: orderId,
+        }).catch((err) => console.warn('[notify decline]', err));
       }
       if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
     } else {
@@ -689,13 +685,11 @@ export default function SellerDashboard() {
     const orderForComm = rawOrder || pendingOrders.find((o) => o.id === orderId);
     if (orderForComm) {
       const isB2B = orderForComm.buyer_type === 'retailer';
-      getOrderRecipientUserId(orderForComm)
-        .then((uid) => uid && supabase.rpc('create_notification', {
-          p_user_id: uid, p_title: 'Order Deliver! 🎉',
-          p_body: isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
-          p_type: isB2B ? 'b2b_update' : 'order_delivered', p_ref_id: orderId,
-        }))
-        .catch((err) => console.warn('[notify delivered]', err));
+      supabase.rpc('create_notification', {
+        p_title: 'Order Deliver! 🎉',
+        p_body: isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
+        p_type: isB2B ? 'b2b_update' : 'order_delivered', p_ref_id: orderId,
+      }).catch((err) => console.warn('[notify delivered]', err));
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };
@@ -713,12 +707,10 @@ export default function SellerDashboard() {
       }
     }
     if (rawOrder) {
-      getOrderRecipientUserId(rawOrder)
-        .then((uid) => uid && supabase.rpc('create_notification', {
-          p_user_id: uid, p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
-          p_type: 'order_cancelled', p_ref_id: orderId,
-        }))
-        .catch((err) => console.warn('[notify cancel]', err));
+      supabase.rpc('create_notification', {
+        p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
+        p_type: 'order_cancelled', p_ref_id: orderId,
+      }).catch((err) => console.warn('[notify cancel]', err));
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };

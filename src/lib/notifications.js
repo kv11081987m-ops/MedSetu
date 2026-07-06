@@ -1,48 +1,14 @@
 import { supabase } from './supabase';
 
-// Notification creation now goes through the create_notification()
-// SECURITY DEFINER RPC (notificationRpc.sql) — it validates the recipient
-// is actually the other party on the referenced order, which a plain
-// client-side insert can't enforce. Call sites call supabase.rpc(...)
-// directly; getSellerUserId/getOrderRecipientUserId below are still
-// needed to resolve WHO that recipient is before making that call.
-
-// sellers.user_id exists in the schema but isn't populated by the current
-// registration flow (every live seller row has user_id = null) — so a
-// seller/wholesaler resolves to their own login the same way
-// auth.js#getCurrentSeller does it in reverse: match phone (then email)
-// against users.
-export const getSellerUserId = async (sellerId) => {
-  if (!sellerId) return null;
-  try {
-    const { data: seller } = await supabase
-      .from('sellers').select('phone, email').eq('id', sellerId).maybeSingle();
-    if (!seller) return null;
-
-    if (seller.phone) {
-      const { data: u } = await supabase.from('users').select('id').eq('phone', seller.phone).maybeSingle();
-      if (u) return u.id;
-    }
-    if (seller.email) {
-      const { data: u } = await supabase.from('users').select('id').eq('email', seller.email).maybeSingle();
-      if (u) return u.id;
-    }
-    return null;
-  } catch (err) {
-    console.warn('[getSellerUserId]', err.message);
-    return null;
-  }
-};
-
-// The "other side" of an order: the customer for a normal B2C order, or the
-// buying retailer (as a user) for a B2B order — same buyer_type/buyer_id
-// convention orders.js already uses.
-export const getOrderRecipientUserId = async (order) => {
-  if (order.buyer_type === 'retailer' && order.buyer_id) {
-    return getSellerUserId(order.buyer_id);
-  }
-  return order.customer_id || null;
-};
+// Notification creation goes through the create_notification() SECURITY
+// DEFINER RPC (019_notificationRpcV2.sql) — it resolves the recipient
+// itself, server-side, from the referenced order's parties. Recipient
+// resolution used to happen client-side here (getSellerUserId /
+// getOrderRecipientUserId), but that required reading a DIFFERENT
+// person's users row, which 014_rlsPhase5a.sql's users SELECT policy
+// blocks for any non-owning, non-staff session — i.e. every real
+// caller. Both functions were removed once the RPC took over resolving
+// this itself (call sites now just pass p_title/p_body/p_type/p_ref_id).
 
 // ── Phase 2: bell display ──────────────────────────────────────
 export const fetchUserNotifications = async (userId, limit = 20) => {
