@@ -87,9 +87,7 @@ export default function OTPScreen() {
         const result = await verifyFirebaseOTP(code);
         if (result.success) {
           applyDevSession(phone, 'customer');
-          const u = await createOrLoginUser(phone);
-          console.log('[DEBUG LOGIN] createOrLoginUser returned:', u);
-          console.log('[DEBUG LOGIN] localStorage medsetu_user:', localStorage.getItem('medsetu_user'));
+          await createOrLoginUser(phone);
           navigate('/home', { replace: true });
         } else {
           setError(result.error);
@@ -105,9 +103,7 @@ export default function OTPScreen() {
           return;
         }
         applyDevSession(phone, 'customer');
-        const u = await createOrLoginUser(phone);
-        console.log('[DEBUG LOGIN] createOrLoginUser returned:', u);
-        console.log('[DEBUG LOGIN] localStorage medsetu_user:', localStorage.getItem('medsetu_user'));
+        await createOrLoginUser(phone);
         navigate('/home', { replace: true });
       }
     } catch (err) {
