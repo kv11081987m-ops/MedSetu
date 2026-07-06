@@ -29,3 +29,7 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Database backups — contains real customer/order/prescription data,
+# must never reach git. See scripts/backup.md.
+backups/
