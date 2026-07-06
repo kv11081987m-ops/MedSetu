@@ -9,7 +9,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getCurrentSeller } from '../lib/auth';
-import { reserveStock, deductStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
+import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
 import { createNotification, getOrderRecipientUserId, fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 
@@ -393,7 +393,6 @@ export default function SellerDashboard() {
   const [lowStockItems, setLowStockItems] = useState([]);
   const [todayStats,       setTodayStats]       = useState({ totalOrders: 0, pendingCount: 0, todayEarnings: 0, lowStockCount: 0, todayCommission: 0 });
   const [platformCommission, setPlatformCommission] = useState(5);
-  const [tierSettings, setTierSettings] = useState({ lowMax: 30, modMax: 70, lowRate: 5, modRate: 10, highRate: 20 });
   const [loading,            setLoading]            = useState(true);
   const [ordersSubTab,  setOrdersSubTab]  = useState('selling');
   const [b2bPurchases,  setB2bPurchases]  = useState([]);
@@ -478,19 +477,10 @@ export default function SellerDashboard() {
       setStoreOpen(seller.is_open ?? true);
       const { data: ps } = await supabase
         .from('platform_settings')
-        .select('commission, tier_low_max, tier_mod_max, tier_low_rate, tier_mod_rate, tier_high_rate')
+        .select('commission')
         .eq('id', 1)
         .maybeSingle();
       if (ps?.commission != null) setPlatformCommission(ps.commission);
-      if (ps) {
-        setTierSettings((prev) => ({
-          lowMax:   ps.tier_low_max   ?? prev.lowMax,
-          modMax:   ps.tier_mod_max   ?? prev.modMax,
-          lowRate:  ps.tier_low_rate  ?? prev.lowRate,
-          modRate:  ps.tier_mod_rate  ?? prev.modRate,
-          highRate: ps.tier_high_rate ?? prev.highRate,
-        }));
-      }
       await Promise.all([
         fetchPendingOrders(seller.id),
         fetchTodayStats(seller.id),
@@ -658,59 +648,23 @@ export default function SellerDashboard() {
   };
 
   const markDelivered = async (orderId) => {
-    const { error } = await updateOrderStatus(orderId, 'delivered');
-    if (error) { console.error('markDelivered failed:', error); return; }
+    // Commission math now happens server-side (mark_order_delivered RPC,
+    // SECURITY DEFINER) — a seller can no longer influence
+    // commission_amount/seller_earning by tampering with client state.
+    const { data, error } = await supabase.rpc('mark_order_delivered', { p_order_id: orderId });
+    if (error) {
+      console.error('markDelivered failed:', error);
+      alert('Order deliver nahi hua: ' + (error.message || 'Unknown error'));
+      return;
+    }
+    const result = data?.[0];
+    if (result?.stock_deduct_failures?.length) {
+      alert('Order deliver ho gaya, par in items ka stock count update nahi ho paya: ' + result.stock_deduct_failures.join(', ') + '. Inventory manually check kar lein.');
+    }
+
     const rawOrder = allOrders.find((o) => o.id === orderId);
-    // Commission calculation — also check pendingOrders (home tab may not have allOrders loaded)
+    // Also check pendingOrders (home tab may not have allOrders loaded)
     const orderForComm = rawOrder || pendingOrders.find((o) => o.id === orderId);
-    if (orderForComm?.commission_amount == null) {
-      const subtotal = (orderForComm.final_amount || 0) - (orderForComm.delivery_charge || 0);
-      let commAmt, rateToStore;
-
-      if (sellerData?.commission_mode === 'tier') {
-        // Item-wise: each order_item's admin-assigned commission_band
-        // (snapshotted at order-placement time) decides its tier rate.
-        let tierCommAmt = 0;
-        for (const item of orderForComm.order_items || []) {
-          let itemRate;
-          if (item.commission_band === 'high') {
-            itemRate = tierSettings.highRate;
-          } else if (item.commission_band === 'moderate') {
-            itemRate = tierSettings.modRate;
-          } else if (item.commission_band === 'low') {
-            itemRate = tierSettings.lowRate;
-          } else {
-            // Unclassified medicine (admin hasn't assigned a band yet) —
-            // fall back to this seller's flat rate so tier calc can't
-            // stall or crash.
-            itemRate = sellerData?.commission_flat_rate ?? platformCommission;
-          }
-          tierCommAmt += (item.unit_price || 0) * (item.quantity || 0) * (itemRate / 100);
-        }
-        commAmt = parseFloat(tierCommAmt.toFixed(2));
-        // Store the blended effective rate (numeric) rather than the literal
-        // word "tier" — keeps commission_rate consistently numeric whether
-        // the seller is flat or tier, for any downstream sorting/reporting.
-        rateToStore = subtotal > 0 ? parseFloat(((commAmt / subtotal) * 100).toFixed(2)) : 0;
-      } else {
-        // Flat mode — existing calc, untouched.
-        const rate = sellerData?.commission_flat_rate ?? platformCommission;
-        commAmt     = parseFloat((subtotal * (rate / 100)).toFixed(2));
-        rateToStore = rate;
-      }
-
-      const earning = parseFloat((subtotal - commAmt).toFixed(2));
-      await supabase.from('orders').update({ commission_rate: rateToStore, commission_amount: commAmt, seller_earning: earning }).eq('id', orderId);
-    }
-    // Stock deduction — order is already delivered at this point, so a
-    // failure here can't block the flow, but the seller needs to know
-    // their inventory count may now be off.
-    if (rawOrder && sellerData?.id) {
-      const deductResult = await deductStock(sellerData.id, rawOrder.order_items || []);
-      if (!deductResult.success) {
-        alert('Order deliver ho gaya, par in items ka stock count update nahi ho paya: ' + deductResult.failures.join(', ') + '. Inventory manually check kar lein.');
-      }
-    }
     if (orderForComm) {
       const isB2B = orderForComm.buyer_type === 'retailer';
       getOrderRecipientUserId(orderForComm)

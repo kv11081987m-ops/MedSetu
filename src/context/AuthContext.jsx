@@ -205,13 +205,43 @@ export function AuthProvider({ children }) {
               const { error: upsertErr } = await supabase
                 .from('users')
                 .upsert(
-                  { email: emailUser.email, name: emailUser.user_metadata?.full_name || null, role: staffRole, phone: null },
+                  { email: emailUser.email, name: emailUser.user_metadata?.full_name || null, role: staffRole, phone: null, auth_id: emailUser.id },
                   { onConflict: 'email', ignoreDuplicates: true }
                 );
               if (upsertErr) console.error('[AuthContext] users upsert failed:', upsertErr);
-              const { data: row } = await supabase
+              let { data: row } = await supabase
                 .from('users').select('*').eq('email', emailUser.email).maybeSingle();
+
+              // ignoreDuplicates skips the insert entirely when the row
+              // already existed (pre-Phase-0 row, or a repeat login) — patch
+              // auth_id in now so it doesn't stay NULL forever.
+              if (row && !row.auth_id) {
+                const { data: patched } = await supabase
+                  .from('users').update({ auth_id: emailUser.id }).eq('id', row.id).select().maybeSingle();
+                if (patched) row = patched;
+              }
+
               if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
+
+              // sellers.user_id can only ever be linked once we know this
+              // seller's own users.id — approval (SuperAdminPanel) happens
+              // before they've ever logged in, so this is the first reliable
+              // point it can be done. Backfills existing pre-Phase-0 rows too.
+              if (staffRole === 'seller' && row?.email) {
+                try {
+                  const { data: sellerRow } = await supabase
+                    .from('sellers')
+                    .select('id')
+                    .eq('email', row.email)
+                    .is('user_id', null)
+                    .maybeSingle();
+                  if (sellerRow) {
+                    await supabase.from('sellers').update({ user_id: row.id }).eq('id', sellerRow.id);
+                  }
+                } catch (e) {
+                  console.error('[AuthContext] sellers.user_id backfill error:', e);
+                }
+              }
             } catch (e) {
               console.error('[AuthContext] users lookup/insert error:', e);
             }
@@ -239,9 +269,18 @@ export function AuthProvider({ children }) {
             // Same atomic insert-or-skip pattern as the staff branch above.
             await supabase
               .from('users')
-              .upsert({ email: emailUser.email, role: 'customer' }, { onConflict: 'email', ignoreDuplicates: true });
-            const { data: row } = await supabase
+              .upsert({ email: emailUser.email, role: 'customer', auth_id: emailUser.id }, { onConflict: 'email', ignoreDuplicates: true });
+            let { data: row } = await supabase
               .from('users').select('*').eq('email', emailUser.email).maybeSingle();
+
+            // Same backfill as the staff branch — ignoreDuplicates means an
+            // existing pre-Phase-0 row never gets auth_id from the upsert.
+            if (row && !row.auth_id) {
+              const { data: patched } = await supabase
+                .from('users').update({ auth_id: emailUser.id }).eq('id', row.id).select().maybeSingle();
+              if (patched) row = patched;
+            }
+
             if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
           } catch {}
 
