@@ -365,6 +365,8 @@ export default function Checkout() {
 
     const orderData = {
       customerId,
+      customerName:   storedUser?.name  || null,
+      customerPhone:  storedUser?.phone || null,
       sellerId:       cartSellerId || null,
       totalAmount:    cartTotal,
       deliveryCharge: delivFee,

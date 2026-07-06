@@ -326,11 +326,15 @@ export default function PharmacistPanel() {
 
   // ── Handlers ─────────────────────────────────────────────────
   const handleCallAction = async (orderId) => {
-    const { error } = await supabase
-      .from('orders')
-      .update({ pharmacist_verified: true, status: 'confirmed' })
-      .eq('id', orderId);
-    if (error) { console.error('handleCallAction error:', error); return; }
+    // RPC, not a plain UPDATE — confirming here must reserve stock the same
+    // way a seller's own accept does; a pharmacist session can't call
+    // reserve_stock directly (owning-seller-only RLS on seller_inventory).
+    const { data, error } = await supabase.rpc('confirm_order_with_reserve', { p_order_id: orderId });
+    const result = data?.[0];
+    if (error || !result?.success) {
+      alert('Order confirm nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
+      return;
+    }
     setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
     setCompletedCallIds((prev) => new Set([...prev, orderId]));
   };

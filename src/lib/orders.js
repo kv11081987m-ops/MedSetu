@@ -9,6 +9,8 @@ export const createOrder = async (orderData) => {
     .insert({
       order_number:     orderNumber,
       customer_id:      orderData.customerId   || null,
+      customer_name:    orderData.customerName  || null,
+      customer_phone:   orderData.customerPhone || null,
       seller_id:        orderData.sellerId      || null,
       buyer_id:         orderData.buyerId       || null,
       buyer_type:       orderData.buyerType     || 'customer',

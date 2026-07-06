@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { fetchOrderById, updateOrderStatus } from '../lib/orders';
+import { fetchOrderById } from '../lib/orders';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import {
@@ -146,7 +146,19 @@ export default function OrderTracking() {
   const handleCancelConfirm = async () => {
     setShowCancel(false);
     const targetId = order?.id || orderId;
-    if (targetId) await updateOrderStatus(targetId, 'cancelled');
+    if (!targetId) return;
+    // RPC, not a plain UPDATE — a confirmed order has reserved stock that
+    // must be released, and a customer session can't call release_stock
+    // directly (owning-seller-only RLS on seller_inventory).
+    const { data, error } = await supabase.rpc('cancel_order', { p_order_id: targetId });
+    const result = data?.[0];
+    if (error || !result?.success) {
+      alert('Order cancel nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    if (result.message && result.message !== 'Order cancel ho gaya') {
+      alert(result.message);
+    }
     setCancelled(true);
   };
 
