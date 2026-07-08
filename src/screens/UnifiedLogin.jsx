@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { sendFirebaseOTP } from '../lib/firebaseOTP';
 import { supabase } from '../lib/supabase';
 
-// L3 mein isse true karna hai jab phone-OTP dobara live karni ho — poora
-// UI/logic neeche pehle se bana hua hai, sirf render se hide hai. Flag
-// flip karte hi phone section dikhne lagega, koi aur wiring nahi chahiye.
-const PHONE_LOGIN_ENABLED = false;
+// L3 — phone-OTP live: Firebase verifies the OTP, then OTPScreen.jsx bridges
+// to a real Supabase session via the firebase-bridge Edge Function.
+const PHONE_LOGIN_ENABLED = true;
 
 const ORANGE = '#F26C0A';
 const BLUE   = '#0C447C';

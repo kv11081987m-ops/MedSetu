@@ -122,6 +122,60 @@ export function AuthProvider({ children }) {
           const emailUser   = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
+          // ── -1. Phone-authenticated customer (Firebase bridge, L3) ──
+          // A session minted by the firebase-bridge Edge Function has a
+          // phone and no email — Firebase phone auth never sets one, and
+          // staff/SuperAdmin only ever authenticate by email. So this can
+          // only ever be a customer; handled first, with an early return,
+          // so none of the email-oriented branches below ever see it.
+          if (!emailUser.email && emailUser.phone) {
+            // GoTrue actually reports phone WITHOUT a leading '+' (confirmed
+            // live via firebase-bridge's own auth.users lookup bug — it's
+            // "919999999999", not "+919999999999" or bare "9999999999").
+            // The existing phone-login path (auth.js#createOrLoginUser) has
+            // always stored bare 10-digit numbers in public.users.phone, so
+            // normalize in two steps: strip a leading '+' if present (in
+            // case GoTrue's behavior ever differs from what we observed),
+            // then strip a leading '91' ONLY when that leaves exactly 10
+            // digits — i.e. only a true country-code prefix on a 12-digit
+            // value, never the first two digits of a genuine 10-digit
+            // number (a real number can legitimately start with "91").
+            let rawPhone = emailUser.phone.replace(/^\+/, '');
+            if (rawPhone.length === 12 && rawPhone.startsWith('91')) {
+              rawPhone = rawPhone.slice(2);
+            }
+
+            if (!localStorage.getItem('medsetu_role')) {
+              localStorage.setItem('medsetu_role', 'customer');
+              setUserRole('customer');
+            }
+
+            try {
+              // Same atomic insert-or-skip pattern as the email branches below.
+              await supabase
+                .from('users')
+                .upsert({ phone: rawPhone, role: 'customer', auth_id: emailUser.id }, { onConflict: 'phone', ignoreDuplicates: true });
+              let { data: row } = await supabase
+                .from('users').select('*').eq('phone', rawPhone).maybeSingle();
+
+              // Same backfill as the email branches — ignoreDuplicates means
+              // an existing pre-bridge row never gets auth_id from the upsert.
+              if (row && !row.auth_id) {
+                const { data: patched } = await supabase
+                  .from('users').update({ auth_id: emailUser.id }).eq('id', row.id).select().maybeSingle();
+                if (patched) row = patched;
+              }
+
+              if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
+            } catch {}
+
+            markResolved();
+            const currentPath = window.location.pathname;
+            const onAuthPage  = ['/login', '/', '/otp', '/onboarding', '/staff-login'].includes(currentPath);
+            if (onAuthPage) window.location.href = '/home';
+            return;
+          }
+
           // ── 0. Super Admin — email is the source of truth ─────
           // Works regardless of entry point (Google OAuth, magic link, any
           // role tab) since it checks the authenticated session email
