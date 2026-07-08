@@ -216,15 +216,32 @@ export function AuthProvider({ children }) {
           let staffRole = (pendingRole && pendingRole !== 'customer') ? pendingRole : null;
 
           if (!staffRole) {
-            // Whitelist fallback: email se role uthao
+            // Whitelist fallback: email se role uthao. Row ho par
+            // is_approved false ho, to yeh customer branch mein chupchaap
+            // gir jaata tha (is_approved=true filter dono cases mein — row
+            // hi nahi, ya row hai par unapproved — same null deta hai).
+            // Do-step check taaki dono case alag pehchaane jaayein: row
+            // exist karta hai to reject karo saaf message ke saath; row
+            // hai hi nahi to hi customer flow chale (unchanged).
             try {
               const { data: wl } = await supabase
                 .from('staff_whitelist')
-                .select('role')
+                .select('role, is_approved')
                 .eq('email', emailUser.email)
-                .eq('is_approved', true)
                 .maybeSingle();
-              if (wl?.role) staffRole = wl.role;
+              if (wl) {
+                if (wl.is_approved) {
+                  staffRole = wl.role;
+                } else {
+                  intentionalSignOut.current = true;
+                  await supabase.auth.signOut();
+                  localStorage.removeItem('staff_pending_role');
+                  markResolved();
+                  alert('⏳ Aapka account abhi approval pending hai.\n\nSuperAdmin approval ka wait karo, phir dobara login karo.');
+                  window.location.href = '/login';
+                  return;
+                }
+              }
             } catch {}
           } else if (staffRole === 'seller' || staffRole === 'pharmacist' || staffRole === 'admin') {
             // pendingRole set hai — verify whitelist approval
