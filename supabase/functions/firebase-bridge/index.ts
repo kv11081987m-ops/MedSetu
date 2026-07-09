@@ -37,22 +37,37 @@ const firebaseJwks = createRemoteJWKSet(new URL(FIREBASE_JWKS_URL));
 
 const SESSION_TTL_SECONDS = 60 * 60; // 1 hour
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Only the real app origins get a browser-usable response — anything else
+// still gets a reply (the function itself doesn't refuse the request), but
+// with no Access-Control-Allow-Origin match, so a browser blocks it from
+// any other origin. localhost:5173 is Vite's default dev port.
+const ALLOWED_ORIGINS = new Set([
+  "https://med-setu.vercel.app",
+  "http://localhost:5173",
+]);
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
+function corsHeadersFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") ?? "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : "",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
 }
 
 Deno.serve(async (req: Request) => {
+  const cors = corsHeadersFor(req);
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return new Response("ok", { headers: cors });
   }
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
@@ -78,6 +93,11 @@ Deno.serve(async (req: Request) => {
     const { payload } = await jwtVerify(idToken, firebaseJwks, {
       issuer: FIREBASE_ISSUER,
       audience: FIREBASE_PROJECT_ID,
+      // Firebase signs with RS256 — pin it explicitly rather than relying
+      // only on jose's default JWKS key-type matching to block alg-confusion
+      // (tested live: a forged HS256 token was already rejected without
+      // this, but pinning is standard, cheap, explicit defense-in-depth).
+      algorithms: ["RS256"],
     });
     phoneNumber = payload.phone_number as string | undefined;
   } catch (err) {
