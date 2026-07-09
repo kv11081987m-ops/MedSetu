@@ -113,12 +113,27 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // INITIAL_SESSION: resolve immediately unless we're mid-OAuth code exchange
-        if (event === 'INITIAL_SESSION' && !pendingOAuthRef.current) {
+        // INITIAL_SESSION with no session yet — resolve immediately unless
+        // we're mid-OAuth code exchange (waiting for the real session).
+        if (event === 'INITIAL_SESSION' && !session && !pendingOAuthRef.current) {
           markResolved();
         }
 
-        if (event === 'SIGNED_IN' && session) {
+        // INITIAL_SESSION can also arrive WITH an already-valid session —
+        // confirmed live via [DIAG] logs: when the OAuth code exchange
+        // finishes before this listener attaches, Supabase reports the
+        // already-established session as INITIAL_SESSION, never SIGNED_IN.
+        // Role-resolution used to be SIGNED_IN-only, so that session's role
+        // never got resolved — userRole silently fell back to the
+        // 'customer' default from getSavedRole() at mount (the SuperAdmin
+        // regression). Route INITIAL_SESSION-with-session through the exact
+        // same resolution as SIGNED_IN: every branch below already has an
+        // "already X" guard (alreadySuperAdmin / alreadyThisRole / savedRole
+        // already-set) built for repeat SIGNED_IN events (tab focus, token
+        // refresh), so a normal reload with already-correct localStorage
+        // state still redirects nowhere and does nothing extra — only a
+        // session/localStorage mismatch (today's bug) now actually resolves.
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
           const emailUser   = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
@@ -183,17 +198,27 @@ export function AuthProvider({ children }) {
           // OAuth never sets (email isn't known until after the redirect).
           if (emailUser.email === SUPER_ADMIN_EMAIL) {
             const alreadySuperAdmin = localStorage.getItem('medsetu_role') === 'super_admin';
+            // super_admin owns two routes, not just /super-admin (see
+            // App.jsx SuperAdminRoute) — either one counts as "already there".
+            const alreadyOnOwnRoute = ['/super-admin', '/medicine-import'].includes(window.location.pathname);
             localStorage.setItem('medsetu_role', 'super_admin');
             localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
             localStorage.removeItem('staff_pending_role');
             setUserRole('super_admin');
             markResolved();
-            // Only hard-redirect on a genuinely fresh sign-in. Supabase
-            // re-fires SIGNED_IN for an already-active session (tab focus,
-            // token refresh) — without this guard that repeat event forced
-            // a full-page reload (blink) and yanked the SuperAdmin back to
-            // /super-admin from wherever they currently were, every time.
-            if (!alreadySuperAdmin) {
+            // Only hard-redirect on a genuinely fresh sign-in. alreadySuperAdmin
+            // (localStorage-based) was the original guard, built for repeat
+            // SIGNED_IN events (tab focus, token refresh). Now that
+            // INITIAL_SESSION-with-session also runs this same resolution (see
+            // the L4.1 fix above), it fires on every plain page load while a
+            // session is valid — INCLUDING the reload this very redirect
+            // causes — and [DIAG] showed alreadySuperAdmin still reading false
+            // on that fresh reload, turning one redirect into an infinite
+            // loop. alreadyOnOwnRoute checks the browser's actual current path
+            // directly, which can never be wrong about where we already are,
+            // regardless of what localStorage says — added as a second,
+            // independent guard so either one blocks the redirect.
+            if (!alreadySuperAdmin && !alreadyOnOwnRoute) {
               window.location.href = '/super-admin';
             }
             return;
@@ -201,12 +226,15 @@ export function AuthProvider({ children }) {
 
           // ── 1. Super Admin via pendingRole (secondary safety path) ──
           if (pendingRole === 'super_admin') {
+            const alreadyOnOwnRoute = ['/super-admin', '/medicine-import'].includes(window.location.pathname);
             localStorage.setItem('medsetu_role', 'super_admin');
             localStorage.setItem('medsetu_user', JSON.stringify({ email: emailUser.email, role: 'super_admin', name: 'Kumar' }));
             localStorage.removeItem('staff_pending_role');
             setUserRole('super_admin');
             markResolved();
-            window.location.href = '/super-admin';
+            if (!alreadyOnOwnRoute) {
+              window.location.href = '/super-admin';
+            }
             return;
           }
 
@@ -265,6 +293,12 @@ export function AuthProvider({ children }) {
 
           if (staffRole && staffRole !== 'customer') {
             const alreadyThisRole = localStorage.getItem('medsetu_role') === staffRole;
+            const ROLE_OWN_ROUTES = {
+              seller:     ['/seller-dashboard', '/inventory', '/wholesalers', '/wholesaler-inventory', '/b2b-checkout'],
+              pharmacist: ['/pharmacist'],
+              admin:      ['/admin'],
+            };
+            const alreadyOnOwnRoute = (ROLE_OWN_ROUTES[staffRole] || []).includes(window.location.pathname);
             localStorage.setItem('medsetu_role', staffRole);
             localStorage.removeItem('staff_pending_role');
             setUserRole(staffRole);
@@ -322,8 +356,12 @@ export function AuthProvider({ children }) {
             // path that caused Inventory→Home: the whitelist fallback above
             // re-resolves staffRole on every SIGNED_IN (including repeat
             // events from tab focus / token refresh, not just fresh logins),
-            // and this used to redirect unconditionally every time.
-            if (!alreadyThisRole) {
+            // and this used to redirect unconditionally every time. Now that
+            // INITIAL_SESSION-with-session also runs this same resolution,
+            // alreadyThisRole (localStorage) is joined by alreadyOnOwnRoute
+            // (actual browser path) as a second, race-immune guard — see the
+            // SuperAdmin branch above for why the path check was necessary.
+            if (!alreadyThisRole && !alreadyOnOwnRoute) {
               const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', super_admin: '/super-admin' };
               window.location.href = routes[staffRole] || '/home';
             }
