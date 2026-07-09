@@ -228,7 +228,7 @@ export default function B2BCheckout() {
         p_title: 'Naya B2B Order 📦',
         p_body: `Retailer se naya purchase order — ${newOrder.order_number}`,
         p_type: 'b2b_order', p_ref_id: newOrder.id,
-      }).catch((err) => console.warn('[notify wholesaler]', err));
+      }).then(({ error }) => { if (error) console.warn('[notify wholesaler]', error); });
 
       clearCart();
       setOrderId(newOrder.order_number || String(newOrder.id).slice(0, 8).toUpperCase());

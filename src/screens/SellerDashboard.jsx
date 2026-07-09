@@ -631,7 +631,7 @@ export default function SellerDashboard() {
         p_title: 'Order Accept! ✅',
         p_body: isB2B ? 'Wholesaler ne order accept kiya' : 'Store ne aapka order accept kar liya',
         p_type: isB2B ? 'b2b_update' : 'order_accepted', p_ref_id: orderId,
-      }).catch((err) => console.warn('[notify accept]', err));
+      }).then(({ error }) => { if (error) console.warn('[notify accept]', error); });
 
       await fetchAllOrders(sellerData.id, orderFilter);
     } else {
@@ -654,7 +654,7 @@ export default function SellerDashboard() {
         supabase.rpc('create_notification', {
           p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
           p_type: 'order_cancelled', p_ref_id: orderId,
-        }).catch((err) => console.warn('[notify decline]', err));
+        }).then(({ error }) => { if (error) console.warn('[notify decline]', error); });
       }
       if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
     } else {
@@ -689,7 +689,7 @@ export default function SellerDashboard() {
         p_title: 'Order Deliver! 🎉',
         p_body: isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
         p_type: isB2B ? 'b2b_update' : 'order_delivered', p_ref_id: orderId,
-      }).catch((err) => console.warn('[notify delivered]', err));
+      }).then(({ error }) => { if (error) console.warn('[notify delivered]', error); });
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };
@@ -710,7 +710,7 @@ export default function SellerDashboard() {
       supabase.rpc('create_notification', {
         p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
         p_type: 'order_cancelled', p_ref_id: orderId,
-      }).catch((err) => console.warn('[notify cancel]', err));
+      }).then(({ error }) => { if (error) console.warn('[notify cancel]', error); });
     }
     await fetchAllOrders(sellerData.id, orderFilter);
   };

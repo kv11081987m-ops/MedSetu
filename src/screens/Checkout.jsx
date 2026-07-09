@@ -420,7 +420,7 @@ export default function Checkout() {
         p_title: 'Naya Order! 🛒',
         p_body: `Aapko naya order mila — ${newOrder.order_number}`,
         p_type: 'order_placed', p_ref_id: newOrder.id,
-      }).catch((err) => console.warn('[notify seller]', err));
+      }).then(({ error }) => { if (error) console.warn('[notify seller]', error); });
 
       setOrderId(newOrder.order_number || 'MED-' + Date.now());
       clearCart();
