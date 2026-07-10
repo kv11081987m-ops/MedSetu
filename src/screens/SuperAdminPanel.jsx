@@ -396,6 +396,15 @@ export default function SuperAdminPanel() {
     setAdmins((p) => p.filter((a) => a.id !== id));
   };
 
+  // ── Customer View — testing/QA switch, no separate account needed.
+  // sessionStorage only (per-tab, tab-close clears it) — role stays
+  // super_admin the whole time, this only flips ProtectedRoute's gate
+  // (App.jsx) for customer routes. Nothing in AuthContext changes.
+  const handleViewAsCustomer = () => {
+    sessionStorage.setItem('superadmin_viewing_as_customer', '1');
+    navigate('/home');
+  };
+
   // ── Logout ────────────────────────────────────────────────
   const handleLogout = async () => {
     intentionalSignOut.current = true;
@@ -421,6 +430,7 @@ export default function SuperAdminPanel() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={s.adminName}>Kumar</span>
+          <button style={s.customerViewBtn} onClick={handleViewAsCustomer}>👁 Customer View</button>
           <button style={s.logoutBtn} onClick={handleLogout}>Logout</button>
         </div>
       </div>
@@ -1119,6 +1129,7 @@ const s = {
   topTitle: { fontSize: '15px', fontWeight: '700', color: '#1A1A1A' },
   adminName:{ fontSize: '13px', color: '#555', fontWeight: '600' },
   logoutBtn:{ padding: '6px 12px', backgroundColor: '#FEE2E2', border: 'none', borderRadius: '6px', color: '#991B1B', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
+  customerViewBtn:{ padding: '6px 12px', backgroundColor: '#E0E7FF', border: 'none', borderRadius: '6px', color: '#3730A3', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   content:  { flex: 1, padding: '16px', maxWidth: '600px', width: '100%', margin: '0 auto', boxSizing: 'border-box' },
   bottomNav:{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', display: 'flex', borderTop: '1px solid #E0E0E0', zIndex: 50 },
   navBtn:   { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', padding: '10px 4px 12px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: '#888' },

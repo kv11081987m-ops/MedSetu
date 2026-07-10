@@ -66,6 +66,30 @@ function roleHome(role) {
   return '/home';
 }
 
+// ── SuperAdmin "Customer View" — sticky banner shown on customer
+// routes while sessionStorage's superadmin_viewing_as_customer flag is
+// set (SuperAdminPanel.jsx's Customer View button). Fixed/overlay so it
+// works on top of any customer screen's own layout without editing each
+// one individually. "Wapas Panel" clears the flag and returns — role
+// itself was never touched, so a plain SPA navigate is enough.
+function SuperAdminViewBanner() {
+  const navigate = useNavigate();
+  const handleBack = () => {
+    sessionStorage.removeItem('superadmin_viewing_as_customer');
+    navigate('/super-admin');
+  };
+  return (
+    <div style={svb.bar}>
+      <span>👁 Customer View (SuperAdmin)</span>
+      <button style={svb.btn} onClick={handleBack}>Wapas Panel</button>
+    </div>
+  );
+}
+const svb = {
+  bar: { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, background: '#1A1A2E', color: '#FFFFFF', fontSize: '13px', fontWeight: '600', padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.25)' },
+  btn: { background: '#F26C0A', color: '#FFFFFF', border: 'none', borderRadius: '6px', padding: '5px 14px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+};
+
 // ── Protected Route ───────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
   const { isAuthenticated, userRole, authResolved } = useAuth();
@@ -75,12 +99,26 @@ function ProtectedRoute({ children, allowedRoles }) {
   const devSession = (() => { try { return JSON.parse(sessionStorage.getItem('medsetu_dev') || 'null'); } catch { return null; } })();
   const lsLoggedIn = !!(lsUser?.id || lsUser?.phone || lsUser?.email || devSession);
 
+  // SuperAdmin "Customer View" testing switch — sessionStorage-only flag
+  // (tab-close clears it) lets super_admin through specifically on
+  // customer routes, without AuthContext's role resolution changing at
+  // all: userRole stays 'super_admin' the whole time, this is a pure
+  // route-gate exception. Scoped to allowedRoles that actually include
+  // 'customer' so it can never open seller/pharmacist/admin routes.
+  const viewingAsCustomer =
+    userRole === 'super_admin' &&
+    sessionStorage.getItem('superadmin_viewing_as_customer') === '1' &&
+    !!allowedRoles?.includes('customer');
+
   // Block ALL routing until auth check completes — prevents "customer flash"
   // during OAuth redirects where userRole is briefly 'customer' (default).
   if (!authResolved) return <LoadingScreen />;
   if (!isAuthenticated && !lsLoggedIn) return <Navigate to="/login" replace />;
-  if (allowedRoles && !allowedRoles.includes(userRole)) {
+  if (allowedRoles && !allowedRoles.includes(userRole) && !viewingAsCustomer) {
     return <Navigate to={roleHome(userRole)} replace />;
+  }
+  if (viewingAsCustomer) {
+    return (<><SuperAdminViewBanner />{children}</>);
   }
   return children;
 }
