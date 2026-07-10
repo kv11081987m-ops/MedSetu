@@ -112,30 +112,6 @@ export const removeFromInventory = async (inventoryId) => {
   if (error) throw error
 }
 
-export const reduceInventoryStock = async (sellerId, items) => {
-  for (const item of items) {
-    const medId = item.medicine_id || item.id;
-    const qty   = item.quantity ?? item.qty ?? 0;
-    if (!medId || qty <= 0) continue;
-
-    const { data: row, error: selErr } = await supabase
-      .from('seller_inventory')
-      .select('id, stock_quantity')
-      .eq('seller_id', sellerId)
-      .eq('medicine_id', medId)
-      .maybeSingle();
-    if (selErr) { console.error('stock SELECT error:', selErr); continue; }
-    if (!row) continue;
-
-    const newStock = Math.max(0, (row.stock_quantity || 0) - qty);
-    const { error: updErr } = await supabase
-      .from('seller_inventory')
-      .update({ stock_quantity: newStock, is_available: newStock > 0 })
-      .eq('id', row.id);
-    if (updErr) console.error('stock UPDATE error:', updErr);
-  }
-};
-
 // ── Release reserve on confirmed-order CANCEL — also used internally
 // to roll back partial reservations (see reserveStock below).
 export const releaseStock = async (sellerId, items) => {
@@ -190,25 +166,6 @@ export const reserveStock = async (sellerId, items) => {
     reservedSoFar.push({ medicine_id: medId, quantity: qty, name: item.name || item.medicine_name });
   }
   return { success: true };
-};
-
-// ── Deduct stock on DELIVERED (actual deduct + clear reserve) ──
-export const deductStock = async (sellerId, items) => {
-  const failures = [];
-  for (const item of items) {
-    const medId = item.medicine_id || item.id;
-    const qty   = item.quantity ?? item.qty ?? 0;
-    if (!medId || qty <= 0) continue;
-
-    const { data, error } = await supabase.rpc('deduct_stock', {
-      p_seller_id: sellerId, p_medicine_id: medId, p_qty: qty,
-    });
-    if (error || !data) {
-      console.error('deduct_stock RPC error:', error);
-      failures.push(item.name || item.medicine_name || 'Medicine');
-    }
-  }
-  return { success: failures.length === 0, failures };
 };
 
 // ── B2B Lot Auto-Add: retailer confirms receipt of a delivered order ──
