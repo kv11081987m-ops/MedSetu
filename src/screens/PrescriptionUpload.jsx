@@ -67,6 +67,21 @@ export default function PrescriptionUpload() {
   const [realStores, setRealStores] = useState([]);
   const [form, setForm]           = useState({ doctor: '', date: '', medicines: '' });
 
+  // returnTo travels via router state, but on real phones the native
+  // camera/gallery picker (triggered below by the hidden file input) can
+  // background-kill and reload this page — location.state doesn't survive
+  // that (confirmed live, Round 6 mobile test; never reproduces on desktop
+  // since there's no native picker to kill the tab). Mirror it into
+  // sessionStorage on the way in so a post-camera reload can recover it.
+  useEffect(() => {
+    if (location.state?.returnTo) {
+      sessionStorage.setItem('rx_return_to', location.state.returnTo);
+    }
+  }, [location.state?.returnTo]);
+
+  const returnTo = location.state?.returnTo || sessionStorage.getItem('rx_return_to') || '';
+  const clearReturnTo = () => sessionStorage.removeItem('rx_return_to');
+
   // ── Fetch real stores ──────────────────────────────────────
   useEffect(() => {
     supabase
@@ -165,8 +180,8 @@ export default function PrescriptionUpload() {
   };
 
   if (submitted) {
-    const returnTo = location.state?.returnTo;
     const goToPrimary = () => {
+      clearReturnTo();
       if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
       else navigate('/orders');
     };
@@ -177,6 +192,7 @@ export default function PrescriptionUpload() {
             <button style={s.iconBtn} onClick={() => {
               // Success screen back-arrow — same rule as the primary button
               // below: don't let ANY exit from this screen drop the URL.
+              clearReturnTo();
               if (returnTo) navigate(returnTo, { state: { prescriptionUrl: uploadedUrl } });
               else navigate('/home');
             }}>
@@ -189,7 +205,7 @@ export default function PrescriptionUpload() {
             rxNumber={rxNumber}
             returnTo={returnTo}
             onPrimary={goToPrimary}
-            onHome={() => navigate('/home')}
+            onHome={() => { clearReturnTo(); navigate('/home'); }}
           />
         </div>
       </div>
@@ -202,7 +218,7 @@ export default function PrescriptionUpload() {
 
         {/* ── Header ── */}
         <div style={s.header}>
-          <button style={s.iconBtn} onClick={() => navigate('/home')}>
+          <button style={s.iconBtn} onClick={() => { clearReturnTo(); navigate('/home'); }}>
             <ArrowLeft size={22} color="#1A1A1A" />
           </button>
           <span style={s.headerTitle}>Prescription Upload</span>
@@ -455,7 +471,7 @@ export default function PrescriptionUpload() {
               <button
                 key={id}
                 style={s.navTab}
-                onClick={() => { setActiveTab(id); navigate(route); }}
+                onClick={() => { clearReturnTo(); setActiveTab(id); navigate(route); }}
               >
                 <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'} strokeWidth={isActive ? 2.5 : 1.8} />
                 <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA', fontWeight: isActive ? '600' : '400' }}>
