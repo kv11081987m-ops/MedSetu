@@ -148,7 +148,7 @@ export default function UnifiedLogin() {
           had, carried over as-is (not removed, per instruction). */}
       <div style={{ position: 'fixed', bottom: '16px', right: '16px' }}>
         <span onClick={() => navigate('/staff-login')} style={s.staffLink}>
-          Staff Login
+          Admin Login
         </span>
       </div>
 
