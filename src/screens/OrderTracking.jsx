@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchOrderById } from '../lib/orders';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { formatIST } from '../lib/formatTime';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
   MapPin, Package, IndianRupee, CreditCard, Store,
@@ -58,7 +59,7 @@ function getEtaBanner(status) {
 function buildSteps(order) {
   const storeName  = order?.sellers?.store_name || 'Store';
   const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;
-  const fmt        = (d) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '- -';
+  const fmt        = (d) => d ? formatIST(d, { hour: '2-digit', minute: '2-digit' }) : '- -';
   return [
     { id: 1, title: 'Order Confirm Hua',    sub: `${storeName} ne accept kiya`,           time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
     { id: 2, title: 'Taiyari Ho Rahi Hai',  sub: 'Store aapki medicine pack kar raha hai', time: '- -',                   state: activeStep > 2 ? 'done' : activeStep === 2 ? 'active' : 'pending' },

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { formatIST } from '../lib/formatTime';
 import {
   fetchCommissionDelegation,
   fetchPendingCommissionRequests,
@@ -300,9 +301,7 @@ const mapOrderCard = (order) => ({
   store:    order.sellers?.store_name || 'Store',
   amount:   `₹${(order.final_amount || 0).toLocaleString('en-IN')}`,
   status:   order.status,
-  time:     order.created_at
-    ? new Date(order.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-    : '—',
+  time:     formatIST(order.created_at, { hour: '2-digit', minute: '2-digit' }),
 });
 
 const mapSellerList = (s) => ({
@@ -424,10 +423,14 @@ export default function AdminPanel() {
       const dayBuckets = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(today); d.setDate(d.getDate() - i);
-        dayBuckets.push({ key: d.toDateString(), day: d.toLocaleDateString('en-IN', { weekday: 'short' }), val: 0 });
+        dayBuckets.push({
+          key: formatIST(d, { year: 'numeric', month: '2-digit', day: '2-digit' }),
+          day: formatIST(d, { weekday: 'short' }),
+          val: 0,
+        });
       }
       (weekOrders || []).forEach((o) => {
-        const key = new Date(o.created_at).toDateString();
+        const key = formatIST(o.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' });
         const bucket = dayBuckets.find((b) => b.key === key);
         if (bucket) bucket.val += 1;
       });

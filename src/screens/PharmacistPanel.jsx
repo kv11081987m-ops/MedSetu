@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import { formatIST } from '../lib/formatTime';
 import {
   Bell, Phone, CheckCircle, FileText, Clock,
   MapPin, AlertTriangle, X, Search, ZoomIn,
-  PhoneCall, PhoneOff, LayoutDashboard,
+  PhoneCall, LayoutDashboard,
   User, Save, Check, LogOut,
 } from 'lucide-react';
 
@@ -40,19 +41,24 @@ const mapRxCard = (rx) => ({
   medicines:rx.medicines_list || [`${rx.medicines_count || 1} medicine(s) prescribed`],
   doctor:   rx.doctor_name   || 'Doctor',
   hospital: rx.hospital_name || 'Hospital',
-  date:     rx.prescribed_date
-    ? new Date(rx.prescribed_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '—',
+  date:     formatIST(rx.prescribed_date, { day: 'numeric', month: 'short', year: 'numeric' }),
   checks:   [{ ok: true, text: 'Prescription uploaded' }],
   status:   rx.status || 'pending',
 });
 
-const CALL_HISTORY = [
-  { id: 1, name: 'Ramesh Kumar', duration: '4:12', status: 'approved', time: '10:15 AM' },
-  { id: 2, name: 'Meena Devi',   duration: '2:45', status: 'approved', time: '10:32 AM' },
-  { id: 3, name: 'Unknown',      duration: '0:45', status: 'rejected', time: '10:48 AM' },
-  { id: 4, name: 'Suresh Singh', duration: '5:20', status: 'approved', time: '11:05 AM' },
-];
+// Orders can't be attributed to a specific pharmacist (no per-staff column
+// on orders — the whole team shares one call queue), so "Aaj Ki Calls" is a
+// real platform-wide feed of today's pharmacist-confirmed orders, not a
+// personal history. Call duration was never real (no actual telephony
+// integration — "call" here just means "confirm this order") and rejected
+// orders share the same status='cancelled' as customer-initiated cancels
+// with no way to tell them apart, so both are dropped rather than faked.
+const mapVerifiedCard = (order) => ({
+  id:      order.id,
+  name:    order.users?.name || order.customer_name || 'Customer',
+  orderId: order.order_number || String(order.id).slice(0, 8).toUpperCase(),
+  time:    order.updated_at ? formatIST(order.updated_at, { hour: '2-digit', minute: '2-digit' }) : '—',
+});
 
 const LOOKUP_CHIPS = ['Schedule H', 'Schedule X', 'OTC Medicines', 'Drug Interactions'];
 
@@ -240,9 +246,15 @@ export default function PharmacistPanel() {
   const [busyCallIds, setBusyCallIds] = useState(new Set());
   const [loading,         setLoading]         = useState(true);
 
+  // ── Real profile + platform-wide verify stats (replaces hardcoded
+  // "Dr. Anjali Sharma" mock — see staff_whitelist fetch below) ───
+  const [profile, setProfile] = useState({ name: 'Pharmacist', email: '', phone: '', joined: '' });
+  const [history, setHistory] = useState([]);
+  const [verifiedTodayCount, setVerifiedTodayCount] = useState(0);
+  const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
+
   // ── UI state (unchanged) ─────────────────────────────────────
   const [available, setAvailable]           = useState(true);
-  const [history]                           = useState(CALL_HISTORY);
   const [lookup,  setLookup]                = useState('');
   const [notes,   setNotes]                 = useState('');
   const [notesSaved, setNotesSaved]         = useState(false);
@@ -287,8 +299,57 @@ export default function PharmacistPanel() {
     if (data) setCallQueue(data);
   };
 
+  // Real name/phone/joined-date — email is the bridge between the logged-in
+  // session (medsetu_user) and the registration-time row (staff_whitelist)
+  // that actually has phone/created_at (users.phone is always null for
+  // staff — see AuthContext's staff upsert).
+  const fetchProfile = async () => {
+    let medsetuUser = {};
+    try { medsetuUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}'); } catch {}
+    const email = medsetuUser?.email || '';
+    setProfile((p) => ({ ...p, name: medsetuUser?.name || 'Pharmacist', email }));
+    if (!email) return;
+
+    const { data } = await supabase
+      .from('staff_whitelist')
+      .select('phone, created_at')
+      .eq('email', email)
+      .eq('role', 'pharmacist')
+      .maybeSingle();
+    if (data) {
+      setProfile((p) => ({
+        ...p,
+        phone:  data.phone || '',
+        joined: data.created_at ? formatIST(data.created_at, { month: 'short', year: 'numeric' }) : '',
+      }));
+    }
+  };
+
+  // Platform-wide, not personal (see mapVerifiedCard comment) — orders
+  // aren't attributed to a specific pharmacist, only to the team.
+  const fetchVerifiedStats = async () => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const { data: todayRows, count: todayCount } = await supabase
+      .from('orders')
+      .select('id, order_number, updated_at, users(name), customer_name', { count: 'exact' })
+      .eq('pharmacist_verified', true)
+      .gte('updated_at', todayStart.toISOString())
+      .order('updated_at', { ascending: false })
+      .limit(10);
+    if (todayRows) setHistory(todayRows.map(mapVerifiedCard));
+    if (typeof todayCount === 'number') setVerifiedTodayCount(todayCount);
+
+    const { count: totalCount } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('pharmacist_verified', true);
+    if (typeof totalCount === 'number') setVerifiedTotalCount(totalCount);
+  };
+
   useEffect(() => {
-    Promise.all([fetchPrescriptions(), fetchCallQueue()])
+    Promise.all([fetchPrescriptions(), fetchCallQueue(), fetchProfile(), fetchVerifiedStats()])
       .finally(() => setLoading(false));
 
     try {
@@ -479,25 +540,27 @@ export default function PharmacistPanel() {
 
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Aaj Ki Calls</p>
-        <div style={s.historyList}>
-          {history.map((h) => (
-            <div key={h.id} style={s.historyRow}>
-              <div style={{ ...s.histIconCircle, backgroundColor: h.status === 'approved' ? '#E8F5EE' : '#FFEBEE' }}>
-                {h.status === 'approved' ? <PhoneCall size={14} color="#1A6B3C" /> : <PhoneOff size={14} color="#DC3545" />}
+        {history.length === 0 ? (
+          <p style={{ fontSize: '13px', color: '#888888', textAlign: 'center', padding: '12px 0', margin: 0 }}>Aaj tak koi order verify nahi hua</p>
+        ) : (
+          <div style={s.historyList}>
+            {history.map((h) => (
+              <div key={h.id} style={s.historyRow}>
+                <div style={{ ...s.histIconCircle, backgroundColor: '#E8F5EE' }}>
+                  <PhoneCall size={14} color="#1A6B3C" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={s.histName}>{h.name}</p>
+                  <p style={s.histDur}>{h.orderId}</p>
+                </div>
+                <div style={s.histRight}>
+                  <span style={{ ...s.histStatus, color: '#1A6B3C', backgroundColor: '#E8F5EE' }}>Confirmed</span>
+                  <span style={s.histTime}>{h.time}</span>
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <p style={s.histName}>{h.name}</p>
-                <p style={s.histDur}>{h.duration}</p>
-              </div>
-              <div style={s.histRight}>
-                <span style={{ ...s.histStatus, color: h.status === 'approved' ? '#1A6B3C' : '#DC3545', backgroundColor: h.status === 'approved' ? '#E8F5EE' : '#FFEBEE' }}>
-                  {h.status === 'approved' ? 'Approved' : 'Rejected'}
-                </span>
-                <span style={s.histTime}>{h.time}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={s.whiteCard}>
@@ -595,11 +658,10 @@ export default function PharmacistPanel() {
     <>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '16px 0 8px' }}>
         <div style={{ width: '72px', height: '72px', borderRadius: '36px', backgroundColor: '#1A6B3C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontSize: '32px', fontWeight: '800', color: '#FFFFFF' }}>A</span>
+          <span style={{ fontSize: '32px', fontWeight: '800', color: '#FFFFFF' }}>{(profile.name || 'P')[0].toUpperCase()}</span>
         </div>
-        <p style={{ fontSize: '20px', fontWeight: '800', color: '#1A1A1A', margin: 0 }}>Dr. Anjali Sharma</p>
+        <p style={{ fontSize: '20px', fontWeight: '800', color: '#1A1A1A', margin: 0 }}>{profile.name}</p>
         <p style={{ fontSize: '13px', color: '#888888', margin: 0 }}>Licensed Pharmacist</p>
-        <p style={{ fontSize: '12px', color: '#1A6B3C', fontWeight: '600', margin: 0 }}>B.Pharm — Reg: UP-PH-2024-001</p>
       </div>
 
       <div style={s.whiteCard}>
@@ -622,11 +684,9 @@ export default function PharmacistPanel() {
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Info</p>
         {[
-          ['Email',          'pharma@medsetu.in'],
-          ['Phone',          '+91 98765XXXXX'   ],
-          ['Joined',         'Jan 2025'          ],
-          ['Today Calls',    '24'                ],
-          ['Today Verified', '18'                ],
+          ['Email',  profile.email || '—'],
+          ['Phone',  profile.phone ? `+91 ${profile.phone}` : '—'],
+          ['Joined', profile.joined || '—'],
         ].map(([label, val]) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F5F5F5' }}>
             <span style={{ fontSize: '13px', color: '#888888' }}>{label}</span>
@@ -635,11 +695,12 @@ export default function PharmacistPanel() {
         ))}
       </div>
 
+      {/* Platform-wide verify counts, not personal — orders aren't
+          attributed to a specific pharmacist (see mapVerifiedCard). */}
       <div style={{ display: 'flex', gap: '10px' }}>
         {[
-          { val: '156', label: 'Total Calls', color: '#2563EB', bg: '#EAF2FF' },
-          { val: '142', label: 'Approved',    color: '#1A6B3C', bg: '#E8F5EE' },
-          { val: '14',  label: 'Rejected',    color: '#DC3545', bg: '#FFEBEE' },
+          { val: String(verifiedTodayCount), label: 'Aaj Verify Hue',   color: '#1A6B3C', bg: '#E8F5EE' },
+          { val: String(verifiedTotalCount), label: 'Total Verify Hue', color: '#2563EB', bg: '#EAF2FF' },
         ].map(({ val, label, color, bg }) => (
           <div key={label} style={{ flex: 1, backgroundColor: bg, borderRadius: '12px', padding: '12px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
             <p style={{ fontSize: '22px', fontWeight: '800', color, margin: 0 }}>{val}</p>
@@ -662,7 +723,7 @@ export default function PharmacistPanel() {
         <div style={s.header}>
           <div>
             <p style={s.headerTitle}>Pharmacist Panel</p>
-            <p style={s.headerSub}>Dr. Anjali Sharma</p>
+            <p style={s.headerSub}>{profile.name}</p>
           </div>
           <div style={s.headerRight}>
             <button style={s.iconBtn} onClick={handleBellClick}>

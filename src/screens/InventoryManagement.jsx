@@ -107,6 +107,10 @@ function EditModal({ item, onSave, onClose, isWholesaler }) {
   const handleSubmit = () => {
     if (!formData.stock.trim()) { alert('Stock quantity daalna zaroori hai'); return; }
     if (!formData.selling.trim()) { alert('Selling price daalna zaroori hai'); return; }
+    if (item?.mrp > 0 && Number(formData.selling) > item.mrp) {
+      alert(`Selling price MRP (₹${item.mrp}) se zyada nahi ho sakta`);
+      return;
+    }
     onSave({
       stock:              Number(formData.stock),
       selling_price:      Number(formData.selling),
@@ -320,6 +324,10 @@ function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler }) {
   const handleSubmit = async () => {
     if (!form.sellingPrice || !form.stock) {
       alert('Selling price aur stock daalna zaroori hai');
+      return;
+    }
+    if (medicine?.mrp_max > 0 && Number(form.sellingPrice) > medicine.mrp_max) {
+      alert(`Selling price MRP (₹${medicine.mrp_max}) se zyada nahi ho sakta`);
       return;
     }
     setSaving(true);
@@ -579,7 +587,7 @@ function BulkModal({ sellerId, onClose, onDone }) {
     for (const r of validRows) {
       const { data: match, error: matchErr } = await supabase
         .from('master_medicines')
-        .select('id, name')
+        .select('id, name, mrp_max')
         .ilike('name', r.name.trim())
         .eq('is_active', true)
         .limit(1)
@@ -591,8 +599,17 @@ function BulkModal({ sellerId, onClose, onDone }) {
         const expiryDate = rawExpiry
           ? (rawExpiry.length === 7 ? rawExpiry + '-01' : rawExpiry)
           : null;
+        const sellingPrice = Number(r.selling_price) || Number(r.mrp) || 0;
+        // DB's own mrp_max is authoritative — the CSV's mrp column is
+        // seller-self-reported, only used as a fallback when master_medicines
+        // has no reference price at all.
+        const effectiveMrp = match.mrp_max > 0 ? match.mrp_max : (Number(r.mrp) || 0);
+        if (effectiveMrp > 0 && sellingPrice > effectiveMrp) {
+          res.failed.push(`${r.name} (selling price MRP ₹${effectiveMrp} se zyada hai)`);
+          continue;
+        }
         await addToSellerInventory(match.id, {
-          sellingPrice:     Number(r.selling_price) || Number(r.mrp) || 0,
+          sellingPrice,
           stock:            Number(r.stock)          || 0,
           unit:             r.unit                   || 'strips',
           expiryDate,

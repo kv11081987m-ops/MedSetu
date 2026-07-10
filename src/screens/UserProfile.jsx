@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { formatIST } from '../lib/formatTime';
 import {
   ArrowLeft, Pencil, Camera, User, Phone, Mail,
   Home, Briefcase, Heart, AlertCircle, Activity,
@@ -236,7 +237,7 @@ export default function UserProfile() {
             <p style={s.heroCity}>{userData.city || 'Deoria, Uttar Pradesh'}</p>
             <p style={s.heroMember}>
               {userData.created_at
-                ? `Member since ${new Date(userData.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+                ? `Member since ${formatIST(userData.created_at, { month: 'short', year: 'numeric' })}`
                 : 'Member since —'}
             </p>
 
@@ -416,9 +417,7 @@ export default function UserProfile() {
                     <p style={s.rxHosp}>{rx.hospital_name || '—'}</p>
                     <div style={s.rxMeta}>
                       <span style={s.rxDate}>
-                        {rx.prescribed_date
-                          ? new Date(rx.prescribed_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                          : '—'}
+                        {formatIST(rx.prescribed_date, { day: '2-digit', month: 'short', year: 'numeric' })}
                       </span>
                       {rx.review_notes && <span style={s.rxMeds}>{rx.review_notes}</span>}
                     </div>

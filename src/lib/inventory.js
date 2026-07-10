@@ -181,10 +181,24 @@ export const addLotToRetailerInventory = async (retailerId, order) => {
   const items = order?.order_items || [];
   const results = [];
 
+  // Batch-fetch MRP reference for every medicine in this lot up front — the
+  // rate-confirm modal needs it to stop a retailer setting a selling price
+  // above MRP (master_medicines is public catalog data, no RLS concern).
+  const medIds = [...new Set(items.map((i) => i.medicine_id).filter(Boolean))];
+  let mrpMap = {};
+  if (medIds.length) {
+    const { data: meds } = await supabase
+      .from('master_medicines')
+      .select('id, mrp_max')
+      .in('id', medIds);
+    mrpMap = Object.fromEntries((meds || []).map((m) => [m.id, m.mrp_max || 0]));
+  }
+
   for (const item of items) {
     const medId = item.medicine_id;
     const qty   = item.quantity || 0;
     if (!medId || qty <= 0) continue;
+    const mrp = mrpMap[medId] || 0;
 
     const { data: existing, error: selErr } = await supabase
       .from('seller_inventory')
@@ -207,7 +221,7 @@ export const addLotToRetailerInventory = async (retailerId, order) => {
         })
         .eq('id', existing.id);
       if (updErr) { console.error('addLotToRetailerInventory UPDATE error:', updErr); continue; }
-      results.push({ inventoryId: existing.id, medicineId: medId, name: item.name, quantity: qty, costPrice: item.unit_price, existingSellingPrice: existing.selling_price, isNew: false });
+      results.push({ inventoryId: existing.id, medicineId: medId, name: item.name, quantity: qty, costPrice: item.unit_price, existingSellingPrice: existing.selling_price, mrp, isNew: false });
     } else {
       const { data: inserted, error: insErr } = await supabase
         .from('seller_inventory')
@@ -224,7 +238,7 @@ export const addLotToRetailerInventory = async (retailerId, order) => {
         .select()
         .maybeSingle();
       if (insErr) { console.error('addLotToRetailerInventory INSERT error:', insErr); continue; }
-      results.push({ inventoryId: inserted?.id, medicineId: medId, name: item.name, quantity: qty, costPrice: item.unit_price, isNew: true });
+      results.push({ inventoryId: inserted?.id, medicineId: medId, name: item.name, quantity: qty, costPrice: item.unit_price, mrp, isNew: true });
     }
   }
 

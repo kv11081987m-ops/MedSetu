@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { formatIST } from './formatTime';
 
 // ── Create order ───────────────────────────────────────────────
 export const createOrder = async (orderData) => {
@@ -161,9 +162,7 @@ export function mapOrder(row) {
     cancelled:         'cancelled',
   };
   const date = row.created_at
-    ? new Date(row.created_at).toLocaleString('en-IN', {
-        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-      })
+    ? formatIST(row.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '';
 
   return {

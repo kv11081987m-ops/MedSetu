@@ -12,6 +12,7 @@ import { getCurrentSeller } from '../lib/auth';
 import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import { formatIST } from '../lib/formatTime';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -40,14 +41,7 @@ const ORDER_FILTERS = [
 
 const formatOrderTime = (dateStr) => {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return formatIST(dateStr, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
 };
 
 const mapOrderDisplay = (order) => {
@@ -234,6 +228,14 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
 
   const handleConfirm = async () => {
     if (newItemsMissingPrice) { alert('Naye items ka selling price daalna zaroori hai'); return; }
+    const overMrp = items.find((it) => {
+      const val = String(prices[it.inventoryId] || '').trim();
+      return val && it.mrp > 0 && Number(val) > it.mrp;
+    });
+    if (overMrp) {
+      alert(`${overMrp.name} ka selling price MRP (₹${overMrp.mrp}) se zyada nahi ho sakta`);
+      return;
+    }
     setSaving(true);
     try {
       await onConfirm(prices);
@@ -259,6 +261,7 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
                 <p style={s.rateItemName}>{it.name}</p>
                 <p style={s.rateItemMeta}>
                   Qty: {it.quantity} · Cost: ₹{it.costPrice}
+                  {it.mrp > 0 ? ` · MRP: ₹${it.mrp}` : ''}
                   {it.isNew ? <span style={s.newTag}> NAYA</span> : null}
                 </p>
               </div>

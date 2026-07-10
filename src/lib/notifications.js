@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { formatIST } from './formatTime';
 
 // Notification creation goes through the create_notification() SECURITY
 // DEFINER RPC (019_notificationRpcV2.sql) — it resolves the recipient
@@ -42,6 +43,4 @@ export const markAllNotificationsRead = async (userId) => {
 
 // "30 Jun, 2:30 pm"
 export const formatNotifTime = (dateString) =>
-  new Date(dateString).toLocaleString('en-IN', {
-    day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
-  });
+  formatIST(dateString, { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
