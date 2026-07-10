@@ -360,6 +360,20 @@ export default function Checkout() {
     const storedUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
     const customerId   = storedUser?.id || null;
 
+    // SuperAdmin's Customer View (SuperAdminPanel.jsx) has no real users.id
+    // (Step 0 in AuthContext never creates one) — orders_insert_own's RLS
+    // policy (015_rlsPhase5b.sql) requires a real customer_id, so this will
+    // always fail. Expected and fine (a testing view shouldn't be able to
+    // write real orders) — just surface a message that explains why instead
+    // of a raw RLS error string.
+    const isSuperAdminCustomerView =
+      localStorage.getItem('medsetu_role') === 'super_admin' &&
+      sessionStorage.getItem('superadmin_viewing_as_customer') === '1';
+    const orderFailMessage = (raw) =>
+      isSuperAdminCustomerView
+        ? 'Customer View mein order place nahi ho sakta — asli customer account se test karein'
+        : (raw || 'Order nahi ho saka. Dobara try karo.');
+
     const orderData = {
       customerId,
       customerName:   storedUser?.name  || null,
@@ -380,7 +394,7 @@ export default function Checkout() {
       const { data: orderRows, error: orderErr } = await createOrder(orderData);
 
       if (orderErr || !orderRows?.length) {
-        setOrderError(orderErr?.message || 'Order nahi ho saka. Dobara try karo.');
+        setOrderError(orderFailMessage(orderErr?.message));
         setOrdering(false);
         return;
       }
@@ -426,7 +440,7 @@ export default function Checkout() {
       clearCart();
       setSuccess(true);
     } catch (err) {
-      setOrderError(err?.message || 'Order nahi ho saka. Dobara try karo.');
+      setOrderError(orderFailMessage(err?.message));
     } finally {
       setOrdering(false);
     }

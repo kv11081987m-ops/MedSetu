@@ -7,6 +7,26 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
+// Module-level (NOT React state) — persists across SPA remounts of this
+// screen within the same page-load, but resets when the module
+// re-evaluates from scratch (i.e. any real browser reload, including the
+// camera-kill one this whole returnTo dance exists for). This is the
+// signal that tells a camera-kill reload apart from a genuine standalone
+// re-visit: if this screen already rendered once THIS page-load and now
+// mounts again with no returnTo in location.state, that's a deliberate
+// new visit (e.g. the Home tile) — safe to drop any leftover
+// rx_return_to. If this is the FIRST render since the page loaded and
+// returnTo is still missing, there's no way to tell a same-JS-session
+// standalone visit (there wasn't one — this IS the first render) apart
+// from a reload that lost location.state — so sessionStorage is left
+// alone in that case; a stale flag surviving one extra visit is a much
+// smaller cost than wrongly dropping it mid-flow.
+// Trade-off: React 18 StrictMode's dev-only double-effect-invoke can trip
+// this after the very first render in local dev (harmless — no effect in
+// production builds, and the camera-kill scenario only happens on real
+// phones anyway).
+let hasMountedThisPageLoad = false;
+
 const NAV_TABS = [
   { id: 'home',    Icon: Home,        label: 'Home',   route: '/home' },
   { id: 'search',  Icon: Search,      label: 'Search', route: '/medicine-search' },
@@ -76,7 +96,12 @@ export default function PrescriptionUpload() {
   useEffect(() => {
     if (location.state?.returnTo) {
       sessionStorage.setItem('rx_return_to', location.state.returnTo);
+    } else if (hasMountedThisPageLoad) {
+      // Already rendered once this page-load with no reload in between —
+      // this mount is a genuine fresh visit, not camera-kill recovery.
+      sessionStorage.removeItem('rx_return_to');
     }
+    hasMountedThisPageLoad = true;
   }, [location.state?.returnTo]);
 
   const returnTo = location.state?.returnTo || sessionStorage.getItem('rx_return_to') || '';
