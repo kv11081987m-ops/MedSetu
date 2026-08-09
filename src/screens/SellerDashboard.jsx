@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getCurrentSeller } from '../lib/auth';
+import { fetchMrpMode } from '../lib/api';
 import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
@@ -215,7 +216,7 @@ function B2BPurchaseCard({ order, onReceive, receiving }) {
 // existing/restocked items are pre-filled with their current price and can
 // be left as-is (no-op) or updated — satisfies "retailer reviews rate every
 // time" without forcing an already-live listing offline during a restock.
-function RateConfirmModal({ items, onConfirm, onClose }) {
+function RateConfirmModal({ items, onConfirm, onClose, mrpMode }) {
   const [prices, setPrices] = useState(() =>
     Object.fromEntries(items.map((it) => [
       it.inventoryId,
@@ -227,14 +228,23 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
   const newItemsMissingPrice = items.some((it) => it.isNew && !String(prices[it.inventoryId] || '').trim());
 
   const handleConfirm = async () => {
-    if (newItemsMissingPrice) { alert('Naye items ka selling price daalna zaroori hai'); return; }
-    const overMrp = items.find((it) => {
-      const val = String(prices[it.inventoryId] || '').trim();
-      return val && it.mrp > 0 && Number(val) > it.mrp;
-    });
-    if (overMrp) {
-      alert(`${overMrp.name} ka selling price MRP (₹${overMrp.mrp}) se zyada nahi ho sakta`);
+    if (newItemsMissingPrice) {
+      alert(mrpMode ? 'Naye items ka MRP daalna zaroori hai' : 'Naye items ka selling price daalna zaroori hai');
       return;
+    }
+    // mrp_mode ON: the value entered here IS the seller's own fresh MRP
+    // declaration, so it's not checked against the old master.mrp_max
+    // reference — same "seller MRP is authoritative" reasoning as the
+    // guard trigger and the CSV bulk-upload path.
+    if (!mrpMode) {
+      const overMrp = items.find((it) => {
+        const val = String(prices[it.inventoryId] || '').trim();
+        return val && it.mrp > 0 && Number(val) > it.mrp;
+      });
+      if (overMrp) {
+        alert(`${overMrp.name} ka selling price MRP (₹${overMrp.mrp}) se zyada nahi ho sakta`);
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -248,10 +258,12 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
     <div style={s.modalOverlay} onClick={saving ? undefined : onClose}>
       <div style={s.modalSheet} onClick={(e) => e.stopPropagation()}>
         <div style={s.modalHeader}>
-          <p style={s.modalTitle}>Selling Rate Confirm Karo</p>
+          <p style={s.modalTitle}>{mrpMode ? 'MRP Confirm Karo' : 'Selling Rate Confirm Karo'}</p>
         </div>
         <p style={s.modalSub}>
-          Naye items customer ko tab tak nahi dikhenge jab tak rate set na ho.
+          {mrpMode
+            ? 'Naye items customer ko tab tak nahi dikhenge jab tak MRP set na ho.'
+            : 'Naye items customer ko tab tak nahi dikhenge jab tak rate set na ho.'}
         </p>
 
         <div style={s.rateList}>
@@ -261,7 +273,7 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
                 <p style={s.rateItemName}>{it.name}</p>
                 <p style={s.rateItemMeta}>
                   Qty: {it.quantity} · Cost: ₹{it.costPrice}
-                  {it.mrp > 0 ? ` · MRP: ₹${it.mrp}` : ''}
+                  {!mrpMode && it.mrp > 0 ? ` · MRP: ₹${it.mrp}` : ''}
                   {it.isNew ? <span style={s.newTag}> NAYA</span> : null}
                 </p>
               </div>
@@ -270,7 +282,7 @@ function RateConfirmModal({ items, onConfirm, onClose }) {
                 <input
                   style={s.rateInput}
                   type="number"
-                  placeholder={it.isNew ? 'Rate' : ''}
+                  placeholder={it.isNew ? (mrpMode ? 'MRP' : 'Rate') : ''}
                   value={prices[it.inventoryId]}
                   onChange={(e) => setPrices((p) => ({ ...p, [it.inventoryId]: e.target.value }))}
                 />
@@ -396,6 +408,7 @@ export default function SellerDashboard() {
   const [lowStockItems, setLowStockItems] = useState([]);
   const [todayStats,       setTodayStats]       = useState({ totalOrders: 0, pendingCount: 0, todayEarnings: 0, lowStockCount: 0, todayCommission: 0 });
   const [platformCommission, setPlatformCommission] = useState(5);
+  const [mrpMode, setMrpMode] = useState(false);
   const [loading,            setLoading]            = useState(true);
   const [ordersSubTab,  setOrdersSubTab]  = useState('selling');
   const [b2bPurchases,  setB2bPurchases]  = useState([]);
@@ -503,6 +516,7 @@ export default function SellerDashboard() {
         fetchPendingOrders(seller.id),
         fetchTodayStats(seller.id),
         fetchLowStock(seller.id),
+        fetchMrpMode().then(setMrpMode),
       ]);
     } catch (err) {
       console.error('Seller fetch:', err);
@@ -763,7 +777,10 @@ export default function SellerDashboard() {
     for (const { inventoryId, price } of updates) {
       await supabase
         .from('seller_inventory')
-        .update({ selling_price: price, is_available: price > 0 })
+        // MRP mode: this value is the seller's own MRP declaration, so it
+        // writes to both mrp and selling_price (selling_price stays
+        // NOT NULL-safe, same as the non-MRP-mode path).
+        .update({ selling_price: price, is_available: price > 0, ...(mrpMode ? { mrp: price } : {}) })
         .eq('id', inventoryId);
     }
     setRateConfirmItems(null);
@@ -1292,6 +1309,7 @@ export default function SellerDashboard() {
             items={rateConfirmItems}
             onConfirm={handleConfirmRates}
             onClose={() => setRateConfirmItems(null)}
+            mrpMode={mrpMode}
           />
         )}
 

@@ -52,6 +52,12 @@ export const addToSellerInventory = async (medicineId, details) => {
       batch_number:       details.batchNumber || null,
       is_available:       parseInt(details.stock) > 0,
       min_order_quantity: parseInt(details.minOrderQuantity) || 1,
+      // Only present (and only touched on conflict) when the caller
+      // actually collected an MRP — mrp_mode OFF omits this key entirely
+      // so an existing seller_inventory.mrp is left untouched on upsert.
+      ...(details.mrp !== undefined && details.mrp !== null && details.mrp !== ''
+        ? { mrp: parseFloat(details.mrp) }
+        : {}),
     }, {
       onConflict: 'seller_id,medicine_id',
     })
@@ -73,6 +79,7 @@ export const updateInventoryItem = async (inventoryId, updates) => {
       // just because stock was updated; it needs its rate set too.
       is_available:       updates.stock > 0 && updates.selling_price > 0,
       ...(updates.min_order_quantity != null ? { min_order_quantity: updates.min_order_quantity } : {}),
+      ...(updates.mrp != null ? { mrp: updates.mrp } : {}),
     })
     .eq('id', inventoryId)
 

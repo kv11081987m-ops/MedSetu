@@ -68,6 +68,19 @@ export async function fetchSupportWhatsapp() {
   return data?.support_whatsapp || FALLBACK_SUPPORT_WHATSAPP;
 }
 
+// ── MRP Mode flag (platform_settings) ────────────────────────────
+// Shared read used by every seller-side screen that needs to know
+// whether to collect MRP instead of selling_price. Missing row/column
+// (migration not yet run) falls back to false — old selling_price flow.
+export async function fetchMrpMode() {
+  const { data } = await supabase
+    .from('platform_settings')
+    .select('mrp_mode')
+    .eq('id', 1)
+    .maybeSingle();
+  return !!data?.mrp_mode;
+}
+
 // ── Fetch sellers by district ──────────────────────────────────
 export async function fetchSellers(district = 'Deoria') {
   const { data, error } = await supabase

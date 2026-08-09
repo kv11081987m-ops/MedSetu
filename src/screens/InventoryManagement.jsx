@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getCurrentSeller } from '../lib/auth';
+import { fetchMrpMode } from '../lib/api';
 import {
   searchMasterMedicines,
   fetchSellerInventory,
@@ -78,7 +79,8 @@ function mapInventoryItem(item, idx) {
     reserved,
     available,
     maxStock:    Math.max(stock * 2, 60),
-    mrp:         med.mrp_max || 0,
+    mrp:         med.mrp_max || 0,                 // master's old reference — display only
+    sellerMrp:   item.mrp ?? null,                 // seller's own declared MRP (mrp_mode)
     selling:     item.selling_price,               // null stays null — pending rate
     isPending:   item.selling_price == null,
     unit:        item.unit || 'strips',
@@ -93,10 +95,11 @@ function mapInventoryItem(item, idx) {
 }
 
 // ─── EditModal (for editing existing inventory items) ─────────
-function EditModal({ item, onSave, onClose, isWholesaler }) {
+function EditModal({ item, onSave, onClose, isWholesaler, mrpMode }) {
   const [formData, setFormData] = useState({
-    stock:   String(item?.stock   ?? ''),
-    selling: String(item?.selling ?? ''),
+    stock:   String(item?.stock     ?? ''),
+    selling: String(item?.selling   ?? ''),
+    mrp:     String(item?.sellerMrp ?? ''),
     expiry:  item?.expiryRaw || '',
     unit:    item?.unit || 'strips',
     moq:     String(item?.minOrderQty ?? 1),
@@ -106,14 +109,21 @@ function EditModal({ item, onSave, onClose, isWholesaler }) {
 
   const handleSubmit = () => {
     if (!formData.stock.trim()) { alert('Stock quantity daalna zaroori hai'); return; }
-    if (!formData.selling.trim()) { alert('Selling price daalna zaroori hai'); return; }
-    if (item?.mrp > 0 && Number(formData.selling) > item.mrp) {
-      alert(`Selling price MRP (₹${item.mrp}) se zyada nahi ho sakta`);
-      return;
+    if (mrpMode) {
+      if (!formData.mrp.trim()) { alert('MRP daalna zaroori hai'); return; }
+    } else {
+      if (!formData.selling.trim()) { alert('Selling price daalna zaroori hai'); return; }
+      if (item?.mrp > 0 && Number(formData.selling) > item.mrp) {
+        alert(`Selling price MRP (₹${item.mrp}) se zyada nahi ho sakta`);
+        return;
+      }
     }
     onSave({
       stock:              Number(formData.stock),
-      selling_price:      Number(formData.selling),
+      // MRP mode: selling_price is forced = mrp, so NOT NULL + is_available
+      // logic downstream (updateInventoryItem) keeps working unchanged.
+      selling_price:      mrpMode ? Number(formData.mrp) : Number(formData.selling),
+      mrp:                mrpMode ? Number(formData.mrp) : undefined,
       expiry_date:        formData.expiry || null,
       min_order_quantity: isWholesaler ? (parseInt(formData.moq) || 1) : undefined,
     }, item.id);
@@ -150,11 +160,19 @@ function EditModal({ item, onSave, onClose, isWholesaler }) {
           </div>
         </div>
 
-        <div style={s.fieldWrap}>
-          <label style={s.label}>Selling Price (₹) *</label>
-          <input style={s.input} type="number" value={formData.selling}
-            onChange={set('selling')} placeholder="0.00" />
-        </div>
+        {mrpMode ? (
+          <div style={s.fieldWrap}>
+            <label style={s.label}>MRP (₹) *</label>
+            <input style={s.input} type="number" value={formData.mrp}
+              onChange={set('mrp')} placeholder="0.00" />
+          </div>
+        ) : (
+          <div style={s.fieldWrap}>
+            <label style={s.label}>Selling Price (₹) *</label>
+            <input style={s.input} type="number" value={formData.selling}
+              onChange={set('selling')} placeholder="0.00" />
+          </div>
+        )}
 
         <div style={s.fieldWrap}>
           <label style={s.label}>Expiry Date</label>
@@ -308,9 +326,10 @@ function SearchModal({ onSelectMedicine, onClose, onRequestManual }) {
 }
 
 // ─── AddDetailsModal ──────────────────────────────────────────
-function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler }) {
+function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler, mrpMode }) {
   const [form, setForm] = useState({
     sellingPrice:     medicine?.mrp_max ? String(Math.round(medicine.mrp_max * 0.9)) : '',
+    mrp:              '',
     stock:            '',
     unit:             'strips',
     expiryDate:       '',
@@ -322,17 +341,27 @@ function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler }) {
   const set = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   const handleSubmit = async () => {
-    if (!form.sellingPrice || !form.stock) {
-      alert('Selling price aur stock daalna zaroori hai');
-      return;
-    }
-    if (medicine?.mrp_max > 0 && Number(form.sellingPrice) > medicine.mrp_max) {
-      alert(`Selling price MRP (₹${medicine.mrp_max}) se zyada nahi ho sakta`);
-      return;
+    if (mrpMode) {
+      if (!form.mrp || !form.stock) {
+        alert('MRP aur stock daalna zaroori hai');
+        return;
+      }
+    } else {
+      if (!form.sellingPrice || !form.stock) {
+        alert('Selling price aur stock daalna zaroori hai');
+        return;
+      }
+      if (medicine?.mrp_max > 0 && Number(form.sellingPrice) > medicine.mrp_max) {
+        alert(`Selling price MRP (₹${medicine.mrp_max}) se zyada nahi ho sakta`);
+        return;
+      }
     }
     setSaving(true);
     try {
-      await onAdd(medicine.id, form);
+      // MRP mode: selling_price is forced = mrp so is_available/NOT NULL
+      // logic in addToSellerInventory keeps working unchanged.
+      const payload = mrpMode ? { ...form, sellingPrice: form.mrp } : { ...form, mrp: undefined };
+      await onAdd(medicine.id, payload);
     } finally {
       setSaving(false);
     }
@@ -371,9 +400,19 @@ function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler }) {
 
         <div style={s.fieldRow}>
           <div style={{ ...s.fieldWrap, flex: 1 }}>
-            <label style={s.label}>Selling Price (₹) *</label>
-            <input style={s.input} type="number" placeholder="0.00"
-              value={form.sellingPrice} onChange={set('sellingPrice')} />
+            {mrpMode ? (
+              <>
+                <label style={s.label}>MRP (₹) *</label>
+                <input style={s.input} type="number" placeholder="0.00"
+                  value={form.mrp} onChange={set('mrp')} />
+              </>
+            ) : (
+              <>
+                <label style={s.label}>Selling Price (₹) *</label>
+                <input style={s.input} type="number" placeholder="0.00"
+                  value={form.sellingPrice} onChange={set('sellingPrice')} />
+              </>
+            )}
           </div>
           <div style={{ ...s.fieldWrap, flex: 1 }}>
             <label style={s.label}>Current Stock *</label>
@@ -534,7 +573,7 @@ function RequestModal({ initialName, onClose }) {
 }
 
 // ─── BulkModal ────────────────────────────────────────────────
-function BulkModal({ sellerId, onClose, onDone }) {
+function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
   const [csvData,       setCsvData]       = useState([]);
   const [uploadStatus,  setUploadStatus]  = useState('idle');
   const [errorMsg,      setErrorMsg]      = useState('');
@@ -599,17 +638,25 @@ function BulkModal({ sellerId, onClose, onDone }) {
         const expiryDate = rawExpiry
           ? (rawExpiry.length === 7 ? rawExpiry + '-01' : rawExpiry)
           : null;
-        const sellingPrice = Number(r.selling_price) || Number(r.mrp) || 0;
-        // DB's own mrp_max is authoritative — the CSV's mrp column is
-        // seller-self-reported, only used as a fallback when master_medicines
-        // has no reference price at all.
-        const effectiveMrp = match.mrp_max > 0 ? match.mrp_max : (Number(r.mrp) || 0);
-        if (effectiveMrp > 0 && sellingPrice > effectiveMrp) {
-          res.failed.push(`${r.name} (selling price MRP ₹${effectiveMrp} se zyada hai)`);
-          continue;
+        const csvMrp = Number(r.mrp) || 0;
+
+        // mrp_mode ON: seller's own CSV mrp column is authoritative and
+        // becomes both seller_inventory.mrp and selling_price — the old
+        // master_medicines.mrp_max reference is not consulted at all
+        // (same "seller MRP wins" reasoning as the guard trigger).
+        // mrp_mode OFF: unchanged — selling_price column wins, mrp column
+        // is only a fallback, and still checked against master's mrp_max.
+        const sellingPrice = mrpMode ? csvMrp : (Number(r.selling_price) || csvMrp || 0);
+        if (!mrpMode) {
+          const effectiveMrp = match.mrp_max > 0 ? match.mrp_max : csvMrp;
+          if (effectiveMrp > 0 && sellingPrice > effectiveMrp) {
+            res.failed.push(`${r.name} (selling price MRP ₹${effectiveMrp} se zyada hai)`);
+            continue;
+          }
         }
         await addToSellerInventory(match.id, {
           sellingPrice,
+          mrp:              mrpMode ? csvMrp : undefined,
           stock:            Number(r.stock)          || 0,
           unit:             r.unit                   || 'strips',
           expiryDate,
@@ -867,6 +914,7 @@ export default function InventoryManagement() {
   const [loading,       setLoading]       = useState(true);
   const [sellerId,      setSellerId]      = useState(null);
   const [sellerType,    setSellerType]    = useState(null);
+  const [mrpMode,       setMrpMode]       = useState(false);
 
   const [query,         setQuery]         = useState('');
   const [category,      setCategory]      = useState('Sab');
@@ -891,8 +939,12 @@ export default function InventoryManagement() {
         setSellerId(seller.id);
         setSellerType(seller.seller_type);
       }
-      const data = await fetchSellerInventory();
+      const [data, mrpModeOn] = await Promise.all([
+        fetchSellerInventory(),
+        fetchMrpMode(),
+      ]);
       setInventory(data);
+      setMrpMode(mrpModeOn);
     } catch (err) {
       console.error('Inventory error:', err);
     } finally {
@@ -1120,6 +1172,7 @@ export default function InventoryManagement() {
             onSave={handleSave}
             onClose={() => setEditItem(null)}
             isWholesaler={isWholesaler}
+            mrpMode={mrpMode}
           />
         )}
 
@@ -1129,6 +1182,7 @@ export default function InventoryManagement() {
             sellerId={sellerId}
             onClose={() => setShowBulkModal(false)}
             onDone={async () => { await loadInventory(); }}
+            mrpMode={mrpMode}
           />
         )}
 
@@ -1148,6 +1202,7 @@ export default function InventoryManagement() {
             onAdd={handleAddToInventory}
             onClose={() => { setShowAddModal(false); setSelectedMedicine(null); }}
             isWholesaler={isWholesaler}
+            mrpMode={mrpMode}
           />
         )}
 
