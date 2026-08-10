@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, X, Package, AlertTriangle, ShoppingCart } from 'lucide-react';
 import { fetchWholesalerInventory } from '../lib/inventory';
 import { useCart } from '../context/CartContext';
+import { fetchMrpMode, effectiveMrp } from '../lib/api';
 
 const PALETTE = [
   { color: '#0C447C', bg: '#EAF2FF' },
@@ -19,7 +20,7 @@ function formatExpiry(dateStr) {
   } catch { return dateStr; }
 }
 
-function mapItem(item, idx) {
+function mapItem(item, idx, mrpMode) {
   const { color, bg } = PALETTE[idx % PALETTE.length];
   const med = item.master_medicines || {};
   return {
@@ -30,8 +31,12 @@ function mapItem(item, idx) {
     name:         med.name || 'Unknown',
     genericName:  med.generic_name || med.salt_composition || '',
     category:     med.category || 'Other',
-    mrp:          med.mrp_max || 0,
+    mrp:          med.mrp_max || 0,               // master's old reference
     selling:      item.selling_price || 0,
+    // What the buyer actually sees/pays: seller's own MRP (falling back to
+    // master's mrp_max) under mrp_mode, plain selling_price otherwise. null
+    // means no usable price at all — caller must filter these out.
+    displayPrice: mrpMode ? effectiveMrp(item.mrp, med.mrp_max) : (item.selling_price || 0),
     moq:          item.min_order_quantity ?? 1,   // always numeric, min 1
     unit:         item.unit || 'strips',
     stock:        item.stock_quantity ?? 0,
@@ -43,7 +48,7 @@ function mapItem(item, idx) {
 }
 
 // ─── Medicine Card ─────────────────────────────────────────────
-function MedicineCard({ item, qty, onQtyChange, onAddToCart, added }) {
+function MedicineCard({ item, qty, onQtyChange, onAddToCart, added, mrpMode }) {
   const atMoq   = qty <= item.moq;
   const atStock = qty >= item.available;
 
@@ -68,16 +73,25 @@ function MedicineCard({ item, qty, onQtyChange, onAddToCart, added }) {
       </div>
 
       {/* Pricing block */}
-      <div style={s.priceBlock}>
-        <div>
-          <p style={s.priceLabel}>MRP (Reference)</p>
-          <p style={s.mrp}>₹{item.mrp}</p>
+      {mrpMode ? (
+        <div style={s.priceBlock}>
+          <div style={{ textAlign: 'right', width: '100%' }}>
+            <p style={s.priceLabel}>MRP</p>
+            <p style={s.sellingPrice}>₹{item.displayPrice}</p>
+          </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <p style={s.priceLabel}>Wholesale Rate</p>
-          <p style={s.sellingPrice}>₹{item.selling}</p>
+      ) : (
+        <div style={s.priceBlock}>
+          <div>
+            <p style={s.priceLabel}>MRP (Reference)</p>
+            <p style={s.mrp}>₹{item.mrp}</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={s.priceLabel}>Wholesale Rate</p>
+            <p style={s.sellingPrice}>₹{item.selling}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Meta: stock + expiry */}
       <div style={s.metaRow}>
@@ -128,16 +142,29 @@ export default function WholesalerInventory() {
   const [query,      setQuery]      = useState('');
   const [quantities, setQuantities] = useState({});  // { [inventoryId]: number }
   const [addedItems, setAddedItems] = useState({});  // { [inventoryId]: bool }
+  const [mrpMode,    setMrpMode]    = useState(false);
 
   useEffect(() => {
     if (!sellerId) { setLoading(false); return; }
-    fetchWholesalerInventory(sellerId).then((data) => {
+    // mrpMode must be known BEFORE fetching inventory — the fetch's
+    // stock-vs-seller_hidden filter depends on it.
+    (async () => {
+      const mrpModeOn = await fetchMrpMode();
+      const data = await fetchWholesalerInventory(sellerId, mrpModeOn);
       setInventory(data);
+      setMrpMode(mrpModeOn);
       setLoading(false);
-    });
+    })();
   }, [sellerId]);
 
-  const items = useMemo(() => inventory.map(mapItem), [inventory]);
+  const items = useMemo(
+    () => inventory
+      .map((item, idx) => mapItem(item, idx, mrpMode))
+      // mrp_mode ON: a medicine with no usable MRP anywhere (seller hasn't
+      // set one AND master has none) must never be orderable at ₹0 — drop it.
+      .filter((i) => !mrpMode || i.displayPrice != null),
+    [inventory, mrpMode]
+  );
 
   // Seed quantities to MOQ on first load
   useEffect(() => {
@@ -171,7 +198,7 @@ export default function WholesalerInventory() {
     const medicine = {
       id:       item.medicineId,
       name:     item.name,
-      price:    item.selling,
+      price:    item.displayPrice,
       quantity: qty,
       unit:     item.unit,
       moq:      item.moq,
@@ -286,6 +313,7 @@ export default function WholesalerInventory() {
                   onQtyChange={handleQtyChange}
                   onAddToCart={handleAddToCart}
                   added={!!addedItems[item.id]}
+                  mrpMode={mrpMode}
                 />
               ))}
               <div style={{ height: '24px' }} />

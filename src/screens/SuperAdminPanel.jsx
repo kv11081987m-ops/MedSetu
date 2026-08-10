@@ -11,6 +11,7 @@ import MedicineBandsTab from './MedicineBandsTab';
 const TABS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: '🏠' },
   { id: 'sellers',      label: 'Sellers',       icon: '🏪' },
+  { id: 'routing',      label: 'Routing',       icon: '🎯' },
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
   { id: 'offers',       label: 'Offers',        icon: '🎁' },
@@ -451,6 +452,7 @@ export default function SuperAdminPanel() {
             loading={loadingSellers} onApprove={approveSeller} onReject={rejectSeller}
           />
         )}
+        {activeTab === 'routing'     && <TabRouting />}
         {activeTab === 'pharmacists' && (
           <TabPharmacists
             pharmacists={pendingPharmacists} loading={loadingPharmacists}
@@ -982,6 +984,254 @@ function TabOffers({ offers, setOffers, offerForm, setOfferForm, loadOffers }) {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// TAB: Order Routing (R2 Part A — foundation only)
+// Weights/timeout set here aren't read by any order-placement code yet
+// — that's R2-C (auto-assign) and R2-D (timeout hop). This screen only
+// lets an admin populate sellers.routing_weight and
+// platform_settings.routing_timeout_minutes ahead of that.
+// ══════════════════════════════════════════════════════════════
+function TabRouting() {
+  const [sellers,       setSellers]       = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [saving,        setSaving]        = useState(false);
+  const [timeoutMinutes,  setTimeoutMinutes]  = useState('15');
+  const [savingTimeout,   setSavingTimeout]   = useState(false);
+
+  const [pincodes,        setPincodes]        = useState([]);
+  const [loadingPincodes, setLoadingPincodes] = useState(true);
+  const [togglingId,      setTogglingId]      = useState(null);
+  const [removingId,      setRemovingId]      = useState(null);
+  const [newPincode,      setNewPincode]      = useState('');
+  const [newAreaName,     setNewAreaName]     = useState('');
+  const [addingPincode,   setAddingPincode]   = useState(false);
+
+  useEffect(() => { loadSellers(); loadTimeout(); loadPincodes(); }, []);
+
+  const loadSellers = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('id, store_name, routing_weight')
+      .eq('seller_type', 'retailer')
+      .order('store_name', { ascending: true });
+    if (error) { console.error('TabRouting loadSellers error:', error); setLoading(false); return; }
+    setSellers((data || []).map((s) => ({ ...s, weightInput: String(s.routing_weight ?? 0) })));
+    setLoading(false);
+  };
+
+  const loadTimeout = async () => {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('routing_timeout_minutes')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) { console.error('TabRouting loadTimeout error:', error); return; }
+    setTimeoutMinutes(String(data?.routing_timeout_minutes ?? 15));
+  };
+
+  const setWeightInput = (sellerId, value) => {
+    setSellers((prev) => prev.map((s) => (s.id === sellerId ? { ...s, weightInput: value } : s)));
+  };
+
+  const saveWeights = async () => {
+    setSaving(true);
+    const results = await Promise.all(
+      sellers.map((s) => {
+        const n = Number(s.weightInput);
+        const weight = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+        return supabase.from('sellers').update({ routing_weight: weight }).eq('id', s.id);
+      })
+    );
+    setSaving(false);
+    const failed = results.find((r) => r.error);
+    if (failed) { alert('Kuch weights save nahi hue: ' + failed.error.message); return; }
+    alert('Routing weights save ho gaye!');
+    await loadSellers();
+  };
+
+  const saveTimeout = async () => {
+    setSavingTimeout(true);
+    const n = Number(timeoutMinutes);
+    const minutes = Number.isFinite(n) && n > 0 ? Math.floor(n) : 15;
+    const { error } = await supabase
+      .from('platform_settings')
+      .update({ routing_timeout_minutes: minutes })
+      .eq('id', 1);
+    setSavingTimeout(false);
+    if (error) { alert('Timeout save nahi hua: ' + error.message); return; }
+    setTimeoutMinutes(String(minutes));
+    alert('Timeout save ho gaya!');
+  };
+
+  const loadPincodes = async () => {
+    setLoadingPincodes(true);
+    const { data, error } = await supabase
+      .from('serviceable_pincodes')
+      .select('*')
+      .order('pincode', { ascending: true });
+    if (error) { console.error('TabRouting loadPincodes error:', error); setLoadingPincodes(false); return; }
+    setPincodes(data || []);
+    setLoadingPincodes(false);
+  };
+
+  const addPincode = async () => {
+    const pincode = newPincode.trim();
+    if (!pincode) { alert('Pincode daalo'); return; }
+    if (!/^\d{6}$/.test(pincode)) { alert('Pincode 6 digit ka number hona chahiye (jaise 274001)'); return; }
+    setAddingPincode(true);
+    const { error } = await supabase
+      .from('serviceable_pincodes')
+      .insert({ pincode, area_name: newAreaName.trim() || null, is_active: true });
+    setAddingPincode(false);
+    if (error) { alert('Pincode add nahi hua: ' + error.message); return; }
+    setNewPincode('');
+    setNewAreaName('');
+    await loadPincodes();
+  };
+
+  const togglePincodeActive = async (pin) => {
+    setTogglingId(pin.id);
+    const { error } = await supabase
+      .from('serviceable_pincodes')
+      .update({ is_active: !pin.is_active })
+      .eq('id', pin.id);
+    setTogglingId(null);
+    if (error) { alert('Update nahi hua: ' + error.message); return; }
+    setPincodes((prev) => prev.map((p) => (p.id === pin.id ? { ...p, is_active: !p.is_active } : p)));
+  };
+
+  const removePincode = async (pin) => {
+    if (!window.confirm(`Confirm: ${pin.pincode}${pin.area_name ? ' (' + pin.area_name + ')' : ''} ko list se hataao?`)) return;
+    setRemovingId(pin.id);
+    const { error } = await supabase.from('serviceable_pincodes').delete().eq('id', pin.id);
+    setRemovingId(null);
+    if (error) { alert('Delete nahi hua: ' + error.message); return; }
+    setPincodes((prev) => prev.filter((p) => p.id !== pin.id));
+  };
+
+  const totalWeight = sellers.reduce((sum, s) => sum + (Number(s.weightInput) || 0), 0);
+  const inRotation   = sellers.filter((s) => Number(s.weightInput) > 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <p style={s.sectionTitle}>Order Routing</p>
+      <p style={{ fontSize: '12px', color: '#888', margin: '-8px 0 0' }}>
+        Yeh sirf neev hai — abhi koi order automatically route nahi hota. Weights/timeout yahin set karo, aage ke phase inhe use karenge.
+      </p>
+
+      <div style={s.formCard}>
+        <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 12px' }}>Seller Weights (Retailer)</p>
+        {loading ? (
+          <p style={s.emptyText}>Loading...</p>
+        ) : sellers.length === 0 ? (
+          <p style={s.emptyText}>Koi retailer seller nahi mila</p>
+        ) : (
+          sellers.map((seller) => {
+            const weight = Number(seller.weightInput) || 0;
+            const pct = totalWeight > 0 ? Math.round((weight / totalWeight) * 100) : 0;
+            return (
+              <div key={seller.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #F0F0F0', gap: '12px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: '14px', color: '#333', margin: 0, fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{seller.store_name}</p>
+                  <p style={{ fontSize: '11px', color: weight > 0 ? '#1A6B3C' : '#DC2626', margin: '2px 0 0', fontWeight: '600' }}>
+                    {weight > 0 ? `${pct}% ratio` : 'Rotation ke bahar'}
+                  </p>
+                </div>
+                <input
+                  style={{ ...s.inputSm, width: '72px', textAlign: 'center', padding: '8px' }}
+                  type="number" min="0" step="1"
+                  value={seller.weightInput}
+                  onChange={(e) => setWeightInput(seller.id, e.target.value)}
+                />
+              </div>
+            );
+          })
+        )}
+        <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: saving ? 0.7 : 1 }} onClick={saveWeights} disabled={saving || loading || sellers.length === 0}>
+          {saving ? 'Save Ho Raha Hai...' : 'Save Karo'}
+        </button>
+      </div>
+
+      {!loading && sellers.length > 0 && (
+        <div style={s.formCard}>
+          <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 10px' }}>Current Ratio</p>
+          {totalWeight === 0 ? (
+            <p style={s.emptyText}>Sab sellers ka weight 0 hai — rotation abhi khaali hai</p>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#333', margin: 0, lineHeight: '1.6' }}>
+              {inRotation
+                .map((s2) => `${s2.store_name} ${Math.round(((Number(s2.weightInput) || 0) / totalWeight) * 100)}%`)
+                .join('  :  ')}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div style={s.formCard}>
+        <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 12px' }}>Seller Response Timeout</p>
+        <label style={{ fontSize: '13px', color: '#555', display: 'block', marginBottom: '4px' }}>Timeout (minutes)</label>
+        <input style={s.inputSm} type="number" min="1" value={timeoutMinutes} onChange={(e) => setTimeoutMinutes(e.target.value)} />
+        <p style={{ fontSize: '11px', color: '#888', margin: '4px 0 0' }}>Itne minute mein seller accept nahi karta to agla seller try hoga</p>
+        <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: savingTimeout ? 0.7 : 1 }} onClick={saveTimeout} disabled={savingTimeout}>
+          {savingTimeout ? 'Save Ho Raha Hai...' : 'Save Karo'}
+        </button>
+      </div>
+
+      <div style={s.formCard}>
+        <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 4px' }}>Serviceable Pincodes</p>
+        <p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>
+          Yeh hi service area hai — abhi sirf data, koi order isse check nahi hota.
+        </p>
+
+        {loadingPincodes ? (
+          <p style={s.emptyText}>Loading...</p>
+        ) : pincodes.length === 0 ? (
+          <p style={s.emptyText}>Koi pincode add nahi hua</p>
+        ) : (
+          pincodes.map((pin) => (
+            <div key={pin.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #F0F0F0', gap: '10px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: '14px', color: '#333', margin: 0, fontWeight: '600' }}>{pin.pincode}</p>
+                <p style={{ fontSize: '11px', color: '#888', margin: '2px 0 0' }}>{pin.area_name || '—'}</p>
+              </div>
+              <div
+                style={{ width: '44px', height: '24px', borderRadius: '12px', backgroundColor: pin.is_active ? '#1A6B3C' : '#ccc', cursor: togglingId === pin.id ? 'default' : 'pointer', position: 'relative', transition: 'background 0.2s', opacity: togglingId === pin.id ? 0.6 : 1, flexShrink: 0 }}
+                onClick={() => { if (togglingId !== pin.id) togglePincodeActive(pin); }}
+              >
+                <div style={{ position: 'absolute', top: '3px', left: pin.is_active ? '23px' : '3px', width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+              </div>
+              <button
+                style={{ ...s.removeBtn, flexShrink: 0, opacity: removingId === pin.id ? 0.6 : 1 }}
+                disabled={removingId === pin.id}
+                onClick={() => removePincode(pin)}
+              >
+                Del
+              </button>
+            </div>
+          ))
+        )}
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+          <input
+            style={{ ...s.inputSm, flex: 1 }}
+            type="text" placeholder="Pincode" maxLength={6}
+            value={newPincode} onChange={(e) => setNewPincode(e.target.value)}
+          />
+          <input
+            style={{ ...s.inputSm, flex: 1 }}
+            type="text" placeholder="Area name"
+            value={newAreaName} onChange={(e) => setNewAreaName(e.target.value)}
+          />
+        </div>
+        <button style={{ ...s.approveBtn, marginTop: '10px', width: '100%', opacity: addingPincode ? 0.7 : 1 }} onClick={addPincode} disabled={addingPincode}>
+          {addingPincode ? 'Add Ho Raha Hai...' : 'Add Karo'}
+        </button>
+      </div>
     </div>
   );
 }

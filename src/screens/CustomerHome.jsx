@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchSellers } from '../lib/api';
+import { fetchSellers, fetchMrpMode } from '../lib/api';
 import { useCart } from '../context/CartContext';
 import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
@@ -123,6 +123,7 @@ export default function CustomerHome() {
   const [showNotif, setShowNotif]     = useState(false);
   const [notifs, setNotifs]           = useState([]);
   const [offers, setOffers]           = useState([]);
+  const [mrpMode, setMrpMode]         = useState(false);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
 
   useEffect(() => {
@@ -140,6 +141,8 @@ export default function CustomerHome() {
           if (!cancelled) navigate('/login', { replace: true });
           return;
         }
+
+        fetchMrpMode().then((on) => { if (!cancelled) setMrpMode(on); });
 
         // Fetch sellers (primary page content)
         try {
@@ -336,8 +339,8 @@ export default function CustomerHome() {
             </div>
           </div>
 
-          {/* Offers — sirf tab dikhe jab active offers ho */}
-          {offers.length > 0 && (
+          {/* Offers — sirf tab dikhe jab active offers ho, aur mrp_mode OFF ho */}
+          {!mrpMode && offers.length > 0 && (
             <div style={s.section}>
               <div style={s.sectionHeader}>
                 <span style={s.sectionTitle}>Offers</span>

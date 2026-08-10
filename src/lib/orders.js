@@ -25,6 +25,7 @@ export const createOrder = async (orderData) => {
       payment_status:   orderData.paymentMethod === 'cod' ? 'pending' : 'paid',
       delivery_type:    orderData.deliveryType,
       delivery_address: orderData.deliveryAddress || null,
+      delivery_pincode: orderData.deliveryPincode || null,
       prescription_url: orderData.prescriptionUrl || null,
     })
     .select();

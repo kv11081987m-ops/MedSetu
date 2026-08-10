@@ -9,6 +9,7 @@ import {
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
 import { supabase } from '../lib/supabase';
+import { fetchMrpMode } from '../lib/api';
 
 
 const PAYMENT_OPTS = [
@@ -178,6 +179,7 @@ export default function Checkout() {
   );
 
   const [selectedAddress,     setSelectedAddress]     = useState('');
+  const [selectedPincode,     setSelectedPincode]     = useState('');
   const [addressLoading,      setAddressLoading]      = useState(true);
   const [prescriptionUploaded, setPrescriptionUploaded] = useState(
     !!location.state?.prescriptionUrl
@@ -199,6 +201,11 @@ export default function Checkout() {
   const [orderError, setOrderError]     = useState('');
   const [orderDbId, setOrderDbId]       = useState('');
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
+  const [mrpMode, setMrpMode] = useState(false);
+
+  useEffect(() => {
+    fetchMrpMode().then(setMrpMode);
+  }, []);
 
   // ── Fetch platform delivery settings ──────────────────────
   useEffect(() => {
@@ -249,8 +256,10 @@ export default function Checkout() {
         setSelectedAddress(
           data ? `${data.address_line}, ${data.city} — ${data.pincode}` : ''
         );
+        setSelectedPincode(data?.pincode || '');
       } catch {
         setSelectedAddress('');
+        setSelectedPincode('');
       } finally {
         setAddressLoading(false);
       }
@@ -266,7 +275,9 @@ export default function Checkout() {
   const amountForFree  = delivery === 'home' && platformDelivery.threshold > 0 && !isFreeDelivery
     ? platformDelivery.threshold - cartTotal
     : 0;
-  const discount     = appliedOffer
+  // mrp_mode: offers/discount are fully bypassed — customer pays exactly
+  // cartTotal + delivFee, no matter what appliedOffer state holds.
+  const discount     = (!mrpMode && appliedOffer)
     ? (appliedOffer.discount_type === 'percentage'
         ? cartTotal * (Number(appliedOffer.discount_value) / 100)
         : Number(appliedOffer.discount_value))
@@ -382,11 +393,12 @@ export default function Checkout() {
       totalAmount:    cartTotal,
       deliveryCharge: delivFee,
       discount:       safeDiscount,
-      promoCode:      appliedOffer ? appliedOffer.promo_code : null,
+      promoCode:      (!mrpMode && appliedOffer) ? appliedOffer.promo_code : null,
       finalAmount:    grandTotal,
       paymentMethod:  payment,
       deliveryType:   delivery,
       deliveryAddress: delivery === 'home' ? selectedAddress : 'Store Pickup',
+      deliveryPincode: delivery === 'home' ? (selectedPincode || null) : null,
       prescriptionUrl,
     };
 
@@ -613,46 +625,48 @@ export default function Checkout() {
             )}
           </div>}
 
-          {/* Promo Code */}
-          <div style={s.card}>
-            <div style={s.promoRow}>
-              <Tag size={16} color="#1A6B3C" />
-              <span style={s.promoHeading}>Promo Code</span>
-              <button style={s.viewOffersBtn} onClick={() => setShowOffers(true)}>
-                <Gift size={13} color="#1A6B3C" />
-                Offers Dekho
-              </button>
-            </div>
-            {appliedOffer ? (
-              <div style={s.promoApplied}>
-                <CheckCircle size={16} color="#1A6B3C" />
-                <span style={s.promoAppliedText}>
-                  {appliedOffer.promo_code} applied! ₹{safeDiscount.toFixed(0)} off
-                </span>
-                <button style={s.removePromo} onClick={() => { setAppliedOffer(null); setPromoInput(''); }}>
-                  <Trash2 size={13} color="#EF4444" />
+          {/* Promo Code — mrp_mode mein poori tarah hidden, discount 0 rehta hai */}
+          {!mrpMode && (
+            <div style={s.card}>
+              <div style={s.promoRow}>
+                <Tag size={16} color="#1A6B3C" />
+                <span style={s.promoHeading}>Promo Code</span>
+                <button style={s.viewOffersBtn} onClick={() => setShowOffers(true)}>
+                  <Gift size={13} color="#1A6B3C" />
+                  Offers Dekho
                 </button>
               </div>
-            ) : (
-              <>
-                <div style={s.promoInputRow}>
-                  <input
-                    style={s.promoInput}
-                    placeholder="Promo code daalo"
-                    value={promoInput}
-                    onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(''); }}
-                  />
-                  <button
-                    style={{ ...s.applyBtn, opacity: promoInput ? 1 : 0.5 }}
-                    onClick={() => applyPromo()}
-                    disabled={!promoInput}
-                  >Apply</button>
+              {appliedOffer ? (
+                <div style={s.promoApplied}>
+                  <CheckCircle size={16} color="#1A6B3C" />
+                  <span style={s.promoAppliedText}>
+                    {appliedOffer.promo_code} applied! ₹{safeDiscount.toFixed(0)} off
+                  </span>
+                  <button style={s.removePromo} onClick={() => { setAppliedOffer(null); setPromoInput(''); }}>
+                    <Trash2 size={13} color="#EF4444" />
+                  </button>
                 </div>
-                {promoError && <p style={s.promoError}>{promoError}</p>}
-                <p style={s.promoHint}>Promo code hai to daaliye</p>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  <div style={s.promoInputRow}>
+                    <input
+                      style={s.promoInput}
+                      placeholder="Promo code daalo"
+                      value={promoInput}
+                      onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(''); }}
+                    />
+                    <button
+                      style={{ ...s.applyBtn, opacity: promoInput ? 1 : 0.5 }}
+                      onClick={() => applyPromo()}
+                      disabled={!promoInput}
+                    >Apply</button>
+                  </div>
+                  {promoError && <p style={s.promoError}>{promoError}</p>}
+                  <p style={s.promoHint}>Promo code hai to daaliye</p>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Order Summary */}
           <div style={s.card}>
@@ -666,7 +680,7 @@ export default function Checkout() {
                 <span style={s.summaryKey}>Delivery Charge</span>
                 <span style={s.summaryVal}>{delivFee === 0 ? 'Free' : `₹${delivFee.toFixed(2)}`}</span>
               </div>
-              {appliedOffer && (
+              {!mrpMode && appliedOffer && (
                 <div style={s.summaryRow}>
                   <span style={s.summaryKey}>Discount ({appliedOffer.promo_code})</span>
                   <span style={{ ...s.summaryVal, color: '#1A6B3C' }}>− ₹{safeDiscount.toFixed(2)}</span>
@@ -738,8 +752,9 @@ export default function Checkout() {
           </button>
         </div>
 
-        {/* Offers Modal */}
-        {showOffers && (
+        {/* Offers Modal — trigger button is hidden under mrp_mode, but this
+            guard is kept as a defensive backstop */}
+        {!mrpMode && showOffers && (
           <OffersModal
             offers={availableOffers}
             cartTotal={cartTotal}

@@ -5,7 +5,7 @@ import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
   Search, Home, ShoppingBag, User, RefreshCw, ChevronDown,
 } from 'lucide-react';
-import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp } from '../lib/api';
+import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp, fetchMrpMode } from '../lib/api';
 
 const INITIAL_RECENT = [
   'Paracetamol 500mg', 'BP Machine', 'Crocin 650mg', 'ORS Powder',
@@ -15,7 +15,7 @@ const FILTERS = ['Sab', 'Tablets', 'Syrup', 'Injection', 'Equipment', 'Ayurvedic
 const filterKey = { Tablets: 'tablet', Syrup: 'syrup', Equipment: 'equipment', Injection: 'injection', Ayurvedic: 'ayurvedic' };
 
 // ─── MedicineCard ─────────────────────────────────────────────
-function MedicineCard({ medicine, type }) {
+function MedicineCard({ medicine, type, mrpMode }) {
   const { addToCart } = useCart();
   const med      = mapMedicine(medicine);
   const rateInfo = getRatePerDose(medicine);
@@ -35,14 +35,14 @@ function MedicineCard({ medicine, type }) {
     setShowStores(true);
     if (sellers.length > 0) return;
     setStoresLoading(true);
-    const data = await fetchSellersForMedicine(med.id);
+    const data = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
     setSellers(data);
     setStoresLoading(false);
   };
 
   const handleAddFromSeller = (s) => {
     addToCart(
-      { ...med, price: s.selling_price, quantity: 1 },
+      { ...med, price: s.price, quantity: 1 },
       { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
     );
     setAddedSeller(s.sellers?.id);
@@ -54,14 +54,14 @@ function MedicineCard({ medicine, type }) {
     let sellerList = sellers;
     if (sellerList.length === 0) {
       setAddLoading(true);
-      sellerList = await fetchSellersForMedicine(med.id);
+      sellerList = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
       setSellers(sellerList);
       setAddLoading(false);
     }
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
     addToCart(
-      { ...med, price: cheapest.selling_price, quantity: 1 },
+      { ...med, price: cheapest.price, quantity: 1 },
       { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
     );
     setAddedSeller(cheapest.sellers?.id);
@@ -78,17 +78,27 @@ function MedicineCard({ medicine, type }) {
           {med.brand  && <p style={{ color: '#666', fontSize: '12px', margin: '0 0 1px' }}>{med.brand}</p>}
           {med.salt   && <p style={{ color: '#888', fontSize: '11px', margin: 0 }}>{med.salt.substring(0, 60)}</p>}
         </div>
-        <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
-          <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>MRP</p>
-          <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
-        </div>
+        {/* Master's mrp_max is a stale reference under mrp_mode — the real
+            price is per-seller (mrp_mode ? seller.mrp : selling_price),
+            only known once "Store" is expanded below. */}
+        {!mrpMode && (
+          <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
+            <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>MRP</p>
+            <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
+          </div>
+        )}
       </div>
 
-      {/* Rate per dose */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#F8F8F8', borderRadius: '6px', marginBottom: '10px' }}>
-        <span style={{ fontSize: '11px', color: '#666' }}>📦 {medicine.unit || 'Per unit'}</span>
-        <span style={{ fontSize: '12px', color: borderColor, fontWeight: '500' }}>₹{rateInfo.perDose}/{rateInfo.unit}</span>
-      </div>
+      {/* Rate per dose — derived from master mrp_max (getRatePerDose,
+          api.js), so it's a stale-reference leak under mrp_mode: hidden
+          there, same reasoning as the top MRP badge / detail-row MRP
+          above (real price is per-seller, see "Store" list below). */}
+      {!mrpMode && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#F8F8F8', borderRadius: '6px', marginBottom: '10px' }}>
+          <span style={{ fontSize: '11px', color: '#666' }}>📦 {medicine.unit || 'Per unit'}</span>
+          <span style={{ fontSize: '12px', color: borderColor, fontWeight: '500' }}>₹{rateInfo.perDose}/{rateInfo.unit}</span>
+        </div>
+      )}
 
       {/* Badges */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -143,7 +153,7 @@ function MedicineCard({ medicine, type }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 3px' }}>{store.store_name || 'Store'}</p>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.selling_price}</span>
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.price}</span>
                         {store.rating && <span style={{ fontSize: '11px', color: '#F59E0B' }}>★ {store.rating}</span>}
                         <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 6px', borderRadius: '99px', fontWeight: '500' }}>
                           {isOpen ? 'Open' : 'Closed'}
@@ -179,7 +189,9 @@ function MedicineCard({ medicine, type }) {
             {med.brand       && <DetailRow label="Brand"     value={med.brand} />}
             {medicine.unit   && <DetailRow label="Pack"      value={medicine.unit} />}
             {medicine.dosage_form && <DetailRow label="Form" value={medicine.dosage_form} />}
-            {(med.price || med.mrp) && <DetailRow label="MRP" value={`₹${med.price || med.mrp}`} />}
+            {/* Master mrp_max — stale reference under mrp_mode, hidden there (real
+                price is per-seller, see "Store" list above). */}
+            {!mrpMode && (med.price || med.mrp) && <DetailRow label="MRP" value={`₹${med.price || med.mrp}`} />}
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
               {medicine.is_generic             && <span style={badge('#E8F5E9', '#1A6B3C')}>✓ Generic</span>}
               {medicine.source==='janaushadhi' && <span style={badge('#E8F5E9', '#1A6B3C')}>🏥 Jan Aushadhi</span>}
@@ -223,7 +235,7 @@ function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
 }
 
 // ─── PopularCard ──────────────────────────────────────────────
-function PopularCard({ item }) {
+function PopularCard({ item, mrpMode }) {
   const { addToCart } = useCart();
   const [showStores,    setShowStores]    = useState(false);
   const [sellers,       setSellers]       = useState([]);
@@ -237,14 +249,14 @@ function PopularCard({ item }) {
     setShowStores(true);
     if (sellers.length > 0) return;
     setStoresLoading(true);
-    const data = await fetchSellersForMedicine(item.id);
+    const data = await fetchSellersForMedicine(item.id, mrpMode, item.price);
     setSellers(data);
     setStoresLoading(false);
   };
 
   const handleAddFromSeller = (s) => {
     addToCart(
-      { ...item, price: s.selling_price, quantity: 1 },
+      { ...item, price: s.price, quantity: 1 },
       { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
     );
     setAddedSeller(s.sellers?.id);
@@ -256,14 +268,14 @@ function PopularCard({ item }) {
     let sellerList = sellers;
     if (sellerList.length === 0) {
       setAddLoading(true);
-      sellerList = await fetchSellersForMedicine(item.id);
+      sellerList = await fetchSellersForMedicine(item.id, mrpMode, item.price);
       setSellers(sellerList);
       setAddLoading(false);
     }
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
     addToCart(
-      { ...item, price: cheapest.selling_price, quantity: 1 },
+      { ...item, price: cheapest.price, quantity: 1 },
       { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
     );
     setAddedSeller(cheapest.sellers?.id);
@@ -277,9 +289,13 @@ function PopularCard({ item }) {
       </div>
       <p style={s.popName}>{item.name}</p>
       <p style={s.popSalt}>{item.salt}</p>
-      <div style={s.popFooter}>
-        <span style={s.popPrice}>₹{item.price}</span>
-      </div>
+      {/* item.price is master's mrp_max — stale reference under mrp_mode,
+          hidden there (real price is per-seller, see "Store" list below). */}
+      {!mrpMode && (
+        <div style={s.popFooter}>
+          <span style={s.popPrice}>₹{item.price}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
         <button
           onClick={handleStoresToggle}
@@ -312,7 +328,7 @@ function PopularCard({ item }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '11px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{store.store_name || 'Store'}</p>
                     <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.selling_price}</span>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.price}</span>
                       <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 5px', borderRadius: '99px', fontWeight: '500' }}>{isOpen ? 'Open' : 'Closed'}</span>
                     </div>
                   </div>
@@ -346,20 +362,27 @@ export default function MedicineSearch() {
   const [searchResults, setSearchResults] = useState({ branded: [], generic: [], janaushadhi: [] });
   const [searchLoading, setSearchLoading] = useState(false);
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
+  const [mrpMode, setMrpMode] = useState(false);
 
   useEffect(() => {
     fetchSupportWhatsapp().then(setSupportWhatsapp);
   }, []);
 
+  // mrpMode must be known BEFORE fetching popular meds — the fetch's
+  // stock-vs-seller_hidden filter depends on it, so this can't be two
+  // independent parallel effects.
   useEffect(() => {
-    fetchPopularMedicines(12).then(({ data }) => {
+    (async () => {
+      const mrpModeOn = await fetchMrpMode();
+      setMrpMode(mrpModeOn);
+      const { data } = await fetchPopularMedicines(12, mrpModeOn);
       if (data?.length > 0) {
         setPopularMeds(data.map(m => {
           const mapped = mapMedicine(m);
           return { id: mapped.id, name: mapped.name, salt: mapped.salt, price: mapped.mrp, stores: mapped.stores, type: mapped.type, is_generic: mapped.is_generic };
         }));
       }
-    });
+    })();
   }, []);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -382,11 +405,11 @@ export default function MedicineSearch() {
 
     setSearchLoading(true);
     debounceRef.current = setTimeout(async () => {
-      const results = await searchMedicines(val.trim());
+      const results = await searchMedicines(val.trim(), mrpMode);
       setSearchResults(results);
       setSearchLoading(false);
     }, 400);
-  }, []);
+  }, [mrpMode]);
 
   const handleRecentClick = (term) => { handleSearch(term); inputRef.current?.focus(); };
 
@@ -487,7 +510,7 @@ export default function MedicineSearch() {
                 ) : (
                   <div style={s.popGrid}>
                     {applyFilter(popularMeds).map(item => (
-                      <PopularCard key={item.id} item={item} />
+                      <PopularCard key={item.id} item={item} mrpMode={mrpMode} />
                     ))}
                   </div>
                 )}
@@ -514,7 +537,7 @@ export default function MedicineSearch() {
                     tag="💚 Best Value"
                   />
                   {searchResults.janaushadhi.map(med => (
-                    <MedicineCard key={med.id} medicine={med} type="janaushadhi" />
+                    <MedicineCard key={med.id} medicine={med} type="janaushadhi" mrpMode={mrpMode} />
                   ))}
                 </div>
               )}
@@ -529,7 +552,7 @@ export default function MedicineSearch() {
                     subtitle="Same salt, lower price"
                   />
                   {searchResults.generic.map(med => (
-                    <MedicineCard key={med.id} medicine={med} type="generic" />
+                    <MedicineCard key={med.id} medicine={med} type="generic" mrpMode={mrpMode} />
                   ))}
                 </div>
               )}
@@ -544,7 +567,7 @@ export default function MedicineSearch() {
                     subtitle="Popular brands"
                   />
                   {searchResults.branded.map(med => (
-                    <MedicineCard key={med.id} medicine={med} type="branded" />
+                    <MedicineCard key={med.id} medicine={med} type="branded" mrpMode={mrpMode} />
                   ))}
                 </div>
               )}

@@ -107,16 +107,19 @@ export async function fetchWholesalers(district = 'Deoria') {
 
 // ── Search medicines — 3 sections: branded / generic / janaushadhi ──
 // Only medicines stocked by at least one seller are shown.
+// mrp_mode: stock no longer gates display — a medicine is listed as long
+// as some seller hasn't manually hidden it (seller_hidden=false), stock
+// quantity is irrelevant. mrp_mode OFF: unchanged (is_available + stock>0).
 // TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
-export async function searchMedicines(query) {
+export async function searchMedicines(query, mrpMode = false) {
   const empty = { branded: [], generic: [], janaushadhi: [] };
   if (!query || query.length < 2) return empty;
 
-  const { data: invData } = await supabase
-    .from('seller_inventory')
-    .select('medicine_id')
-    .eq('is_available', true)
-    .gt('stock_quantity', 0);
+  let invQuery = supabase.from('seller_inventory').select('medicine_id');
+  invQuery = mrpMode
+    ? invQuery.eq('seller_hidden', false)
+    : invQuery.eq('is_available', true).gt('stock_quantity', 0);
+  const { data: invData } = await invQuery;
   const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
   if (availableIds.length === 0) return empty;
 
@@ -164,30 +167,63 @@ export function getRatePerDose(med) {
   return { perDose: price.toFixed(2), unit: 'unit', total: 1 };
 }
 
+// ── Effective customer-facing MRP under MRP Mode ─────────────────
+// Seller's own seller_inventory.mrp is authoritative once set; master's
+// mrp_max is only a fallback for rows a seller hasn't declared one for
+// yet — same "seller wins, master is fallback" rule as the guard trigger
+// (021_mrpGuard.sql / 022_mrpMode.sql) and the CSV bulk-upload path.
+// Returns null when neither source has a usable value — callers must
+// treat that as "don't show this, don't let it be ordered".
+export function effectiveMrp(sellerMrp, masterMrpMax) {
+  if (sellerMrp > 0) return sellerMrp;
+  if (masterMrpMax > 0) return masterMrpMax;
+  return null;
+}
+
 // ── Sellers stocking a specific medicine (medicine-first order flow) ──
-export async function fetchSellersForMedicine(medicineId) {
+// mrpMode/masterMrpMax: when mrp_mode is ON, each row's resolved `.price`
+// is its effective MRP (seller's own mrp, falling back to the caller-
+// supplied master mrp_max) instead of selling_price, and rows with no
+// usable MRP at all are dropped — never surface a ₹0 orderable row.
+// Stock no longer gates display under mrp_mode — a seller shows up as
+// long as they haven't manually hidden this row (seller_hidden=false),
+// regardless of stock_quantity/reserved_quantity. mrp_mode OFF: unchanged
+// (is_available + available>0, exactly as before).
+export async function fetchSellersForMedicine(medicineId, mrpMode = false, masterMrpMax = 0) {
   if (!medicineId) return [];
-  const { data, error } = await supabase
+  let query = supabase
     .from('seller_inventory')
-    .select('selling_price, stock_quantity, reserved_quantity, sellers(id, store_name, address, phone, rating, is_open, seller_type)')
-    .eq('medicine_id', medicineId)
-    .eq('is_available', true)
-    .order('selling_price', { ascending: true });
+    .select('selling_price, mrp, seller_hidden, stock_quantity, reserved_quantity, sellers(id, store_name, address, phone, rating, is_open, seller_type)')
+    .eq('medicine_id', medicineId);
+  query = mrpMode ? query.eq('seller_hidden', false) : query.eq('is_available', true);
+
+  const { data, error } = await query.order('selling_price', { ascending: true });
   if (error) { console.error('fetchSellersForMedicine error:', error); return []; }
-  return (data || [])
+  let rows = (data || [])
     .map((row) => ({ ...row, available: (row.stock_quantity || 0) - (row.reserved_quantity || 0) }))
-    .filter((row) => row.available > 0 && row.sellers?.seller_type === 'retailer');
+    .filter((row) => row.sellers?.seller_type === 'retailer');
+  if (!mrpMode) {
+    rows = rows.filter((row) => row.available > 0);
+  }
+
+  if (mrpMode) {
+    return rows
+      .map((row) => ({ ...row, price: effectiveMrp(row.mrp, masterMrpMax) }))
+      .filter((row) => row.price != null);
+  }
+  return rows.map((row) => ({ ...row, price: row.selling_price }));
 }
 
 // ── Fetch popular medicines (for home/search landing) ─────────
 // Only medicines stocked by at least one seller are shown.
+// mrp_mode: same stock-ignoring rule as searchMedicines above.
 // TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
-export async function fetchPopularMedicines(limit = 12) {
-  const { data: invData } = await supabase
-    .from('seller_inventory')
-    .select('medicine_id')
-    .eq('is_available', true)
-    .gt('stock_quantity', 0);
+export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
+  let invQuery = supabase.from('seller_inventory').select('medicine_id');
+  invQuery = mrpMode
+    ? invQuery.eq('seller_hidden', false)
+    : invQuery.eq('is_available', true).gt('stock_quantity', 0);
+  const { data: invData } = await invQuery;
   const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
   if (availableIds.length === 0) return { data: [], error: null };
 

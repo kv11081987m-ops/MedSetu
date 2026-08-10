@@ -4,6 +4,7 @@ import { ArrowLeft, Search, X, Package, AlertTriangle, ShoppingCart, Star } from
 import { fetchStoreInventory } from '../lib/inventory';
 import { supabase } from '../lib/supabase';
 import { useCart } from '../context/CartContext';
+import { fetchMrpMode, effectiveMrp } from '../lib/api';
 
 const PALETTE = [
   { color: '#1A6B3C', bg: '#E8F5EE' },
@@ -20,7 +21,7 @@ function formatExpiry(dateStr) {
   } catch { return dateStr; }
 }
 
-function mapItem(item, idx) {
+function mapItem(item, idx, mrpMode) {
   const { color, bg } = PALETTE[idx % PALETTE.length];
   const med = item.master_medicines || {};
   return {
@@ -31,8 +32,12 @@ function mapItem(item, idx) {
     name:         med.name || 'Unknown',
     genericName:  med.generic_name || med.salt_composition || '',
     category:     med.category || 'Other',
-    mrp:          med.mrp_max || 0,
+    mrp:          med.mrp_max || 0,               // master's old reference
     selling:      item.selling_price || 0,
+    // What the customer actually sees/pays: seller's own MRP (falling back
+    // to master's mrp_max) under mrp_mode, plain selling_price otherwise.
+    // null means no usable price at all — caller must filter these out.
+    displayPrice: mrpMode ? effectiveMrp(item.mrp, med.mrp_max) : (item.selling_price || 0),
     unit:         item.unit || 'strips',
     available:    (item.stock_quantity ?? 0) - (item.reserved_quantity ?? 0),
     expiry:       formatExpiry(item.expiry_date),
@@ -42,7 +47,7 @@ function mapItem(item, idx) {
 }
 
 // ─── Medicine Card ─────────────────────────────────────────────
-function MedicineCard({ item, onAddToCart, added }) {
+function MedicineCard({ item, onAddToCart, added, mrpMode }) {
   return (
     <div style={s.card}>
       {/* Top row: avatar + name + category */}
@@ -64,16 +69,25 @@ function MedicineCard({ item, onAddToCart, added }) {
       </div>
 
       {/* Pricing block */}
-      <div style={s.priceBlock}>
-        <div>
-          <p style={s.priceLabel}>MRP</p>
-          <p style={s.mrp}>₹{item.mrp}</p>
+      {mrpMode ? (
+        <div style={s.priceBlock}>
+          <div style={{ textAlign: 'right', width: '100%' }}>
+            <p style={s.priceLabel}>MRP</p>
+            <p style={s.sellingPrice}>₹{item.displayPrice}</p>
+          </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <p style={s.priceLabel}>Store Price</p>
-          <p style={s.sellingPrice}>₹{item.selling}</p>
+      ) : (
+        <div style={s.priceBlock}>
+          <div>
+            <p style={s.priceLabel}>MRP</p>
+            <p style={s.mrp}>₹{item.mrp}</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={s.priceLabel}>Store Price</p>
+            <p style={s.sellingPrice}>₹{item.selling}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Meta: stock + expiry */}
       <div style={s.metaRow}>
@@ -106,20 +120,33 @@ export default function CustomerStoreInventory() {
   const [loading,    setLoading]    = useState(true);
   const [query,      setQuery]      = useState('');
   const [addedItems, setAddedItems] = useState({});
+  const [mrpMode,    setMrpMode]    = useState(false);
 
   useEffect(() => {
     if (!sellerId) { setLoading(false); return; }
-    Promise.all([
-      fetchStoreInventory(sellerId),
-      supabase.from('sellers').select('store_name, is_open, rating').eq('id', sellerId).maybeSingle(),
-    ]).then(([inv, sellerRes]) => {
+    // mrpMode must be known BEFORE fetching inventory — the fetch's
+    // stock-vs-seller_hidden filter depends on it.
+    (async () => {
+      const mrpModeOn = await fetchMrpMode();
+      const [inv, sellerRes] = await Promise.all([
+        fetchStoreInventory(sellerId, mrpModeOn),
+        supabase.from('sellers').select('store_name, is_open, rating').eq('id', sellerId).maybeSingle(),
+      ]);
       setInventory(inv);
       setStore(sellerRes.data || null);
+      setMrpMode(mrpModeOn);
       setLoading(false);
-    });
+    })();
   }, [sellerId]);
 
-  const items = useMemo(() => inventory.map(mapItem), [inventory]);
+  const items = useMemo(
+    () => inventory
+      .map((item, idx) => mapItem(item, idx, mrpMode))
+      // mrp_mode ON: a medicine with no usable MRP anywhere (seller hasn't
+      // set one AND master has none) must never be orderable at ₹0 — drop it.
+      .filter((i) => !mrpMode || i.displayPrice != null),
+    [inventory, mrpMode]
+  );
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -132,7 +159,7 @@ export default function CustomerStoreInventory() {
 
   const handleAddToCart = (item) => {
     addToCart(
-      { id: item.medicineId, name: item.name, price: item.selling, quantity: 1, unit: item.unit },
+      { id: item.medicineId, name: item.name, price: item.displayPrice, quantity: 1, unit: item.unit },
       { id: sellerId, name: storeName || store?.store_name || 'Store' }
     );
     setAddedItems((prev) => ({ ...prev, [item.id]: true }));
@@ -251,6 +278,7 @@ export default function CustomerStoreInventory() {
                   item={item}
                   onAddToCart={handleAddToCart}
                   added={!!addedItems[item.id]}
+                  mrpMode={mrpMode}
                 />
               ))}
               <div style={{ height: '24px' }} />

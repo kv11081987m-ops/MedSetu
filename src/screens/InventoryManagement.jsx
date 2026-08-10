@@ -15,6 +15,7 @@ import {
   updateInventoryItem,
   removeFromInventory,
   requestNewMedicine,
+  toggleSellerHidden,
 } from '../lib/inventory';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -91,6 +92,7 @@ function mapInventoryItem(item, idx) {
     requiresRx:  med.requires_prescription || false,
     status:      getItemStatus(available, item.expiry_date),
     minOrderQty: item.min_order_quantity ?? 1,
+    sellerHidden: item.seller_hidden ?? false,     // manual show/hide (mrp_mode)
   };
 }
 
@@ -142,7 +144,7 @@ function EditModal({ item, onSave, onClose, isWholesaler, mrpMode }) {
           <p style={{ fontSize: '12px', color: '#555', margin: 0 }}>
             {item?.brand && <span>{item.brand}</span>}
             {item?.category && <span style={{ marginLeft: '8px', color: '#1A6B3C' }}>• {item.category}</span>}
-            {item?.mrp > 0 && <span style={{ marginLeft: '8px', color: '#888' }}>• MRP ₹{item.mrp}</span>}
+            {item?.mrp > 0 && <span style={{ marginLeft: '8px', color: '#888' }}>• {mrpMode ? 'Purana Ref' : 'MRP'} ₹{item.mrp}</span>}
           </p>
         </div>
 
@@ -383,7 +385,9 @@ function AddDetailsModal({ medicine, onAdd, onClose, isWholesaler, mrpMode }) {
           )}
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {medicine.mrp_max > 0 && (
-              <span style={{ fontSize: '13px', color: '#1A6B3C', fontWeight: '600' }}>MRP: ₹{medicine.mrp_max}</span>
+              <span style={{ fontSize: '13px', color: '#1A6B3C', fontWeight: '600' }}>
+                {mrpMode ? 'Purana Ref' : 'MRP'}: ₹{medicine.mrp_max}
+              </span>
             )}
             {medicine.source === 'janaushadhi' && (
               <span style={{ background: '#C8E6C9', color: '#1A6B3C', fontSize: '10px', fontWeight: '700', padding: '1px 7px', borderRadius: '99px' }}>
@@ -800,13 +804,13 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
 }
 
 // ─── ItemCard ─────────────────────────────────────────────────
-function ItemCard({ item, onEdit, onDelete }) {
+function ItemCard({ item, onEdit, onDelete, onToggleHidden }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pct = item.maxStock > 0 ? Math.round((item.stock / item.maxStock) * 100) : 0;
   const st  = STATUS_COLOR[item.status];
 
   return (
-    <div style={s.itemCard}>
+    <div style={{ ...s.itemCard, opacity: item.sellerHidden ? 0.55 : 1 }}>
       <div style={{ ...s.itemInitialBox, backgroundColor: item.bg }}>
         <span style={{ ...s.itemInitial, color: item.color }}>{item.initial}</span>
       </div>
@@ -822,6 +826,9 @@ function ItemCard({ item, onEdit, onDelete }) {
               {item.requiresRx && (
                 <span style={{ background: '#FFF3E0', color: '#E65100', fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '99px', flexShrink: 0 }}>Rx</span>
               )}
+              {item.sellerHidden && (
+                <span style={{ background: '#F0F0F0', color: '#666', fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '99px', flexShrink: 0 }}>🙈 Chhupa hua</span>
+              )}
             </div>
             <p style={s.itemBrand}>{item.brand}</p>
           </div>
@@ -835,6 +842,10 @@ function ItemCard({ item, onEdit, onDelete }) {
                 <div style={s.menu}>
                   <button style={s.menuItem} onClick={() => { setMenuOpen(false); onEdit(item); }}>
                     <Edit2 size={13} color="#1A6B3C" /> Edit
+                  </button>
+                  <button style={s.menuItem}
+                    onClick={() => { setMenuOpen(false); onToggleHidden(item); }}>
+                    {item.sellerHidden ? <>👁️ Dikhao</> : <>🙈 Chhupao</>}
                   </button>
                   <button style={{ ...s.menuItem, color: '#DC3545' }}
                     onClick={() => { setMenuOpen(false); onDelete(item.id); }}>
@@ -975,6 +986,16 @@ export default function InventoryManagement() {
       setInventory((prev) => prev.filter((m) => m.id !== id));
     } catch (err) {
       alert('Delete nahi hua: ' + err.message);
+    }
+  };
+
+  // ── Show/Hide (mrp_mode) ────────────────────────────────────────
+  const handleToggleHidden = async (item) => {
+    try {
+      await toggleSellerHidden(item.id, !item.sellerHidden);
+      await loadInventory();
+    } catch (err) {
+      alert('Update nahi hua: ' + err.message);
     }
   };
 
@@ -1156,6 +1177,7 @@ export default function InventoryManagement() {
                   <ItemCard key={item.id} item={item}
                     onEdit={(it) => setEditItem(it)}
                     onDelete={handleDelete}
+                    onToggleHidden={handleToggleHidden}
                   />
                 ))}
               </div>

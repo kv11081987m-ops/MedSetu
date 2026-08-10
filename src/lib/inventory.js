@@ -86,9 +86,27 @@ export const updateInventoryItem = async (inventoryId, updates) => {
   if (error) throw error
 }
 
-export const fetchWholesalerInventory = async (sellerId) => {
+// mrpMode: stock no longer gates display — filters on seller_hidden=false
+// instead of is_available, so a 0-stock (but not manually hidden) item
+// still shows. mrp_mode OFF: unchanged (is_available, exactly as before).
+// ── Seller manual show/hide (mrp_mode) ─────────────────────────
+// Deliberately touches ONLY seller_hidden — never is_available, stock,
+// or price. is_available is stock/price-derived and gets recomputed by
+// reserve_stock/deduct_stock/release_stock and the two functions above,
+// so a manual hide stored there would risk being silently undone by any
+// of those; seller_hidden is untouched by all of them (024_sellerHidden.sql).
+export const toggleSellerHidden = async (inventoryId, hidden) => {
+  const { error } = await supabase
+    .from('seller_inventory')
+    .update({ seller_hidden: hidden })
+    .eq('id', inventoryId)
+
+  if (error) throw error
+}
+
+export const fetchWholesalerInventory = async (sellerId, mrpMode = false) => {
   if (!sellerId) return [];
-  const { data } = await supabase
+  let query = supabase
     .from('seller_inventory')
     .select(`
       *,
@@ -98,9 +116,9 @@ export const fetchWholesalerInventory = async (sellerId) => {
         requires_prescription, source
       )
     `)
-    .eq('seller_id', sellerId)
-    .eq('is_available', true)
-    .order('created_at', { ascending: false });
+    .eq('seller_id', sellerId);
+  query = mrpMode ? query.eq('seller_hidden', false) : query.eq('is_available', true);
+  const { data } = await query.order('created_at', { ascending: false });
   return data || [];
 };
 
