@@ -164,7 +164,7 @@ function OffersModal({ offers, cartTotal, onApply, onClose }) {
 export default function Checkout() {
   const navigate  = useNavigate();
   const location  = useLocation();
-  const { cartItems, cartSellerId, cartSellerName, clearCart, updateQuantity, removeFromCart } = useCart();
+  const { cartItems, cartSellerId, clearCart, updateQuantity, removeFromCart } = useCart();
 
   const [items, setItems] = useState(() =>
     cartItems.map((i) => ({
@@ -203,9 +203,27 @@ export default function Checkout() {
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [mrpMode, setMrpMode] = useState(false);
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
+  const [fulfilledByLabel, setFulfilledByLabel] = useState('MedSetu');
 
   useEffect(() => {
     fetchMrpMode().then(setMrpMode);
+  }, []);
+
+  // ── Fetch "Fulfilled by" label — kept as its own isolated query since
+  // platform_settings.fulfilled_by_label doesn't exist yet (no migration
+  // in this change); a column-not-found error here must not break the
+  // delivery-charge/routing-timeout fetch above, so it's not bundled into
+  // that .select(). Falls back to the 'MedSetu' default on any error.
+  useEffect(() => {
+    supabase
+      .from('platform_settings')
+      .select('fulfilled_by_label')
+      .eq('id', 1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data?.fulfilled_by_label) setFulfilledByLabel(data.fulfilled_by_label);
+      })
+      .catch(() => {});
   }, []);
 
   // ── Fetch platform delivery settings ──────────────────────
@@ -389,13 +407,19 @@ export default function Checkout() {
 
     try {
       // ── Routing: home-delivery orders get an auto-assigned seller by
-      // pincode (get_routing_candidates, 027_routingCandidatesFn.sql) —
-      // this OVERRIDES whatever seller the cart is currently bound to.
-      // Cart itself isn't seller-free yet (that's R2-C3); store-pickup
-      // orders are deferred — they keep the old cart-bound behaviour.
+      // pincode (get_routing_candidates, 027_routingCandidatesFn.sql).
+      // Cart is seller-free as of R2-C3 (addToCart no longer binds a
+      // seller for B2C) — cartSellerId is always null here in practice,
+      // this fallback only still matters for store-pickup, which routing
+      // doesn't cover yet (deferred, keeps old cart-bound behaviour).
       let routedSellerId = cartSellerId || null;
       let routingFields  = {};
       if (delivery === 'home') {
+        if (!selectedPincode) {
+          setOrderError('Address mein pincode nahi hai, kripya address update karein');
+          setOrdering(false);
+          return;
+        }
         const { data: routing, error: routingErr } = await supabase.rpc(
           'get_routing_candidates', { p_pincode: selectedPincode }
         );
@@ -527,20 +551,19 @@ export default function Checkout() {
         {/* ── Body ── */}
         <div style={s.body}>
 
-          {/* Store Banner */}
+          {/* Fulfilled-by Banner — R2-C3: cart is seller-free, routing
+              (get_routing_candidates) assigns the seller at checkout, so
+              there's no store to name or "Change" anymore. */}
           <div style={s.storeBanner}>
             <div style={s.storeLeft}>
               <div style={s.storeIconBox}>
                 <Store size={18} color="#1A6B3C" />
               </div>
               <div>
-                <p style={s.storeName}>{cartSellerName ? `${cartSellerName} se order` : 'Store se order'}</p>
-                <p style={s.storeAddr}>Deoria, UP</p>
+                <p style={s.storeName}>Fulfilled by {fulfilledByLabel}</p>
+                <p style={s.storeAddr}>Aapke pincode ke nearest available store se</p>
               </div>
             </div>
-            <button style={s.changeLink} onClick={() => navigate('/store-locator')}>
-              Change
-            </button>
           </div>
 
           {/* Cart Items */}

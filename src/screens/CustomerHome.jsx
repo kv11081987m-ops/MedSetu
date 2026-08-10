@@ -28,12 +28,22 @@ const CATEGORIES = [
 ];
 
 
+// R2-C3: "Store Dhundho" hidden — cart/checkout is seller-free now, routing
+// (get_routing_candidates) picks the fulfilling seller, so customer
+// store-picking has no effect on the order anymore. Screens themselves
+// (StoreLocator/CustomerStoreInventory) stay for now — full removal is R3.
+// { label: 'Store Dhundho', Icon: MapPin, bg: '#E8F5EE', color: '#1A6B3C', route: '/store-locator' },
 const QUICK_ACTIONS = [
-  { label: 'Store Dhundho',       Icon: MapPin,    bg: '#E8F5EE', color: '#1A6B3C', route: '/store-locator' },
   { label: 'Prescription Upload', Icon: FileText,  bg: '#EAF2FF', color: '#2563EB', route: '/prescription' },
   { label: 'Medicine Order',      Icon: Pill,      bg: '#FFF3E8', color: '#EA6C00', route: '/medicine-search' },
   { label: 'Order History',       Icon: Clock,     bg: '#F3EEFF', color: '#7C3AED', route: '/orders' },
 ];
+
+// R2-C3: gates the "Nearby Stores" browse section (See All / per-store
+// Order button) below — same reasoning as QUICK_ACTIONS above. Flip to
+// true to bring it back; R3 removes the section (and StoreLocator/
+// CustomerStoreInventory) outright instead of gating it.
+const SHOW_STORE_BROWSE = false;
 
 // ─── Sub-components ───────────────────────────────────────────
 
@@ -293,30 +303,32 @@ export default function CustomerHome() {
             ))}
           </div>
 
-          {/* Nearby Stores */}
-          <div style={s.section}>
-            <div style={s.sectionHeader}>
-              <span style={s.sectionTitle}>Aapke Paas Ke Stores</span>
-              <button style={s.seeAllBtn} onClick={() => navigate('/store-locator')}>
-                Sab Dekho
-              </button>
-            </div>
-            {storesLoading ? (
-              <p style={{ fontSize: '13px', color: '#AAAAAA', padding: '12px 0' }}>Stores load ho rahe hain...</p>
-            ) : nearbyStores.length === 0 ? (
-              <p style={{ fontSize: '13px', color: '#888888', padding: '12px 0' }}>Aapke area mein koi store nahi mila</p>
-            ) : (
-              <div style={s.horizontalScroll}>
-                {nearbyStores.map((store, idx) => (
-                  <StoreCard
-                    key={store?.id || store?.name || `store-${idx}`}
-                    store={store}
-                    onOrder={(st) => navigate('/store-inventory', { state: { sellerId: st.id, storeName: st.name } })}
-                  />
-                ))}
+          {/* Nearby Stores — hidden behind SHOW_STORE_BROWSE, see R2-C3 note above */}
+          {SHOW_STORE_BROWSE && (
+            <div style={s.section}>
+              <div style={s.sectionHeader}>
+                <span style={s.sectionTitle}>Aapke Paas Ke Stores</span>
+                <button style={s.seeAllBtn} onClick={() => navigate('/store-locator')}>
+                  Sab Dekho
+                </button>
               </div>
-            )}
-          </div>
+              {storesLoading ? (
+                <p style={{ fontSize: '13px', color: '#AAAAAA', padding: '12px 0' }}>Stores load ho rahe hain...</p>
+              ) : nearbyStores.length === 0 ? (
+                <p style={{ fontSize: '13px', color: '#888888', padding: '12px 0' }}>Aapke area mein koi store nahi mila</p>
+              ) : (
+                <div style={s.horizontalScroll}>
+                  {nearbyStores.map((store, idx) => (
+                    <StoreCard
+                      key={store?.id || store?.name || `store-${idx}`}
+                      store={store}
+                      onOrder={(st) => navigate('/store-inventory', { state: { sellerId: st.id, storeName: st.name } })}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Categories */}
           <div style={s.section}>

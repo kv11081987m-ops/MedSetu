@@ -40,11 +40,11 @@ function MedicineCard({ medicine, type, mrpMode }) {
     setStoresLoading(false);
   };
 
+  // Seller-free cart (R2-C3) — the store list below is price/availability
+  // info only now, actual fulfilment seller is picked by routing at
+  // checkout (get_routing_candidates), not by which row the customer taps.
   const handleAddFromSeller = (s) => {
-    addToCart(
-      { ...med, price: s.price, quantity: 1 },
-      { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
-    );
+    addToCart({ ...med, price: s.price, quantity: 1 });
     setAddedSeller(s.sellers?.id);
     setTimeout(() => setAddedSeller(null), 2000);
   };
@@ -60,10 +60,7 @@ function MedicineCard({ medicine, type, mrpMode }) {
     }
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
-    addToCart(
-      { ...med, price: cheapest.price, quantity: 1 },
-      { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
-    );
+    addToCart({ ...med, price: cheapest.price, quantity: 1 });
     setAddedSeller(cheapest.sellers?.id);
     setTimeout(() => setAddedSeller(null), 2000);
   };
@@ -254,11 +251,9 @@ function PopularCard({ item, mrpMode }) {
     setStoresLoading(false);
   };
 
+  // Seller-free cart (R2-C3) — same reasoning as MedicineCard above.
   const handleAddFromSeller = (s) => {
-    addToCart(
-      { ...item, price: s.price, quantity: 1 },
-      { id: s.sellers?.id, name: s.sellers?.store_name || 'Store' }
-    );
+    addToCart({ ...item, price: s.price, quantity: 1 });
     setAddedSeller(s.sellers?.id);
     setTimeout(() => setAddedSeller(null), 2000);
   };
@@ -274,10 +269,7 @@ function PopularCard({ item, mrpMode }) {
     }
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
-    addToCart(
-      { ...item, price: cheapest.price, quantity: 1 },
-      { id: cheapest.sellers?.id, name: cheapest.sellers?.store_name || 'Store' }
-    );
+    addToCart({ ...item, price: cheapest.price, quantity: 1 });
     setAddedSeller(cheapest.sellers?.id);
     setTimeout(() => setAddedSeller(null), 2000);
   };

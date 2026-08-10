@@ -157,10 +157,13 @@ export default function CustomerStoreInventory() {
     );
   }, [items, query]);
 
+  // Seller-free cart (R2-C3) — this screen is unreachable from normal
+  // navigation now (CustomerHome.jsx entry points hidden), kept alive only
+  // for a direct URL hit; add-to-cart no longer binds cartSellerId either
+  // way — routing at checkout (get_routing_candidates) picks the seller.
   const handleAddToCart = (item) => {
     addToCart(
-      { id: item.medicineId, name: item.name, price: item.displayPrice, quantity: 1, unit: item.unit },
-      { id: sellerId, name: storeName || store?.store_name || 'Store' }
+      { id: item.medicineId, name: item.name, price: item.displayPrice, quantity: 1, unit: item.unit }
     );
     setAddedItems((prev) => ({ ...prev, [item.id]: true }));
     setTimeout(() => {

@@ -26,8 +26,12 @@ export function CartProvider({ children }) {
   }, [cartItems, cartSellerId, cartSellerName]);
 
   // ── Add to cart ──────────────────────────────────────────────
-  // seller = { id, name } — enforces single-seller cart
-  const addToCart = useCallback((medicine, seller) => {
+  // seller = { id, name }, OPTIONAL. B2B (WholesalerInventory.jsx) always
+  // passes it — enforces single-seller cart, unchanged. B2C (MedicineSearch/
+  // CustomerStoreInventory) no longer passes it as of R2-C3 — checkout-time
+  // routing (get_routing_candidates) picks the fulfilling seller instead, so
+  // the cart itself stays seller-free and cartSellerId is never set/used.
+  const addToCart = useCallback((medicine, seller = null) => {
     if (seller && cartSellerId && seller.id !== cartSellerId) {
       const ok = window.confirm(
         `Cart mein pehle se ${cartSellerName} ki items hain.\n\n` +

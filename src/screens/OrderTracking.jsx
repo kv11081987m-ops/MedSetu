@@ -45,7 +45,12 @@ const STEPS = [
 const ACTIVE_STEP = 1; // fallback while loading — show step 1 (not fake "delivery pe hai")
 
 function getActiveStep(status) {
-  const map = { pending: 1, confirmed: 2, preparing: 2, out_for_delivery: 3, delivered: 4, cancelled: 4 };
+  // 'cancelled' deliberately has no entry — it must never map to step 4
+  // (that reads as "delivered", the exact wrong impression this fixes).
+  // A cancelled order never reaches buildSteps()/this timeline at all
+  // (see the early-return below), so the `|| 1` fallback is never
+  // actually shown for it — this just keeps the map itself honest.
+  const map = { pending: 1, confirmed: 2, preparing: 2, out_for_delivery: 3, delivered: 4 };
   return map[status] || 1;
 }
 
@@ -212,7 +217,14 @@ export default function OrderTracking() {
     );
   }
 
-  if (cancelled) {
+  // Covers two cases with one screen: `cancelled` (local state) is set
+  // right after THIS session's own cancel action; `order?.status ===
+  // 'cancelled'` covers an order that was already cancelled before this
+  // screen loaded (page reload, seller/pharmacist decline, another
+  // session) — previously only the first case short-circuited here, so
+  // the second fell through to the normal timeline below and hit the
+  // getActiveStep('cancelled') bug (all 4 steps shown green/done).
+  if (cancelled || order?.status === 'cancelled') {
     return (
       <div style={s.wrapper}>
         <div style={s.screen}>
@@ -232,6 +244,9 @@ export default function OrderTracking() {
             </div>
             <h2 style={s.cancelledTitle}>Order Cancel Ho Gaya</h2>
             <p style={s.cancelledSub}>Refund 3–5 business days mein aayega</p>
+            {order?.cancel_reason && (
+              <p style={s.cancelledReason}>Cancel wajah: {order.cancel_reason}</p>
+            )}
             <button style={s.goHomeBtn} onClick={() => navigate('/home')}>Home Jaao</button>
           </div>
         </div>
@@ -912,6 +927,15 @@ const s = {
     fontSize: '14px',
     color: '#888888',
     margin: 0,
+  },
+  cancelledReason: {
+    fontSize: '13px',
+    color: '#DC2626',
+    backgroundColor: '#FEF2F2',
+    padding: '8px 14px',
+    borderRadius: '10px',
+    margin: 0,
+    textAlign: 'center',
   },
   goHomeBtn: {
     padding: '14px 32px',
