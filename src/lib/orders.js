@@ -27,6 +27,11 @@ export const createOrder = async (orderData) => {
       delivery_address: orderData.deliveryAddress || null,
       delivery_pincode: orderData.deliveryPincode || null,
       prescription_url: orderData.prescriptionUrl || null,
+      assigned_at:        orderData.assignedAt       || null,
+      routing_expires_at: orderData.routingExpiresAt || null,
+      routing_attempt:    orderData.routingAttempt   ?? 0,
+      assigned_by:        orderData.assignedBy       || 'auto',
+      routing_history:    orderData.routingHistory   || [],
     })
     .select();
 

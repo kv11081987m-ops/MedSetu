@@ -202,6 +202,7 @@ export default function Checkout() {
   const [orderDbId, setOrderDbId]       = useState('');
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [mrpMode, setMrpMode] = useState(false);
+  const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
 
   useEffect(() => {
     fetchMrpMode().then(setMrpMode);
@@ -211,7 +212,7 @@ export default function Checkout() {
   useEffect(() => {
     supabase
       .from('platform_settings')
-      .select('delivery_charge, free_delivery_threshold')
+      .select('delivery_charge, free_delivery_threshold, routing_timeout_minutes')
       .eq('id', 1)
       .maybeSingle()
       .then(({ data }) => {
@@ -219,6 +220,7 @@ export default function Checkout() {
           charge:    data.delivery_charge         ?? 30,
           threshold: data.free_delivery_threshold ?? 0,
         });
+        if (data?.routing_timeout_minutes != null) setRoutingTimeoutMinutes(data.routing_timeout_minutes);
       });
   }, []);
 
@@ -385,24 +387,62 @@ export default function Checkout() {
         ? 'Customer View mein order place nahi ho sakta — asli customer account se test karein'
         : (raw || 'Order nahi ho saka. Dobara try karo.');
 
-    const orderData = {
-      customerId,
-      customerName:   storedUser?.name  || null,
-      customerPhone:  storedUser?.phone || null,
-      sellerId:       cartSellerId || null,
-      totalAmount:    cartTotal,
-      deliveryCharge: delivFee,
-      discount:       safeDiscount,
-      promoCode:      (!mrpMode && appliedOffer) ? appliedOffer.promo_code : null,
-      finalAmount:    grandTotal,
-      paymentMethod:  payment,
-      deliveryType:   delivery,
-      deliveryAddress: delivery === 'home' ? selectedAddress : 'Store Pickup',
-      deliveryPincode: delivery === 'home' ? (selectedPincode || null) : null,
-      prescriptionUrl,
-    };
-
     try {
+      // ── Routing: home-delivery orders get an auto-assigned seller by
+      // pincode (get_routing_candidates, 027_routingCandidatesFn.sql) —
+      // this OVERRIDES whatever seller the cart is currently bound to.
+      // Cart itself isn't seller-free yet (that's R2-C3); store-pickup
+      // orders are deferred — they keep the old cart-bound behaviour.
+      let routedSellerId = cartSellerId || null;
+      let routingFields  = {};
+      if (delivery === 'home') {
+        const { data: routing, error: routingErr } = await supabase.rpc(
+          'get_routing_candidates', { p_pincode: selectedPincode }
+        );
+        if (routingErr) {
+          setOrderError('Routing check nahi ho saka. Dobara try karo.');
+          setOrdering(false);
+          return;
+        }
+        if (!routing?.serviceable) {
+          setOrderError(`Maaf kijiye, abhi is pincode (${selectedPincode}) par home delivery available nahi hai.`);
+          setOrdering(false);
+          return;
+        }
+        if (!routing.candidates?.length) {
+          setOrderError('Abhi koi seller uplabdh nahi, thodi der baad koshish karein.');
+          setOrdering(false);
+          return;
+        }
+        routedSellerId = routing.candidates[0].seller_id;
+        const nowIso = new Date().toISOString();
+        routingFields = {
+          assignedAt:       nowIso,
+          routingAttempt:   1,
+          assignedBy:       'auto',
+          routingExpiresAt: new Date(Date.now() + routingTimeoutMinutes * 60000).toISOString(),
+          routingHistory:   [{ seller_id: routedSellerId, assigned_at: nowIso, result: 'assigned' }],
+        };
+      }
+
+      const orderData = {
+        customerId,
+        customerName:   storedUser?.name  || null,
+        customerPhone:  storedUser?.phone || null,
+        sellerId:       routedSellerId,
+        totalAmount:    cartTotal,
+        deliveryCharge: delivFee,
+        discount:       safeDiscount,
+        promoCode:      (!mrpMode && appliedOffer) ? appliedOffer.promo_code : null,
+        finalAmount:    grandTotal,
+        paymentMethod:  payment,
+        deliveryType:   delivery,
+        deliveryAddress: delivery === 'home' ? selectedAddress : 'Store Pickup',
+        deliveryPincode: delivery === 'home' ? (selectedPincode || null) : null,
+        prescriptionUrl,
+        ...routingFields,
+      };
+
       const { data: orderRows, error: orderErr } = await createOrder(orderData);
 
       if (orderErr || !orderRows?.length) {
@@ -421,7 +461,7 @@ export default function Checkout() {
         price:    it.price,
       }));
 
-      const { error: itemsErr } = await createOrderItems(newOrder.id, orderItems, cartSellerId);
+      const { error: itemsErr } = await createOrderItems(newOrder.id, orderItems, routedSellerId);
       if (itemsErr) {
         console.error('createOrderItems failed:', itemsErr);
         alert('Order toh ban gaya par items save nahi hue. Support se sampark karein. Order ID: ' + newOrder.order_number);
