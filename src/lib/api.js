@@ -39,14 +39,21 @@ export function mapMedicine(row) {
              : 'tablet';
 
   const mrp = parseFloat(row.mrp_max) || 0;
+  // row.sellerPrice (attached by searchMedicines/fetchPopularMedicines —
+  // cheapest available seller's real price, seller-grounded in both
+  // mrp_mode states) is what checkout will actually charge — that's what
+  // a card should show (R3-A). mrp_max is only a fallback for a caller
+  // that hasn't resolved one, keeping this function safe standalone.
+  const price = row.sellerPrice != null ? row.sellerPrice : mrp;
 
   return {
     id:          row.id,
     name:        row.name,
     brand:       row.brand_names || row.manufacturer || '',
     salt:        row.generic_name || row.salt_composition || '',
+    strength:    row.strength || '',
     mrp,
-    price:       mrp,
+    price,
     off:         0,
     rxRequired:  row.requires_prescription || false,
     stores:      1,
@@ -105,6 +112,36 @@ export async function fetchWholesalers(district = 'Deoria') {
   return { data: data || [], error };
 }
 
+// ── Shared: cheapest-available-seller raw price per medicine, from a
+// seller_inventory batch already fetched for availableIds filtering
+// (searchMedicines/fetchPopularMedicines below) — avoids a second,
+// per-card fetch just to show a real, seller-grounded price (R3-A).
+// mrp_mode OFF: selling_price is already the real transactable price.
+// mrp_mode ON: raw seller mrp only — combined with master's mrp_max via
+// effectiveMrp() in attachSellerPrice() below, once each medicine's own
+// mrp_max is known (same "seller wins, master is fallback" rule as
+// fetchSellersForMedicine).
+function buildPriceByMedicine(invRows, mrpMode) {
+  const priceByMedicine = {};
+  (invRows || []).forEach((row) => {
+    const raw = mrpMode ? row.mrp : row.selling_price;
+    if (raw == null || raw <= 0) return;
+    if (priceByMedicine[row.medicine_id] == null || raw < priceByMedicine[row.medicine_id]) {
+      priceByMedicine[row.medicine_id] = raw;
+    }
+  });
+  return priceByMedicine;
+}
+
+function attachSellerPrice(rows, priceByMedicine, mrpMode) {
+  return (rows || []).map((row) => ({
+    ...row,
+    sellerPrice: mrpMode
+      ? effectiveMrp(priceByMedicine[row.id], row.mrp_max)
+      : (priceByMedicine[row.id] ?? null),
+  }));
+}
+
 // ── Search medicines — 3 sections: branded / generic / janaushadhi ──
 // Only medicines stocked by at least one seller are shown.
 // mrp_mode: stock no longer gates display — a medicine is listed as long
@@ -115,13 +152,14 @@ export async function searchMedicines(query, mrpMode = false) {
   const empty = { branded: [], generic: [], janaushadhi: [] };
   if (!query || query.length < 2) return empty;
 
-  let invQuery = supabase.from('seller_inventory').select('medicine_id');
+  let invQuery = supabase.from('seller_inventory').select('medicine_id, selling_price, mrp');
   invQuery = mrpMode
     ? invQuery.eq('seller_hidden', false)
     : invQuery.eq('is_available', true).gt('stock_quantity', 0);
   const { data: invData } = await invQuery;
   const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
   if (availableIds.length === 0) return empty;
+  const priceByMedicine = buildPriceByMedicine(invData, mrpMode);
 
   const filter =
     `name.ilike.%${query}%,` +
@@ -141,15 +179,19 @@ export async function searchMedicines(query, mrpMode = false) {
   ]);
 
   return {
-    janaushadhi: janRes.data     || [],
-    generic:     genericRes.data || [],
-    branded:     brandedRes.data || [],
+    janaushadhi: attachSellerPrice(janRes.data,     priceByMedicine, mrpMode),
+    generic:     attachSellerPrice(genericRes.data, priceByMedicine, mrpMode),
+    branded:     attachSellerPrice(brandedRes.data, priceByMedicine, mrpMode),
   };
 }
 
 // ── Rate per dose ─────────────────────────────────────────────
-export function getRatePerDose(med) {
-  const price = parseFloat(med.mrp_max || med.mrp) || 0;
+// priceOverride: pass mapMedicine()'s already-resolved med.price (seller-
+// grounded, R3-A) so rate/dose divides the real customer-facing price
+// instead of always falling back to master's stale mrp_max. Omit it and
+// this behaves exactly as before (med.mrp_max || med.mrp).
+export function getRatePerDose(med, priceOverride) {
+  const price = priceOverride != null ? priceOverride : (parseFloat(med.mrp_max || med.mrp) || 0);
   const pack  = (med.unit || med.pack_size_label || '').toLowerCase();
 
   const tabMatch = pack.match(/(\d+)\s*tab/i) || pack.match(/strip of (\d+)/i);
@@ -219,13 +261,14 @@ export async function fetchSellersForMedicine(medicineId, mrpMode = false, maste
 // mrp_mode: same stock-ignoring rule as searchMedicines above.
 // TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
 export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
-  let invQuery = supabase.from('seller_inventory').select('medicine_id');
+  let invQuery = supabase.from('seller_inventory').select('medicine_id, selling_price, mrp');
   invQuery = mrpMode
     ? invQuery.eq('seller_hidden', false)
     : invQuery.eq('is_available', true).gt('stock_quantity', 0);
   const { data: invData } = await invQuery;
   const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
   if (availableIds.length === 0) return { data: [], error: null };
+  const priceByMedicine = buildPriceByMedicine(invData, mrpMode);
 
   const { data, error } = await supabase
     .from('master_medicines')
@@ -237,5 +280,5 @@ export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
     .limit(limit);
 
   if (error) return { data: [], error };
-  return { data: data || [], error: null };
+  return { data: attachSellerPrice(data, priceByMedicine, mrpMode), error: null };
 }

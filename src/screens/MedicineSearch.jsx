@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
-  Search, Home, ShoppingBag, User, RefreshCw, ChevronDown,
+  Search, Home, ShoppingBag, User, RefreshCw, ShoppingCart,
 } from 'lucide-react';
 import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp, fetchMrpMode } from '../lib/api';
 
@@ -15,93 +15,85 @@ const FILTERS = ['Sab', 'Tablets', 'Syrup', 'Injection', 'Equipment', 'Ayurvedic
 const filterKey = { Tablets: 'tablet', Syrup: 'syrup', Equipment: 'equipment', Injection: 'injection', Ayurvedic: 'ayurvedic' };
 
 // ─── MedicineCard ─────────────────────────────────────────────
+// R3-A: no store picker anymore (routing assigns the fulfilling seller
+// at checkout, R2-C2/C3) — this card shows medicine detail + a real,
+// seller-grounded price/rate straight away, and a single Add button.
 function MedicineCard({ medicine, type, mrpMode }) {
   const { addToCart } = useCart();
   const med      = mapMedicine(medicine);
-  const rateInfo = getRatePerDose(medicine);
-  const [expanded,      setExpanded]      = useState(false);
-  const [showStores,    setShowStores]    = useState(false);
-  const [sellers,       setSellers]       = useState([]);
-  const [storesLoading, setStoresLoading] = useState(false);
-  const [addedSeller,   setAddedSeller]   = useState(null);
-  const [addLoading,    setAddLoading]    = useState(false);
+  const rateInfo = getRatePerDose(medicine, med.price);
+  const [added,      setAdded]      = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
 
   const borderColor = type === 'janaushadhi' ? '#1A6B3C'
                     : type === 'generic'      ? '#2563EB'
                     : '#FF8C00';
 
-  const handleStoresToggle = async () => {
-    if (showStores) { setShowStores(false); return; }
-    setShowStores(true);
-    if (sellers.length > 0) return;
-    setStoresLoading(true);
-    const data = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
-    setSellers(data);
-    setStoresLoading(false);
-  };
-
-  // Seller-free cart (R2-C3) — the store list below is price/availability
-  // info only now, actual fulfilment seller is picked by routing at
-  // checkout (get_routing_candidates), not by which row the customer taps.
-  const handleAddFromSeller = (s) => {
-    addToCart({ ...med, price: s.price, quantity: 1 });
-    setAddedSeller(s.sellers?.id);
-    setTimeout(() => setAddedSeller(null), 2000);
-  };
-
+  // Still a live fetch at add-time (stock/price can have moved since this
+  // card's data loaded) — picks the cheapest currently-available seller,
+  // same as before R3-A, just without a dropdown to cache it in.
   const handleQuickAdd = async () => {
-    if (addLoading || addedSeller) return;
-    let sellerList = sellers;
-    if (sellerList.length === 0) {
-      setAddLoading(true);
-      sellerList = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
-      setSellers(sellerList);
-      setAddLoading(false);
-    }
+    if (addLoading || added) return;
+    setAddLoading(true);
+    const sellerList = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
+    setAddLoading(false);
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
     addToCart({ ...med, price: cheapest.price, quantity: 1 });
-    setAddedSeller(cheapest.sellers?.id);
-    setTimeout(() => setAddedSeller(null), 2000);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
   };
 
   return (
     <div style={{ background: '#fff', borderRadius: '12px', padding: '14px 16px', marginBottom: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderLeft: `3px solid ${borderColor}` }}>
 
-      {/* Name / brand / salt + MRP */}
+      {/* Name / strength / brand / salt + price */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontWeight: '600', fontSize: '14px', color: '#1A1A1A', margin: '0 0 2px', lineHeight: '1.3' }}>{med.name}</p>
+          <p style={{ fontWeight: '600', fontSize: '14px', color: '#1A1A1A', margin: '0 0 2px', lineHeight: '1.3' }}>
+            {med.name}
+            {med.strength && <span style={{ color: '#888', fontWeight: '500' }}> · {med.strength}</span>}
+          </p>
           {med.brand  && <p style={{ color: '#666', fontSize: '12px', margin: '0 0 1px' }}>{med.brand}</p>}
           {med.salt   && <p style={{ color: '#888', fontSize: '11px', margin: 0 }}>{med.salt.substring(0, 60)}</p>}
         </div>
-        {/* Master's mrp_max is a stale reference under mrp_mode — the real
-            price is per-seller (mrp_mode ? seller.mrp : selling_price),
-            only known once "Store" is expanded below. */}
-        {!mrpMode && (
-          <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
-            <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>MRP</p>
-            <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
-          </div>
-        )}
+        {/* med.price = cheapest available seller's real price (mapMedicine,
+            sourced from searchMedicines' sellerPrice) — same price
+            handleQuickAdd below will actually charge, in both mrp_mode
+            states. No longer master's stale mrp_max, no longer hidden
+            under mrp_mode. */}
+        <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
+          <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>Price</p>
+          <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
+        </div>
       </div>
 
-      {/* Rate per dose — derived from master mrp_max (getRatePerDose,
-          api.js), so it's a stale-reference leak under mrp_mode: hidden
-          there, same reasoning as the top MRP badge / detail-row MRP
-          above (real price is per-seller, see "Store" list below). */}
-      {!mrpMode && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#F8F8F8', borderRadius: '6px', marginBottom: '10px' }}>
-          <span style={{ fontSize: '11px', color: '#666' }}>📦 {medicine.unit || 'Per unit'}</span>
-          <span style={{ fontSize: '12px', color: borderColor, fontWeight: '500' }}>₹{rateInfo.perDose}/{rateInfo.unit}</span>
-        </div>
-      )}
+      {/* Rate per dose — now divides the same seller-grounded med.price
+          (getRatePerDose's priceOverride) instead of master mrp_max, so
+          it's correct in both mrp_mode states — no longer hidden. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#F8F8F8', borderRadius: '6px', marginBottom: '10px' }}>
+        {/* R3-A2: tablet/capsule packs show a real, computed count (from
+            getRatePerDose's already-parsed rateInfo.total) instead of the
+            raw unit string — clean "10 tablets/strip" regardless of how
+            medicine.unit happens to be worded. Non-tablet packs (syrup/ml
+            or unparseable) fall back to the raw unit string as-is — never
+            a fabricated count for those. */}
+        <span style={{ fontSize: '11px', color: '#666' }}>
+          📦 {rateInfo.unit === 'tablet' && rateInfo.total > 0
+            ? `${rateInfo.total} tablet${rateInfo.total > 1 ? 's' : ''}/strip`
+            : (medicine.unit || 'Per unit')}
+        </span>
+        <span style={{ fontSize: '12px', color: borderColor, fontWeight: '500' }}>₹{rateInfo.perDose}/{rateInfo.unit}</span>
+      </div>
 
-      {/* Badges */}
+      {/* Badges — Generic/Branded always shown (one or the other), plus
+          Jan Aushadhi / Rx / dosage form when present (strength is shown
+          next to the name above, pack size in the rate row above).
+          commission_band is deliberately never surfaced here — internal. */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-        {medicine.is_generic && (
-          <span style={badge('#E8F5E9', '#1A6B3C')}>✓ Generic</span>
-        )}
+        <span style={badge(medicine.is_generic ? '#E8F5E9' : '#F5F5F5', medicine.is_generic ? '#1A6B3C' : '#666666')}>
+          {medicine.is_generic ? '✓ Generic' : 'Branded'}
+        </span>
         {medicine.source === 'janaushadhi' && (
           <span style={badge('#E8F5E9', '#1A6B3C')}>🏥 Jan Aushadhi</span>
         )}
@@ -109,93 +101,17 @@ function MedicineCard({ medicine, type, mrpMode }) {
           <span style={badge('#FFF3E0', '#FF8C00')}>Rx Required</span>
         )}
         {medicine.dosage_form && (
-          <span style={badge('#F5F5F5', '#666')}>{medicine.dosage_form}</span>
+          <span style={badge('#F5F5F5', '#666666')}>{medicine.dosage_form}</span>
         )}
       </div>
 
-      {/* Actions */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-
-        {/* Store + Add buttons */}
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={handleStoresToggle}
-            style={{ flex: 1, padding: '9px', background: showStores ? '#E8F4FF' : '#0C447C', border: 'none', borderRadius: '8px', color: showStores ? '#0C447C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
-          >
-            Store
-            <ChevronDown size={13} color={showStores ? '#0C447C' : '#fff'} style={{ transition: 'transform 0.2s', transform: showStores ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-          </button>
-          <button
-            onClick={handleQuickAdd}
-            style={{ flex: 1, padding: '9px', background: addedSeller ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '8px', color: addedSeller ? '#1A6B3C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
-          >
-            {addLoading ? '...' : addedSeller ? 'Added ✓' : 'Add'}
-          </button>
-        </div>
-
-        {/* Seller list */}
-        {showStores && (
-          <div style={{ borderTop: '1px solid #F0F0F0', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {storesLoading ? (
-              <p style={{ fontSize: '12px', color: '#888', textAlign: 'center', padding: '8px 0', margin: 0 }}>Stores dhundh rahe hain...</p>
-            ) : sellers.length === 0 ? (
-              <p style={{ fontSize: '12px', color: '#888', textAlign: 'center', padding: '8px 0', margin: 0 }}>Yeh medicine kisi store mein abhi available nahi</p>
-            ) : (
-              sellers.map((s, i) => {
-                const store   = s.sellers || {};
-                const isOpen  = store.is_open;
-                const isAdded = addedSeller === store.id;
-                return (
-                  <div key={store.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: '#F8F8F8', borderRadius: '8px' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 3px' }}>{store.store_name || 'Store'}</p>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.price}</span>
-                        {store.rating && <span style={{ fontSize: '11px', color: '#F59E0B' }}>★ {store.rating}</span>}
-                        <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 6px', borderRadius: '99px', fontWeight: '500' }}>
-                          {isOpen ? 'Open' : 'Closed'}
-                        </span>
-                      </div>
-                      <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0' }}>{s.available} units available</p>
-                    </div>
-                    <button
-                      onClick={() => isOpen && !isAdded && handleAddFromSeller(s)}
-                      style={{ padding: '6px 14px', background: isAdded ? '#E8F5EE' : isOpen ? '#1A6B3C' : '#CCCCCC', border: 'none', borderRadius: '6px', color: isAdded ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: isOpen ? 'pointer' : 'not-allowed', fontFamily: 'inherit', flexShrink: 0, marginLeft: '10px' }}
-                    >
-                      {isAdded ? 'Added ✓' : 'Add'}
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* Detail accordion — unchanged */}
-        <button
-          onClick={() => setExpanded((p) => !p)}
-          style={{ width: '100%', padding: '6px', background: 'transparent', border: 'none', color: '#999', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-        >
-          Detail
-          <ChevronDown size={13} color="#999" style={{ transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-        </button>
-
-        {expanded && (
-          <div style={{ borderTop: '1px solid #F0F0F0', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            {med.salt        && <DetailRow label="Salt"      value={med.salt} />}
-            {med.brand       && <DetailRow label="Brand"     value={med.brand} />}
-            {medicine.unit   && <DetailRow label="Pack"      value={medicine.unit} />}
-            {medicine.dosage_form && <DetailRow label="Form" value={medicine.dosage_form} />}
-            {/* Master mrp_max — stale reference under mrp_mode, hidden there (real
-                price is per-seller, see "Store" list above). */}
-            {!mrpMode && (med.price || med.mrp) && <DetailRow label="MRP" value={`₹${med.price || med.mrp}`} />}
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-              {medicine.is_generic             && <span style={badge('#E8F5E9', '#1A6B3C')}>✓ Generic</span>}
-              {medicine.source==='janaushadhi' && <span style={badge('#E8F5E9', '#1A6B3C')}>🏥 Jan Aushadhi</span>}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Add — sole action now, no Store dropdown */}
+      <button
+        onClick={handleQuickAdd}
+        style={{ width: '100%', padding: '10px', background: added ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '8px', color: added ? '#1A6B3C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+      >
+        {addLoading ? 'Add ho raha hai...' : added ? 'Cart Mein Add Ho Gaya ✓' : 'Cart Mein Add Karo'}
+      </button>
     </div>
   );
 }
@@ -203,15 +119,6 @@ function MedicineCard({ medicine, type, mrpMode }) {
 const badge = (bg, color) => ({
   background: bg, color, fontSize: '10px', padding: '2px 8px', borderRadius: '99px', fontWeight: '500',
 });
-
-function DetailRow({ label, value }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-      <span style={{ fontSize: '11px', color: '#AAAAAA', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: '11px', color: '#444444', textAlign: 'right' }}>{value}</span>
-    </div>
-  );
-}
 
 // ─── Section header ───────────────────────────────────────────
 function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
@@ -232,46 +139,24 @@ function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
 }
 
 // ─── PopularCard ──────────────────────────────────────────────
+// R3-A: same no-store-picker redesign as MedicineCard, compact 2-col
+// grid version — Generic/Branded + Rx badges, price + rate/dose, Add.
 function PopularCard({ item, mrpMode }) {
   const { addToCart } = useCart();
-  const [showStores,    setShowStores]    = useState(false);
-  const [sellers,       setSellers]       = useState([]);
-  const [storesLoading, setStoresLoading] = useState(false);
-  const [addedSeller,   setAddedSeller]   = useState(null);
-  const [addLoading,    setAddLoading]    = useState(false);
+  const [added,      setAdded]      = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
   const isEquip = item.type === 'equipment';
 
-  const handleStoresToggle = async () => {
-    if (showStores) { setShowStores(false); return; }
-    setShowStores(true);
-    if (sellers.length > 0) return;
-    setStoresLoading(true);
-    const data = await fetchSellersForMedicine(item.id, mrpMode, item.price);
-    setSellers(data);
-    setStoresLoading(false);
-  };
-
-  // Seller-free cart (R2-C3) — same reasoning as MedicineCard above.
-  const handleAddFromSeller = (s) => {
-    addToCart({ ...item, price: s.price, quantity: 1 });
-    setAddedSeller(s.sellers?.id);
-    setTimeout(() => setAddedSeller(null), 2000);
-  };
-
   const handleQuickAdd = async () => {
-    if (addLoading || addedSeller) return;
-    let sellerList = sellers;
-    if (sellerList.length === 0) {
-      setAddLoading(true);
-      sellerList = await fetchSellersForMedicine(item.id, mrpMode, item.price);
-      setSellers(sellerList);
-      setAddLoading(false);
-    }
+    if (addLoading || added) return;
+    setAddLoading(true);
+    const sellerList = await fetchSellersForMedicine(item.id, mrpMode, item.mrp);
+    setAddLoading(false);
     if (sellerList.length === 0) return;
     const cheapest = sellerList[0];
     addToCart({ ...item, price: cheapest.price, quantity: 1 });
-    setAddedSeller(cheapest.sellers?.id);
-    setTimeout(() => setAddedSeller(null), 2000);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
   };
 
   return (
@@ -279,63 +164,38 @@ function PopularCard({ item, mrpMode }) {
       <div style={{ ...s.popIconBox, backgroundColor: isEquip ? '#EAF2FF' : '#E8F5EE' }}>
         {isEquip ? <Wrench size={18} color="#2563EB" /> : <Pill size={18} color="#1A6B3C" />}
       </div>
-      <p style={s.popName}>{item.name}</p>
+      <p style={s.popName}>
+        {item.name}
+        {item.strength && <span style={{ color: '#888', fontWeight: '500' }}> · {item.strength}</span>}
+      </p>
       <p style={s.popSalt}>{item.salt}</p>
-      {/* item.price is master's mrp_max — stale reference under mrp_mode,
-          hidden there (real price is per-seller, see "Store" list below). */}
-      {!mrpMode && (
-        <div style={s.popFooter}>
-          <span style={s.popPrice}>₹{item.price}</span>
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-        <button
-          onClick={handleStoresToggle}
-          style={{ flex: 1, padding: '6px', background: showStores ? '#E8F4FF' : '#0C447C', border: 'none', borderRadius: '6px', color: showStores ? '#0C447C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-        >
-          Store
-          <ChevronDown size={12} color={showStores ? '#0C447C' : '#fff'} style={{ transition: 'transform 0.2s', transform: showStores ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-        </button>
-        <button
-          onClick={handleQuickAdd}
-          style={{ flex: 1, padding: '6px', background: addedSeller ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '6px', color: addedSeller ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
-        >
-          {addLoading ? '...' : addedSeller ? '✓' : 'Add'}
-        </button>
+      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+        <span style={badge(item.is_generic ? '#E8F5E9' : '#F5F5F5', item.is_generic ? '#1A6B3C' : '#666666')}>
+          {item.is_generic ? 'Generic' : 'Branded'}
+        </span>
+        {item.rxRequired && <span style={badge('#FFF3E0', '#FF8C00')}>Rx</span>}
       </div>
-
-      {showStores && (
-        <div style={{ marginTop: '8px', borderTop: '1px solid #F0F0F0', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {storesLoading ? (
-            <p style={{ fontSize: '11px', color: '#888', textAlign: 'center', margin: 0 }}>Loading...</p>
-          ) : sellers.length === 0 ? (
-            <p style={{ fontSize: '11px', color: '#888', textAlign: 'center', margin: 0 }}>Koi store available nahi</p>
-          ) : (
-            sellers.map((s, i) => {
-              const store   = s.sellers || {};
-              const isOpen  = store.is_open;
-              const isAdded = addedSeller === store.id;
-              return (
-                <div key={store.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', background: '#F0F8F4', borderRadius: '6px' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: '11px', fontWeight: '600', color: '#1A1A1A', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{store.store_name || 'Store'}</p>
-                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A6B3C' }}>₹{s.price}</span>
-                      <span style={{ fontSize: '10px', color: isOpen ? '#1A6B3C' : '#888888', background: isOpen ? '#E8F5EE' : '#F0F0F0', padding: '1px 5px', borderRadius: '99px', fontWeight: '500' }}>{isOpen ? 'Open' : 'Closed'}</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => isOpen && !isAdded && handleAddFromSeller(s)}
-                    style={{ padding: '4px 10px', background: isAdded ? '#E8F5EE' : isOpen ? '#1A6B3C' : '#CCCCCC', border: 'none', borderRadius: '5px', color: isAdded ? '#1A6B3C' : '#fff', fontSize: '11px', fontWeight: '600', cursor: isOpen ? 'pointer' : 'not-allowed', fontFamily: 'inherit', flexShrink: 0, marginLeft: '6px' }}
-                  >
-                    {isAdded ? '✓' : 'Add'}
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
+      {/* item.price = cheapest available seller's real price (mapMedicine,
+          sourced from fetchPopularMedicines' sellerPrice) — same price
+          handleQuickAdd above will actually charge. */}
+      <div style={s.popFooter}>
+        <span style={s.popPrice}>₹{item.price || 0}</span>
+        {item.perDose && <span style={s.popRate}>₹{item.perDose}/{item.doseUnit}</span>}
+      </div>
+      {/* R3-A2: same tablet-count-vs-raw-unit rule as MedicineCard —
+          computed count for tablet packs, raw unit string (or nothing)
+          otherwise, never a fabricated count. */}
+      {item.doseUnit === 'tablet' && item.doseTotal > 0 ? (
+        <p style={s.popPack}>📦 {item.doseTotal} tablet{item.doseTotal > 1 ? 's' : ''}/strip</p>
+      ) : item.rawUnit ? (
+        <p style={s.popPack}>📦 {item.rawUnit}</p>
+      ) : null}
+      <button
+        onClick={handleQuickAdd}
+        style={{ marginTop: '4px', padding: '7px', width: '100%', background: added ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '6px', color: added ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+      >
+        {addLoading ? '...' : added ? 'Added ✓' : 'Add'}
+      </button>
     </div>
   );
 }
@@ -343,6 +203,7 @@ function PopularCard({ item, mrpMode }) {
 // ─── Main Screen ──────────────────────────────────────────────
 export default function MedicineSearch() {
   const navigate = useNavigate();
+  const { cartCount } = useCart();
   const inputRef    = useRef(null);
   const debounceRef = useRef(null);
 
@@ -371,7 +232,8 @@ export default function MedicineSearch() {
       if (data?.length > 0) {
         setPopularMeds(data.map(m => {
           const mapped = mapMedicine(m);
-          return { id: mapped.id, name: mapped.name, salt: mapped.salt, price: mapped.mrp, stores: mapped.stores, type: mapped.type, is_generic: mapped.is_generic };
+          const rateInfo = getRatePerDose(m, mapped.price);
+          return { ...mapped, perDose: rateInfo.perDose, doseUnit: rateInfo.unit, doseTotal: rateInfo.total, rawUnit: m.unit || '' };
         }));
       }
     })();
@@ -585,24 +447,47 @@ export default function MedicineSearch() {
             </div>
           )}
 
-          <div style={{ height: '80px' }} />
+          {/* Clearance for the fixed footer below — taller when the cart
+              bar is also floating (nav + cart bar), so the last list item
+              never ends up hidden underneath it. */}
+          <div style={{ height: cartCount > 0 ? '140px' : '80px' }} />
         </div>
 
-        {/* ── Bottom Nav ── */}
-        <nav style={s.bottomNav}>
-          {NAV_TABS.map(({ id, Icon, label, route }) => {
-            const isActive = activeTab === id;
-            return (
-              <button key={id} style={s.navTab} onClick={() => { setActiveTab(id); navigate(route); }}>
-                <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'} strokeWidth={isActive ? 2.5 : 1.8} />
-                <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA', fontWeight: isActive ? '600' : '400' }}>
-                  {label}
-                </span>
-                {isActive && <span style={s.navDot} />}
-              </button>
-            );
-          })}
-        </nav>
+        {/* ── Fixed footer: cart bar (conditional) + bottom nav ──
+            The page itself scrolls (screen uses minHeight, not height —
+            .body's overflowY:auto never actually clips), so a plain
+            in-flow element only appears at the very bottom of a long
+            list. This whole footer is position:fixed to the viewport
+            instead, centered to the app's own mobile-width container
+            (left:50% + translateX(-50%) + matching maxWidth) rather than
+            the full browser width — always visible regardless of scroll
+            or list length. Cart bar (if shown) stacks directly above the
+            nav via normal flow inside this fixed block, so it never needs
+            to know the nav's exact height. */}
+        <div style={s.fixedFooter}>
+          {cartCount > 0 && (
+            <button style={s.cartBar} onClick={() => navigate('/checkout')}>
+              <ShoppingCart size={16} color="#FFFFFF" />
+              <span style={{ flex: 1, textAlign: 'left' }}>Cart Dekho ({cartCount} items)</span>
+              <span style={s.cartBarArrow}>Checkout →</span>
+            </button>
+          )}
+
+          <nav style={s.bottomNav}>
+            {NAV_TABS.map(({ id, Icon, label, route }) => {
+              const isActive = activeTab === id;
+              return (
+                <button key={id} style={s.navTab} onClick={() => { setActiveTab(id); navigate(route); }}>
+                  <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'} strokeWidth={isActive ? 2.5 : 1.8} />
+                  <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA', fontWeight: isActive ? '600' : '400' }}>
+                    {label}
+                  </span>
+                  {isActive && <span style={s.navDot} />}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
       </div>
     </div>
   );
@@ -637,13 +522,25 @@ const s = {
   popSalt:      { fontSize: '11px', color: '#888888', margin: 0 },
   popFooter:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' },
   popPrice:     { fontSize: '14px', fontWeight: '700', color: '#1A6B3C' },
+  popRate:      { fontSize: '10px', fontWeight: '500', color: '#888888' },
+  popPack:      { fontSize: '10px', color: '#999999', margin: '2px 0 0' },
   addBtn:       { backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   emptyState:   { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '60px 32px', backgroundColor: '#FFFFFF' },
   emptyTitle:   { fontSize: '17px', fontWeight: '700', color: '#333333', margin: 0 },
   emptySubtitle:{ fontSize: '13px', color: '#888888', margin: '0 0 12px', textAlign: 'center' },
   prescBtn:     { width: '100%', padding: '13px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   pharmacistBtn:{ width: '100%', padding: '13px', backgroundColor: '#FFFFFF', color: '#1A6B3C', border: '1.5px solid #1A6B3C', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  bottomNav:    { position: 'sticky', bottom: 0, backgroundColor: '#FFFFFF', borderTop: '1px solid #F0F0F0', display: 'flex', padding: '8px 0 12px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' },
+  // position:fixed to the viewport, centered to the app's own mobile-width
+  // container (not the full browser width) — matches .wrapper/.screen's
+  // width:100%/maxWidth:480px centering so this floats inside the same
+  // column on desktop instead of spanning the whole browser window.
+  fixedFooter:  { position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', zIndex: 50 },
+  bottomNav:    { backgroundColor: '#FFFFFF', borderTop: '1px solid #F0F0F0', display: 'flex', padding: '8px 0 12px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' },
+  // Translucent + blurred (Kumar: "light color transparent type") — content
+  // scrolling underneath stays faintly visible, text stays readable at
+  // this opacity/contrast.
+  cartBar:      { display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: 'rgba(26,107,60,0.88)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', padding: '10px 16px', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: '#FFFFFF', fontSize: '13px', fontWeight: '700', width: '100%', boxShadow: '0 -2px 12px rgba(0,0,0,0.12)' },
+  cartBarArrow: { fontSize: '13px', fontWeight: '600', color: '#C8F5D8', flexShrink: 0 },
   navTab:       { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', position: 'relative', fontFamily: 'inherit' },
   navLabel:     { fontSize: '10px' },
   navDot:       { position: 'absolute', top: '-8px', width: '20px', height: '3px', backgroundColor: '#1A6B3C', borderRadius: '2px' },
