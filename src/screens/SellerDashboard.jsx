@@ -663,20 +663,45 @@ export default function SellerDashboard() {
 
   const declineOrderImpl = async (orderId) => {
     const declinedOrder = pendingOrders.find((o) => o.id === orderId);
-    const { error } = await supabase
-      .from('orders').update({ status: 'cancelled' }).eq('id', orderId);
-    if (!error) {
-      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
-      if (declinedOrder) {
+
+    // B2B (this seller is the wholesaler being asked to fulfil a
+    // retailer's purchase order) — left exactly as before, cancel-only.
+    // R2-E's reassign chain is a retailer-routing concept
+    // (get_routing_candidates/advance_order_routing both key off
+    // delivery_pincode + retailer sellers) that doesn't apply here.
+    if (declinedOrder?.buyer_type === 'retailer') {
+      const { error } = await supabase
+        .from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+      if (!error) {
+        setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
         supabase.rpc('create_notification', {
           p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
           p_type: 'order_cancelled', p_ref_id: orderId,
         }).then(({ error }) => { if (error) console.warn('[notify decline]', error); });
+        if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
+      } else {
+        console.error('declineOrder failed:', error);
+        alert('Order decline nahi hua: ' + (error.message || 'Unknown error'));
       }
+      return;
+    }
+
+    // B2C (R2-E) — reject moves the order to the next routing candidate
+    // (or flags it for admin if none are left); the order itself is
+    // never cancelled. Reason is optional and never blocks the decline
+    // either way — same "Cancel/empty = no reason recorded, action still
+    // proceeds" idiom as SuperAdminPanel.jsx's seller/pharmacist
+    // registration-reject prompts.
+    const reason = window.prompt('Kyun reject? (optional)')?.trim() || null;
+    const { data: result, error } = await supabase.rpc('advance_order_routing', {
+      p_order_id: orderId, p_result: 'rejected', p_reason: reason,
+    });
+    if (!error && result?.success) {
+      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
       if (sellerData?.id) await fetchAllOrders(sellerData.id, orderFilter);
     } else {
-      console.error('declineOrder failed:', error);
-      alert('Order decline nahi hua: ' + (error.message || 'Unknown error'));
+      console.error('declineOrder failed:', error || result?.message);
+      alert('Order decline nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
     }
   };
 

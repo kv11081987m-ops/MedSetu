@@ -203,27 +203,9 @@ export default function Checkout() {
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [mrpMode, setMrpMode] = useState(false);
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
-  const [fulfilledByLabel, setFulfilledByLabel] = useState('MedSetu');
 
   useEffect(() => {
     fetchMrpMode().then(setMrpMode);
-  }, []);
-
-  // ── Fetch "Fulfilled by" label — kept as its own isolated query since
-  // platform_settings.fulfilled_by_label doesn't exist yet (no migration
-  // in this change); a column-not-found error here must not break the
-  // delivery-charge/routing-timeout fetch above, so it's not bundled into
-  // that .select(). Falls back to the 'MedSetu' default on any error.
-  useEffect(() => {
-    supabase
-      .from('platform_settings')
-      .select('fulfilled_by_label')
-      .eq('id', 1)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!error && data?.fulfilled_by_label) setFulfilledByLabel(data.fulfilled_by_label);
-      })
-      .catch(() => {});
   }, []);
 
   // ── Fetch platform delivery settings ──────────────────────
@@ -550,21 +532,6 @@ export default function Checkout() {
 
         {/* ── Body ── */}
         <div style={s.body}>
-
-          {/* Fulfilled-by Banner — R2-C3: cart is seller-free, routing
-              (get_routing_candidates) assigns the seller at checkout, so
-              there's no store to name or "Change" anymore. */}
-          <div style={s.storeBanner}>
-            <div style={s.storeLeft}>
-              <div style={s.storeIconBox}>
-                <Store size={18} color="#1A6B3C" />
-              </div>
-              <div>
-                <p style={s.storeName}>Fulfilled by {fulfilledByLabel}</p>
-                <p style={s.storeAddr}>Aapke pincode ke nearest available store se</p>
-              </div>
-            </div>
-          </div>
 
           {/* Cart Items */}
           {items.length > 0 ? (
@@ -905,41 +872,6 @@ const s = {
     padding: '12px',
   },
 
-  // Store banner
-  storeBanner: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: '14px',
-    padding: '14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    boxShadow: '0 1px 5px rgba(0,0,0,0.05)',
-  },
-  storeLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  storeIconBox: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '10px',
-    backgroundColor: '#E8F5EE',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  storeName: {
-    fontSize: '13px',
-    fontWeight: '700',
-    color: '#1A1A1A',
-    margin: 0,
-  },
-  storeAddr: {
-    fontSize: '12px',
-    color: '#888888',
-    margin: 0,
-  },
   changeLink: {
     background: 'none',
     border: 'none',

@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import {
   ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
-  Search, Home, ShoppingBag, User, RefreshCw, ShoppingCart,
+  Search, RefreshCw,
 } from 'lucide-react';
 import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp, fetchMrpMode } from '../lib/api';
+import MedicineCard, { badge } from '../components/MedicineCard';
+import CartBar from '../components/CartBar';
+import BottomNav from '../components/BottomNav';
 
 const INITIAL_RECENT = [
   'Paracetamol 500mg', 'BP Machine', 'Crocin 650mg', 'ORS Powder',
@@ -13,112 +16,6 @@ const INITIAL_RECENT = [
 
 const FILTERS = ['Sab', 'Tablets', 'Syrup', 'Injection', 'Equipment', 'Ayurvedic', 'Generic', 'Branded'];
 const filterKey = { Tablets: 'tablet', Syrup: 'syrup', Equipment: 'equipment', Injection: 'injection', Ayurvedic: 'ayurvedic' };
-
-// ─── MedicineCard ─────────────────────────────────────────────
-// R3-A: no store picker anymore (routing assigns the fulfilling seller
-// at checkout, R2-C2/C3) — this card shows medicine detail + a real,
-// seller-grounded price/rate straight away, and a single Add button.
-function MedicineCard({ medicine, type, mrpMode }) {
-  const { addToCart } = useCart();
-  const med      = mapMedicine(medicine);
-  const rateInfo = getRatePerDose(medicine, med.price);
-  const [added,      setAdded]      = useState(false);
-  const [addLoading, setAddLoading] = useState(false);
-
-  const borderColor = type === 'janaushadhi' ? '#1A6B3C'
-                    : type === 'generic'      ? '#2563EB'
-                    : '#FF8C00';
-
-  // Still a live fetch at add-time (stock/price can have moved since this
-  // card's data loaded) — picks the cheapest currently-available seller,
-  // same as before R3-A, just without a dropdown to cache it in.
-  const handleQuickAdd = async () => {
-    if (addLoading || added) return;
-    setAddLoading(true);
-    const sellerList = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
-    setAddLoading(false);
-    if (sellerList.length === 0) return;
-    const cheapest = sellerList[0];
-    addToCart({ ...med, price: cheapest.price, quantity: 1 });
-    setAdded(true);
-    setTimeout(() => setAdded(false), 2000);
-  };
-
-  return (
-    <div style={{ background: '#fff', borderRadius: '12px', padding: '14px 16px', marginBottom: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderLeft: `3px solid ${borderColor}` }}>
-
-      {/* Name / strength / brand / salt + price */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontWeight: '600', fontSize: '14px', color: '#1A1A1A', margin: '0 0 2px', lineHeight: '1.3' }}>
-            {med.name}
-            {med.strength && <span style={{ color: '#888', fontWeight: '500' }}> · {med.strength}</span>}
-          </p>
-          {med.brand  && <p style={{ color: '#666', fontSize: '12px', margin: '0 0 1px' }}>{med.brand}</p>}
-          {med.salt   && <p style={{ color: '#888', fontSize: '11px', margin: 0 }}>{med.salt.substring(0, 60)}</p>}
-        </div>
-        {/* med.price = cheapest available seller's real price (mapMedicine,
-            sourced from searchMedicines' sellerPrice) — same price
-            handleQuickAdd below will actually charge, in both mrp_mode
-            states. No longer master's stale mrp_max, no longer hidden
-            under mrp_mode. */}
-        <div style={{ textAlign: 'right', marginLeft: '12px', flexShrink: 0 }}>
-          <p style={{ color: '#AAAAAA', fontSize: '10px', margin: '0 0 1px' }}>Price</p>
-          <p style={{ color: borderColor, fontWeight: '700', fontSize: '16px', margin: 0 }}>₹{med.price || 0}</p>
-        </div>
-      </div>
-
-      {/* Rate per dose — now divides the same seller-grounded med.price
-          (getRatePerDose's priceOverride) instead of master mrp_max, so
-          it's correct in both mrp_mode states — no longer hidden. */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#F8F8F8', borderRadius: '6px', marginBottom: '10px' }}>
-        {/* R3-A2: tablet/capsule packs show a real, computed count (from
-            getRatePerDose's already-parsed rateInfo.total) instead of the
-            raw unit string — clean "10 tablets/strip" regardless of how
-            medicine.unit happens to be worded. Non-tablet packs (syrup/ml
-            or unparseable) fall back to the raw unit string as-is — never
-            a fabricated count for those. */}
-        <span style={{ fontSize: '11px', color: '#666' }}>
-          📦 {rateInfo.unit === 'tablet' && rateInfo.total > 0
-            ? `${rateInfo.total} tablet${rateInfo.total > 1 ? 's' : ''}/strip`
-            : (medicine.unit || 'Per unit')}
-        </span>
-        <span style={{ fontSize: '12px', color: borderColor, fontWeight: '500' }}>₹{rateInfo.perDose}/{rateInfo.unit}</span>
-      </div>
-
-      {/* Badges — Generic/Branded always shown (one or the other), plus
-          Jan Aushadhi / Rx / dosage form when present (strength is shown
-          next to the name above, pack size in the rate row above).
-          commission_band is deliberately never surfaced here — internal. */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-        <span style={badge(medicine.is_generic ? '#E8F5E9' : '#F5F5F5', medicine.is_generic ? '#1A6B3C' : '#666666')}>
-          {medicine.is_generic ? '✓ Generic' : 'Branded'}
-        </span>
-        {medicine.source === 'janaushadhi' && (
-          <span style={badge('#E8F5E9', '#1A6B3C')}>🏥 Jan Aushadhi</span>
-        )}
-        {med.rxRequired && (
-          <span style={badge('#FFF3E0', '#FF8C00')}>Rx Required</span>
-        )}
-        {medicine.dosage_form && (
-          <span style={badge('#F5F5F5', '#666666')}>{medicine.dosage_form}</span>
-        )}
-      </div>
-
-      {/* Add — sole action now, no Store dropdown */}
-      <button
-        onClick={handleQuickAdd}
-        style={{ width: '100%', padding: '10px', background: added ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '8px', color: added ? '#1A6B3C' : '#fff', fontSize: '13px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
-      >
-        {addLoading ? 'Add ho raha hai...' : added ? 'Cart Mein Add Ho Gaya ✓' : 'Cart Mein Add Karo'}
-      </button>
-    </div>
-  );
-}
-
-const badge = (bg, color) => ({
-  background: bg, color, fontSize: '10px', padding: '2px 8px', borderRadius: '99px', fontWeight: '500',
-});
 
 // ─── Section header ───────────────────────────────────────────
 function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
@@ -210,7 +107,6 @@ export default function MedicineSearch() {
   const [query, setQuery]             = useState('');
   const [activeFilter, setActiveFilter] = useState('Sab');
   const [recent, setRecent]           = useState(INITIAL_RECENT);
-  const [activeTab, setActiveTab]     = useState('search');
   const [popularMeds, setPopularMeds] = useState([]);
   const [searchResults, setSearchResults] = useState({ branded: [], generic: [], janaushadhi: [] });
   const [searchLoading, setSearchLoading] = useState(false);
@@ -276,13 +172,6 @@ export default function MedicineSearch() {
 
   const isSearching = query.trim().length >= 2;
   const hasResults  = searchResults.janaushadhi.length > 0 || searchResults.generic.length > 0 || searchResults.branded.length > 0;
-
-  const NAV_TABS = [
-    { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
-    { id: 'search',  Icon: Search,      label: 'Search',  route: '/medicine-search' },
-    { id: 'orders',  Icon: ShoppingBag, label: 'Orders',  route: '/orders' },
-    { id: 'profile', Icon: User,        label: 'Profile', route: '/profile' },
-  ];
 
   return (
     <div style={s.wrapper}>
@@ -453,41 +342,21 @@ export default function MedicineSearch() {
           <div style={{ height: cartCount > 0 ? '140px' : '80px' }} />
         </div>
 
-        {/* ── Fixed footer: cart bar (conditional) + bottom nav ──
+        {/* ── Cart bar + shared bottom-nav (R3-C3) ──
             The page itself scrolls (screen uses minHeight, not height —
             .body's overflowY:auto never actually clips), so a plain
             in-flow element only appears at the very bottom of a long
-            list. This whole footer is position:fixed to the viewport
-            instead, centered to the app's own mobile-width container
-            (left:50% + translateX(-50%) + matching maxWidth) rather than
-            the full browser width — always visible regardless of scroll
-            or list length. Cart bar (if shown) stacks directly above the
-            nav via normal flow inside this fixed block, so it never needs
-            to know the nav's exact height. */}
-        <div style={s.fixedFooter}>
-          {cartCount > 0 && (
-            <button style={s.cartBar} onClick={() => navigate('/checkout')}>
-              <ShoppingCart size={16} color="#FFFFFF" />
-              <span style={{ flex: 1, textAlign: 'left' }}>Cart Dekho ({cartCount} items)</span>
-              <span style={s.cartBarArrow}>Checkout →</span>
-            </button>
-          )}
-
-          <nav style={s.bottomNav}>
-            {NAV_TABS.map(({ id, Icon, label, route }) => {
-              const isActive = activeTab === id;
-              return (
-                <button key={id} style={s.navTab} onClick={() => { setActiveTab(id); navigate(route); }}>
-                  <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'} strokeWidth={isActive ? 2.5 : 1.8} />
-                  <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA', fontWeight: isActive ? '600' : '400' }}>
-                    {label}
-                  </span>
-                  {isActive && <span style={s.navDot} />}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+            list. Both CartBar and BottomNav are independently
+            position:fixed to the viewport (not nested inside one shared
+            fixed wrapper — nesting fixed-in-fixed has containing-block
+            quirks) — CartBar sits at a fixed offset (~nav height) above
+            BottomNav, which self-positions at bottom:0. */}
+        <CartBar
+          cartCount={cartCount}
+          onClick={() => navigate('/checkout')}
+          style={{ position: 'fixed', bottom: '58px', left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', zIndex: 49 }}
+        />
+        <BottomNav />
       </div>
     </div>
   );
@@ -530,18 +399,4 @@ const s = {
   emptySubtitle:{ fontSize: '13px', color: '#888888', margin: '0 0 12px', textAlign: 'center' },
   prescBtn:     { width: '100%', padding: '13px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   pharmacistBtn:{ width: '100%', padding: '13px', backgroundColor: '#FFFFFF', color: '#1A6B3C', border: '1.5px solid #1A6B3C', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  // position:fixed to the viewport, centered to the app's own mobile-width
-  // container (not the full browser width) — matches .wrapper/.screen's
-  // width:100%/maxWidth:480px centering so this floats inside the same
-  // column on desktop instead of spanning the whole browser window.
-  fixedFooter:  { position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px', zIndex: 50 },
-  bottomNav:    { backgroundColor: '#FFFFFF', borderTop: '1px solid #F0F0F0', display: 'flex', padding: '8px 0 12px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' },
-  // Translucent + blurred (Kumar: "light color transparent type") — content
-  // scrolling underneath stays faintly visible, text stays readable at
-  // this opacity/contrast.
-  cartBar:      { display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: 'rgba(26,107,60,0.88)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', padding: '10px 16px', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: '#FFFFFF', fontSize: '13px', fontWeight: '700', width: '100%', boxShadow: '0 -2px 12px rgba(0,0,0,0.12)' },
-  cartBarArrow: { fontSize: '13px', fontWeight: '600', color: '#C8F5D8', flexShrink: 0 },
-  navTab:       { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', position: 'relative', fontFamily: 'inherit' },
-  navLabel:     { fontSize: '10px' },
-  navDot:       { position: 'absolute', top: '-8px', width: '20px', height: '3px', backgroundColor: '#1A6B3C', borderRadius: '2px' },
 };

@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchOrders, mapOrder, updateOrderStatus } from '../lib/orders';
+import BottomNav from '../components/BottomNav';
 import {
   ArrowLeft, SlidersHorizontal, Search, CheckCircle,
   Clock, XCircle, RefreshCw, ChevronRight,
-  ShoppingBag, MapPin, Home, User, RotateCcw,
+  ShoppingBag, MapPin, RotateCcw,
   Banknote, Smartphone, FileText,
 } from 'lucide-react';
 
@@ -298,28 +299,8 @@ export default function OrderHistory() {
           <div style={{ height: '80px' }} />
         </div>
 
-        {/* ── Bottom Nav ── */}
-        <nav style={s.bottomNav}>
-          {[
-            { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
-            { id: 'search',  Icon: Search,      label: 'Search',  route: '/medicine-search' },
-            { id: 'orders',  Icon: ShoppingBag, label: 'Orders',  route: '/orders' },
-            { id: 'profile', Icon: User,        label: 'Profile', route: '/profile' },
-          ].map(({ id, Icon, label, route }) => {
-            const isActive = id === 'orders';
-            return (
-              <button key={id} style={s.navTab} onClick={() => navigate(route)}>
-                <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'}
-                  strokeWidth={isActive ? 2.5 : 1.8} />
-                <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA',
-                  fontWeight: isActive ? '600' : '400' }}>
-                  {label}
-                </span>
-                {isActive && <span style={s.navDot} />}
-              </button>
-            );
-          })}
-        </nav>
+        {/* ── Bottom Nav (shared, R3-C3) ── */}
+        <BottomNav />
       </div>
     </div>
   );
@@ -713,38 +694,5 @@ const s = {
     fontWeight: '700',
     cursor: 'pointer',
     fontFamily: 'inherit',
-  },
-
-  // Bottom nav
-  bottomNav: {
-    position: 'sticky',
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    borderTop: '1px solid #F0F0F0',
-    display: 'flex',
-    padding: '8px 0 12px',
-    boxShadow: '0 -4px 16px rgba(0,0,0,0.06)',
-  },
-  navTab: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '3px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '4px 0',
-    position: 'relative',
-    fontFamily: 'inherit',
-  },
-  navLabel: { fontSize: '10px' },
-  navDot: {
-    position: 'absolute',
-    top: '-8px',
-    width: '20px',
-    height: '3px',
-    backgroundColor: '#1A6B3C',
-    borderRadius: '2px',
   },
 };

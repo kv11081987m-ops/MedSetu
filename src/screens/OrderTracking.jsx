@@ -4,10 +4,10 @@ import { fetchOrderById } from '../lib/orders';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import BottomNav from '../components/BottomNav';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
-  MapPin, Package, IndianRupee, CreditCard, Store,
-  Home, Search, ShoppingBag, User, X,
+  MapPin, Package, IndianRupee, CreditCard, Store, X,
 } from 'lucide-react';
 
 // ─── Steps ────────────────────────────────────────────────────
@@ -62,23 +62,15 @@ function getEtaBanner(status) {
 }
 
 function buildSteps(order) {
-  const storeName  = order?.sellers?.store_name || 'Store';
   const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;
   const fmt        = (d) => d ? formatIST(d, { hour: '2-digit', minute: '2-digit' }) : '- -';
   return [
-    { id: 1, title: 'Order Confirm Hua',    sub: `${storeName} ne accept kiya`,           time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
+    { id: 1, title: 'Order Confirm Hua',    sub: 'Order Accept Ho Gaya',                   time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
     { id: 2, title: 'Taiyari Ho Rahi Hai',  sub: 'Store aapki medicine pack kar raha hai', time: '- -',                   state: activeStep > 2 ? 'done' : activeStep === 2 ? 'active' : 'pending' },
     { id: 3, title: 'Delivery Pe Hai',      sub: 'Delivery boy aapke paas aa raha hai',    time: 'Expected soon',         state: activeStep > 3 ? 'done' : activeStep === 3 ? 'active' : 'pending' },
     { id: 4, title: 'Deliver Ho Gaya',      sub: 'Order aapko mil gaya',                   time: '- -',                   state: activeStep >= 4 ? 'done' : 'pending' },
   ];
 }
-
-const NAV_TABS = [
-  { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
-  { id: 'search',  Icon: Search,      label: 'Search',  route: '/medicine-search' },
-  { id: 'orders',  Icon: ShoppingBag, label: 'Orders',  route: '/orders' },
-  { id: 'profile', Icon: User,        label: 'Profile', route: '/profile' },
-];
 
 // ─── Step circle ──────────────────────────────────────────────
 function StepCircle({ state }) {
@@ -132,7 +124,6 @@ export default function OrderTracking() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
-  const [activeTab]                 = useState('orders');
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
 
   useEffect(() => {
@@ -193,26 +184,28 @@ export default function OrderTracking() {
 
   if (!loading && !orderId) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', backgroundColor: '#F5F5F5' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px 32px 100px', backgroundColor: '#F5F5F5' }}>
         <Package size={52} color="#CCCCCC" />
         <p style={{ fontSize: '16px', fontWeight: '700', color: '#333333', margin: 0 }}>Order nahi mila</p>
         <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Orders page se kisi order ko track karo</p>
         <button style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => navigate('/orders')}>
           Orders Dekho
         </button>
+        <BottomNav />
       </div>
     );
   }
 
   if (!loading && orderId && !order) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', backgroundColor: '#F5F5F5' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px 32px 100px', backgroundColor: '#F5F5F5' }}>
         <Package size={52} color="#CCCCCC" />
         <p style={{ fontSize: '16px', fontWeight: '700', color: '#333333', margin: 0 }}>Yeh order nahi mila</p>
         <p style={{ fontSize: '13px', color: '#888888', margin: 0, textAlign: 'center' }}>Shayad purana ya delete ho gaya. Order History se dekhein.</p>
         <button style={{ padding: '13px 28px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => navigate('/orders')}>
           Order History Dekho
         </button>
+        <BottomNav />
       </div>
     );
   }
@@ -250,6 +243,7 @@ export default function OrderTracking() {
             <button style={s.goHomeBtn} onClick={() => navigate('/home')}>Home Jaao</button>
           </div>
         </div>
+        <BottomNav />
       </div>
     );
   }
@@ -386,7 +380,7 @@ export default function OrderTracking() {
               <button style={s.detailLink}>Order Details Dekho</button>
             </div>
             {[
-              { Icon: Store,       text: order?.sellers?.store_name || 'Medical Store' },
+              { Icon: Store,       text: `Fulfilled by ${order?.sellers?.store_name || 'a verified pharmacy'}` },
               { Icon: Package,     text: `${(order?.order_items || []).length || '—'} items` },
               { Icon: IndianRupee, text: order ? `₹${parseFloat(order.final_amount || 0).toLocaleString('en-IN')}` : '—' },
               { Icon: CreditCard,  text: order?.payment_method === 'cod' ? 'Cash on Delivery' : (order?.payment_method || 'COD') },
@@ -430,24 +424,8 @@ export default function OrderTracking() {
           <div style={{ height: '80px' }} />
         </div>
 
-        {/* ── Bottom Nav ── */}
-        <nav style={s.bottomNav}>
-          {NAV_TABS.map(({ id, Icon, label, route }) => {
-            const isActive = activeTab === id;
-            return (
-              <button key={id} style={s.navTab}
-                onClick={() => navigate(route)}>
-                <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'}
-                  strokeWidth={isActive ? 2.5 : 1.8} />
-                <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA',
-                  fontWeight: isActive ? '600' : '400' }}>
-                  {label}
-                </span>
-                {isActive && <span style={s.navDot} />}
-              </button>
-            );
-          })}
-        </nav>
+        {/* ── Bottom Nav (shared, R3-C3) ── */}
+        <BottomNav />
 
         {/* Cancel Dialog */}
         {showCancel && (
@@ -905,7 +883,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '14px',
-    padding: '40px 24px',
+    padding: '40px 24px 100px',
     backgroundColor: '#F5F5F5',
   },
   cancelledIcon: {
@@ -948,38 +926,5 @@ const s = {
     cursor: 'pointer',
     fontFamily: 'inherit',
     marginTop: '8px',
-  },
-
-  // Bottom nav
-  bottomNav: {
-    position: 'sticky',
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    borderTop: '1px solid #F0F0F0',
-    display: 'flex',
-    padding: '8px 0 12px',
-    boxShadow: '0 -4px 16px rgba(0,0,0,0.06)',
-  },
-  navTab: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '3px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '4px 0',
-    position: 'relative',
-    fontFamily: 'inherit',
-  },
-  navLabel: { fontSize: '10px' },
-  navDot: {
-    position: 'absolute',
-    top: '-8px',
-    width: '20px',
-    height: '3px',
-    backgroundColor: '#1A6B3C',
-    borderRadius: '2px',
   },
 };

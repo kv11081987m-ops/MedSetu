@@ -3,9 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, HelpCircle, Info, Upload, Camera, Image,
   FileText, CheckCircle, X, AlertCircle, Stethoscope,
-  Calendar, Home, Search, ShoppingBag, User, Check,
+  Calendar, Home, ShoppingBag, Check,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import BottomNav from '../components/BottomNav';
 
 // Module-level (NOT React state) — persists across SPA remounts of this
 // screen within the same page-load, but resets when the module
@@ -26,13 +27,6 @@ import { supabase } from '../lib/supabase';
 // production builds, and the camera-kill scenario only happens on real
 // phones anyway).
 let hasMountedThisPageLoad = false;
-
-const NAV_TABS = [
-  { id: 'home',    Icon: Home,        label: 'Home',   route: '/home' },
-  { id: 'search',  Icon: Search,      label: 'Search', route: '/medicine-search' },
-  { id: 'orders',  Icon: ShoppingBag, label: 'Orders', route: '/orders' },
-  { id: 'profile', Icon: User,        label: 'Profile',route: '/profile' },
-];
 
 // ─── Success Screen ───────────────────────────────────────────
 // returnTo present = came from checkout mid-order — primary action must
@@ -81,7 +75,6 @@ export default function PrescriptionUpload() {
   const [submitting, setSubmitting] = useState(false);
   const [rxNumber, setRxNumber]   = useState('');
   const [uploadedUrl, setUploadedUrl] = useState('');
-  const [activeTab, setActiveTab] = useState('');
   const [delivery, setDelivery]   = useState('home');
   const [selectedStore, setSelectedStore] = useState('');
   const [realStores, setRealStores] = useState([]);
@@ -233,6 +226,7 @@ export default function PrescriptionUpload() {
             onHome={() => { clearReturnTo(); navigate('/home'); }}
           />
         </div>
+        <BottomNav onNavigate={clearReturnTo} />
       </div>
     );
   }
@@ -488,25 +482,8 @@ export default function PrescriptionUpload() {
           <div style={{ height: '80px' }} />
         </div>
 
-        {/* ── Bottom Nav ── */}
-        <nav style={s.bottomNav}>
-          {NAV_TABS.map(({ id, Icon, label, route }) => {
-            const isActive = activeTab === id;
-            return (
-              <button
-                key={id}
-                style={s.navTab}
-                onClick={() => { clearReturnTo(); setActiveTab(id); navigate(route); }}
-              >
-                <Icon size={22} color={isActive ? '#1A6B3C' : '#AAAAAA'} strokeWidth={isActive ? 2.5 : 1.8} />
-                <span style={{ ...s.navLabel, color: isActive ? '#1A6B3C' : '#AAAAAA', fontWeight: isActive ? '600' : '400' }}>
-                  {label}
-                </span>
-                {isActive && <span style={s.navDot} />}
-              </button>
-            );
-          })}
-        </nav>
+        {/* ── Bottom Nav (shared, R3-C3) ── */}
+        <BottomNav onNavigate={clearReturnTo} />
       </div>
     </div>
   );
@@ -581,7 +558,7 @@ const s = {
 
   submitBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '16px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '14px', fontSize: '15px', fontWeight: '700', fontFamily: 'inherit', transition: 'opacity 0.2s ease' },
 
-  successWrap:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', gap: '16px', backgroundColor: '#F5F5F5' },
+  successWrap:     { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px 100px', gap: '16px', backgroundColor: '#F5F5F5' },
   successIconRing: { width: '120px', height: '120px', borderRadius: '60px', backgroundColor: '#E8F5EE', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px' },
   successTitle:    { fontSize: '22px', fontWeight: '800', color: '#1A1A1A', textAlign: 'center', margin: 0 },
   orderIdBox:      { backgroundColor: '#FFFFFF', border: '1.5px dashed #1A6B3C', borderRadius: '10px', padding: '10px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
@@ -591,9 +568,4 @@ const s = {
   returnMsg:       { fontSize: '13px', fontWeight: '600', color: '#1A6B3C', backgroundColor: '#F0FDF4', padding: '8px 14px', borderRadius: '10px', textAlign: 'center', margin: 0 },
   trackBtn:        { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '15px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '14px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', marginTop: '8px' },
   homeBtn:         { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '15px', backgroundColor: '#FFFFFF', color: '#1A6B3C', border: '1.5px solid #1A6B3C', borderRadius: '14px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
-
-  bottomNav: { position: 'sticky', bottom: 0, backgroundColor: '#FFFFFF', borderTop: '1px solid #F0F0F0', display: 'flex', padding: '8px 0 12px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' },
-  navTab:    { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', position: 'relative', fontFamily: 'inherit' },
-  navLabel:  { fontSize: '10px' },
-  navDot:    { position: 'absolute', top: '-8px', width: '20px', height: '3px', backgroundColor: '#1A6B3C', borderRadius: '2px' },
 };

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import BottomNav from '../components/BottomNav';
 import {
   ArrowLeft, Pencil, Camera, User, Phone, Mail,
   Home, Briefcase, Heart, AlertCircle, Activity,
@@ -187,9 +188,13 @@ export default function UserProfile() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' }}>
         <p style={{ color: '#888888', fontSize: '14px' }}>Profile load ho rahi hai...</p>
+        <BottomNav />
       </div>
     );
   }
+  // !userData ("please login") deliberately has no nav below — every nav
+  // tab is a ProtectedRoute(customer) route that would just bounce this
+  // unauthenticated session straight back here.
   if (!userData) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', backgroundColor: '#F5F5F5' }}>
@@ -457,8 +462,11 @@ export default function UserProfile() {
 
           <p style={s.version}>MedSetu v1.0.0 · Made with ❤️ in India</p>
 
-          <div style={{ height: '24px' }} />
+          <div style={{ height: '90px' }} />
         </div>
+
+        {/* ── Bottom Nav (shared, R3-C3) ── */}
+        <BottomNav />
 
         {/* ── Add Address Sheet ── */}
         {showAddAddress && (

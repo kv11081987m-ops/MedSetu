@@ -11,9 +11,8 @@ import UnifiedLogin        from './screens/UnifiedLogin';
 import OTPScreen           from './screens/OTPScreen';
 import CustomerHome        from './screens/CustomerHome';
 import SellerDashboard     from './screens/SellerDashboard';
-import StoreLocator        from './screens/StoreLocator';
-import CustomerStoreInventory from './screens/CustomerStoreInventory';
 import MedicineSearch      from './screens/MedicineSearch';
+import CategoriesScreen    from './screens/CategoriesScreen';
 import PrescriptionUpload  from './screens/PrescriptionUpload';
 import Checkout            from './screens/Checkout';
 import OrderTracking       from './screens/OrderTracking';
@@ -184,9 +183,8 @@ function AppRoutes() {
 
         {/* ── Customer (protected) ── */}
         <Route path="/home"            element={<ProtectedRoute allowedRoles={['customer']}><CustomerHome /></ProtectedRoute>} />
-        <Route path="/store-locator"   element={<ProtectedRoute allowedRoles={['customer']}><StoreLocator /></ProtectedRoute>} />
-        <Route path="/store-inventory" element={<ProtectedRoute allowedRoles={['customer']}><CustomerStoreInventory /></ProtectedRoute>} />
         <Route path="/medicine-search" element={<ProtectedRoute allowedRoles={['customer']}><MedicineSearch /></ProtectedRoute>} />
+        <Route path="/categories"      element={<ProtectedRoute allowedRoles={['customer']}><CategoriesScreen /></ProtectedRoute>} />
         <Route path="/prescription"    element={<ProtectedRoute allowedRoles={['customer']}><PrescriptionUpload /></ProtectedRoute>} />
         <Route path="/checkout"        element={<ProtectedRoute allowedRoles={['customer']}><Checkout /></ProtectedRoute>} />
         <Route path="/order-tracking"  element={<ProtectedRoute allowedRoles={['customer']}><OrderTracking /></ProtectedRoute>} />

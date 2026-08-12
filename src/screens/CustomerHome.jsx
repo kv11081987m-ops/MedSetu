@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchSellers, fetchMrpMode } from '../lib/api';
+import { fetchMrpMode, fetchPopularMedicines } from '../lib/api';
 import { useCart } from '../context/CartContext';
 import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import MedicineCard from '../components/MedicineCard';
+import BottomNav from '../components/BottomNav';
 import {
-  Bell, MapPin, ChevronDown, Search,
-  FileText, Clock, Star, CheckCircle,
-  Home, ShoppingBag, User, Pill, ShoppingCart,
+  Bell, MapPin, Search, Camera,
+  Pill, ShoppingCart,
+  Droplet, Leaf, Phone, Calendar,
 } from 'lucide-react';
 
 // ─── Notification helpers ─────────────────────────────────────
@@ -21,91 +23,21 @@ const NOTIF_COLORS = {
 };
 const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 
-// ─── Dummy fallback stores ────────────────────────────────────
-
-const CATEGORIES = [
-  'Sab', 'Medicines', 'Equipment', 'Surgical', 'Ayurvedic', 'Baby Care',
+// R3-C1: colourful horizontal service tabs — each its own MedSetu-palette
+// colour. Allopath is the only one with real content (best-selling
+// medicines below, shared MedicineCard); the rest show a "Jald Aa Raha
+// Hai" placeholder via `desc`. The two-pane left-rail version of this
+// (R3-C1-purana) was the wrong screen — that's Categories (R3-C2), not
+// Home — this replaces it outright.
+const SERVICE_TABS = [
+  { id: 'allopath',    label: 'Allopath',         Icon: Pill,     color: '#1A6B3C', bg: '#E8F5EE', desc: null },
+  { id: 'homeopath',   label: 'Homeopath',        Icon: Droplet,  color: '#0C447C', bg: '#EAF2FF', desc: 'Yeh feature jald available hoga' },
+  { id: 'ayurved',     label: 'Ayurved',          Icon: Leaf,     color: '#E0A818', bg: '#FFF8E1', desc: 'Yeh feature jald available hoga' },
+  { id: 'pharmacist',  label: 'Call Pharmacist',  Icon: Phone,    color: '#F26C0A', bg: '#FFF1E8', desc: 'Yeh feature jald available hoga' },
+  { id: 'appointment', label: 'Book Appointment', Icon: Calendar, color: '#7C3AED', bg: '#F3EEFF', desc: 'Yeh feature jald available hoga' },
 ];
-
-
-// R2-C3: "Store Dhundho" hidden — cart/checkout is seller-free now, routing
-// (get_routing_candidates) picks the fulfilling seller, so customer
-// store-picking has no effect on the order anymore. Screens themselves
-// (StoreLocator/CustomerStoreInventory) stay for now — full removal is R3.
-// { label: 'Store Dhundho', Icon: MapPin, bg: '#E8F5EE', color: '#1A6B3C', route: '/store-locator' },
-const QUICK_ACTIONS = [
-  { label: 'Prescription Upload', Icon: FileText,  bg: '#EAF2FF', color: '#2563EB', route: '/prescription' },
-  { label: 'Medicine Order',      Icon: Pill,      bg: '#FFF3E8', color: '#EA6C00', route: '/medicine-search' },
-  { label: 'Order History',       Icon: Clock,     bg: '#F3EEFF', color: '#7C3AED', route: '/orders' },
-];
-
-// R2-C3: gates the "Nearby Stores" browse section (See All / per-store
-// Order button) below — same reasoning as QUICK_ACTIONS above. Flip to
-// true to bring it back; R3 removes the section (and StoreLocator/
-// CustomerStoreInventory) outright instead of gating it.
-const SHOW_STORE_BROWSE = false;
 
 // ─── Sub-components ───────────────────────────────────────────
-
-function StarRating({ rating }) {
-  return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-      <Star size={12} fill="#F59E0B" color="#F59E0B" />
-      <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: '600' }}>{rating}</span>
-    </span>
-  );
-}
-
-function StoreCard({ store, onOrder }) {
-  return (
-    <div style={s.storeCard}>
-      {/* Store initial avatar */}
-      <div style={s.storeAvatar}>
-        <span style={s.storeInitial}>{(store.name || 'M')[0]}</span>
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px' }}>
-          <p style={s.storeName}>{store.name}</p>
-          <span style={{ ...s.badge, ...(store.open ? s.badgeOpen : s.badgeClosed) }}>
-            {store.open ? 'Open' : 'Closed'}
-          </span>
-        </div>
-
-        <p style={s.storeAddress}>{store.address}</p>
-
-        <div style={s.storeMetaRow}>
-          <StarRating rating={store.rating} />
-          <span style={s.dotSep}>·</span>
-          <span style={s.reviewCount}>{store.reviews} reviews</span>
-          {store.distance && (
-            <>
-              <span style={s.dotSep}>·</span>
-              <span style={s.distanceBadge}>{store.distance}</span>
-            </>
-          )}
-        </div>
-
-        <div style={s.storeFooter}>
-          <span style={s.verifiedTag}>
-            <CheckCircle size={11} color="#1A6B3C" />
-            Licensed
-          </span>
-          <button
-            style={{
-              ...s.orderBtn,
-              opacity: store.open ? 1 : 0.45,
-              cursor: store.open ? 'pointer' : 'not-allowed',
-            }}
-            onClick={() => store.open && onOrder(store)}
-          >
-            Order Karo
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const OFFER_COLORS = ['#1A6B3C', '#EA6C00', '#0C447C', '#E0A818'];
 
@@ -126,15 +58,14 @@ function OfferCard({ bg, title, sub, code, btnLabel, onPress }) {
 export default function CustomerHome() {
   const navigate = useNavigate();
   const { cartCount } = useCart();
-  const [activeCategory, setActiveCategory] = useState('Sab');
-  const [activeTab, setActiveTab]           = useState('home');
-  const [nearbyStores, setNearbyStores]     = useState([]);
-  const [storesLoading, setStoresLoading]   = useState(true);
+  const [activeServiceTab, setActiveServiceTab] = useState('allopath');
   const [showNotif, setShowNotif]     = useState(false);
   const [notifs, setNotifs]           = useState([]);
   const [offers, setOffers]           = useState([]);
   const [mrpMode, setMrpMode]         = useState(false);
+  const [popularMeds, setPopularMeds] = useState([]);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
+  const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,22 +83,15 @@ export default function CustomerHome() {
           return;
         }
 
-        fetchMrpMode().then((on) => { if (!cancelled) setMrpMode(on); });
+        // mrpMode must be known before fetching best-selling medicines —
+        // fetchPopularMedicines' stock-vs-seller_hidden filter depends on
+        // it (same ordering MedicineSearch.jsx's Popular Medicines uses).
+        const mrpOn = await fetchMrpMode();
+        if (!cancelled) setMrpMode(mrpOn);
 
-        // Fetch sellers (primary page content)
         try {
-          const { data } = await fetchSellers('Deoria');
-          if (!cancelled && data && data.length > 0) {
-            setNearbyStores(data.map((s) => ({
-              id:       s.id,
-              name:     s.store_name,
-              address:  s.address || s.district || '',
-              distance: null,
-              rating:   parseFloat(s.rating) || 4.0,
-              reviews:  s.total_reviews      || 0,
-              open:     s.is_open,
-            })));
-          }
+          const { data: popData } = await fetchPopularMedicines(12, mrpOn);
+          if (!cancelled && popData) setPopularMeds(popData);
         } catch {}
 
         // Fetch real notifications (only if user has a DB id)
@@ -199,8 +123,6 @@ export default function CustomerHome() {
 
       } catch (err) {
         console.error('CustomerHome init error:', err);
-      } finally {
-        if (!cancelled) setStoresLoading(false);
       }
     };
 
@@ -228,12 +150,6 @@ export default function CustomerHome() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const NAV_TABS = [
-    { id: 'home',    Icon: Home,        label: 'Home',    route: '/home' },
-    { id: 'search',  Icon: Search,      label: 'Search',  route: '/medicine-search' },
-    { id: 'orders',  Icon: ShoppingBag, label: 'Orders',  route: '/orders' },
-    { id: 'profile', Icon: User,        label: 'Profile', route: '/profile' },
-  ];
 
   return (
     <div style={s.wrapper}>
@@ -271,84 +187,80 @@ export default function CustomerHome() {
           </div>
         </div>
 
-        {/* ── Location Bar ── */}
-        <button style={s.locationBar}>
-          <MapPin size={16} color="#1A6B3C" />
-          <span style={s.locationText}>Deoria, Uttar Pradesh</span>
-          <ChevronDown size={16} color="#666666" style={{ marginLeft: 'auto' }} />
-        </button>
-
         {/* ── Scrollable body ── */}
         <div style={s.scrollBody}>
 
-          {/* Search Bar */}
-          <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
-            <Search size={18} color="#AAAAAA" />
-            <span style={s.searchPlaceholder}>Medicine ya store dhundho...</span>
-          </button>
-
-          {/* Quick Actions */}
-          <div style={s.quickGrid}>
-            {QUICK_ACTIONS.map(({ label, Icon, bg, color, route }) => (
-              <button
-                key={label}
-                style={s.quickCard}
-                onClick={() => navigate(route)}
-              >
-                <div style={{ ...s.quickIconBox, backgroundColor: bg }}>
-                  <Icon size={24} color={color} />
-                </div>
-                <span style={s.quickLabel}>{label}</span>
-              </button>
-            ))}
+          {/* Service Tabs — colourful, horizontal, scrollable */}
+          <div style={s.serviceTabsRow}>
+            {SERVICE_TABS.map(({ id, label, Icon, color, bg }) => {
+              const isActive = activeServiceTab === id;
+              return (
+                <button key={id} style={s.serviceTab} onClick={() => setActiveServiceTab(id)}>
+                  <div style={{
+                    ...s.serviceTabIconBox,
+                    backgroundColor: bg,
+                    border: isActive ? `2px solid ${color}` : '2px solid transparent',
+                  }}>
+                    <Icon size={22} color={color} />
+                  </div>
+                  <span style={{ ...s.serviceTabLabel, color: isActive ? color : '#666666', fontWeight: isActive ? '700' : '500' }}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Nearby Stores — hidden behind SHOW_STORE_BROWSE, see R2-C3 note above */}
-          {SHOW_STORE_BROWSE && (
-            <div style={s.section}>
-              <div style={s.sectionHeader}>
-                <span style={s.sectionTitle}>Aapke Paas Ke Stores</span>
-                <button style={s.seeAllBtn} onClick={() => navigate('/store-locator')}>
-                  Sab Dekho
-                </button>
-              </div>
-              {storesLoading ? (
-                <p style={{ fontSize: '13px', color: '#AAAAAA', padding: '12px 0' }}>Stores load ho rahe hain...</p>
-              ) : nearbyStores.length === 0 ? (
-                <p style={{ fontSize: '13px', color: '#888888', padding: '12px 0' }}>Aapke area mein koi store nahi mila</p>
+          {/* Address row — thin, static for now (tap does nothing yet) */}
+          <div style={s.addressRow}>
+            <MapPin size={13} color="#888888" />
+            <span style={s.addressText}>274001 · Deoria, Uttar Pradesh</span>
+          </div>
+
+          {/* Search Bar + Camera (prescription scan entry) */}
+          <div style={s.searchRow}>
+            <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
+              <Search size={18} color="#AAAAAA" />
+              <span style={s.searchPlaceholder}>Medicine ya store dhundho...</span>
+            </button>
+            <button style={s.cameraBtn} aria-label="Prescription Upload" onClick={() => navigate('/prescription')}>
+              <Camera size={20} color="#FFFFFF" />
+            </button>
+          </div>
+
+          {/* Best-Selling Medicines (Allopath) / Coming Soon (other tabs) */}
+          <div style={s.section}>
+            <div style={s.sectionHeader}>
+              <span style={s.sectionTitle}>
+                {activeServiceTab === 'allopath' ? 'Best-Selling Medicines' : activeTabData?.label}
+              </span>
+            </div>
+            {activeServiceTab === 'allopath' ? (
+              popularMeds.length === 0 ? (
+                <p style={{ fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '16px 0', margin: 0 }}>
+                  🌱 Jald hi naye medicines available honge
+                </p>
               ) : (
-                <div style={s.horizontalScroll}>
-                  {nearbyStores.map((store, idx) => (
-                    <StoreCard
-                      key={store?.id || store?.name || `store-${idx}`}
-                      store={store}
-                      onOrder={(st) => navigate('/store-inventory', { state: { sellerId: st.id, storeName: st.name } })}
+                <div>
+                  {popularMeds.map((med) => (
+                    <MedicineCard
+                      key={med.id}
+                      medicine={med}
+                      type={med.source === 'janaushadhi' ? 'janaushadhi' : med.is_generic ? 'generic' : 'branded'}
+                      mrpMode={mrpMode}
                     />
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Categories */}
-          <div style={s.section}>
-            <div style={s.sectionHeader}>
-              <span style={s.sectionTitle}>Categories</span>
-            </div>
-            <div style={s.horizontalScroll}>
-              {Array.isArray(CATEGORIES) && CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  style={{
-                    ...s.categoryPill,
-                    ...(activeCategory === cat ? s.categoryPillActive : s.categoryPillInactive),
-                  }}
-                  onClick={() => setActiveCategory(cat)}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
+              )
+            ) : (
+              activeTabData && (
+                <div style={s.comingSoonBox}>
+                  <activeTabData.Icon size={32} color="#CCCCCC" />
+                  <p style={s.comingSoonTitle}>{activeTabData.label} — Jald Aa Raha Hai</p>
+                  <p style={s.comingSoonDesc}>{activeTabData.desc}</p>
+                </div>
+              )
+            )}
           </div>
 
           {/* Offers — sirf tab dikhe jab active offers ho, aur mrp_mode OFF ho */}
@@ -377,35 +289,8 @@ export default function CustomerHome() {
           <div style={{ height: '80px' }} />
         </div>
 
-        {/* ── Bottom Nav ── */}
-        <nav style={s.bottomNav}>
-          {NAV_TABS.map(({ id, Icon, label, route }) => {
-            const isActive = activeTab === id;
-            return (
-              <button
-                key={id}
-                style={s.navTab}
-                onClick={() => { setActiveTab(id); navigate(route); }}
-              >
-                <div style={{ position: 'relative', display: 'inline-flex' }}>
-                  <Icon
-                    size={22}
-                    color={isActive ? '#1A6B3C' : '#AAAAAA'}
-                    strokeWidth={isActive ? 2.5 : 1.8}
-                  />
-                </div>
-                <span style={{
-                  ...s.navLabel,
-                  color: isActive ? '#1A6B3C' : '#AAAAAA',
-                  fontWeight: isActive ? '600' : '400',
-                }}>
-                  {label}
-                </span>
-                {isActive && <span style={s.navActiveDot} />}
-              </button>
-            );
-          })}
-        </nav>
+        {/* ── Bottom Nav (shared, R3-C3) ── */}
+        <BottomNav />
 
         {/* ── Notification Sheet ── */}
         {showNotif && (
@@ -615,26 +500,6 @@ const s = {
     marginTop: '6px',
   },
 
-  // Location bar
-  locationBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '10px 20px',
-    backgroundColor: '#F0FAF4',
-    border: 'none',
-    borderBottom: '1px solid #E8F5EE',
-    cursor: 'pointer',
-    width: '100%',
-    textAlign: 'left',
-    fontFamily: 'inherit',
-  },
-  locationText: {
-    fontSize: '13px',
-    color: '#444444',
-    fontWeight: '500',
-  },
-
   // Scroll body
   scrollBody: {
     flex: 1,
@@ -642,10 +507,64 @@ const s = {
     padding: '16px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '16px',
   },
 
-  // Search
+  // Service Tabs (R3-C1) — colourful horizontal row
+  serviceTabsRow: {
+    display: 'flex',
+    gap: '14px',
+    overflowX: 'auto',
+    paddingBottom: '4px',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+  },
+  serviceTab: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+    width: '64px',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    padding: 0,
+  },
+  serviceTabIconBox: {
+    width: '52px',
+    height: '52px',
+    borderRadius: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'border-color 0.15s ease',
+  },
+  serviceTabLabel: {
+    fontSize: '10.5px',
+    textAlign: 'center',
+    lineHeight: '1.25',
+  },
+
+  // Address row — thin, static
+  addressRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '0 2px',
+  },
+  addressText: {
+    fontSize: '11.5px',
+    color: '#666666',
+  },
+
+  // Search + Camera
+  searchRow: {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'center',
+  },
   searchBar: {
     display: 'flex',
     alignItems: 'center',
@@ -654,7 +573,8 @@ const s = {
     border: '1.5px solid #E8E8E8',
     borderRadius: '12px',
     padding: '13px 16px',
-    width: '100%',
+    flex: 1,
+    minWidth: 0,
     cursor: 'pointer',
     fontFamily: 'inherit',
     textAlign: 'left',
@@ -663,40 +583,41 @@ const s = {
     fontSize: '14px',
     color: '#AAAAAA',
   },
-
-  // Quick Actions
-  quickGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-  },
-  quickCard: {
-    backgroundColor: '#FFFFFF',
-    border: 'none',
-    borderRadius: '14px',
-    padding: '18px 14px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '10px',
-    cursor: 'pointer',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-    fontFamily: 'inherit',
-    textAlign: 'left',
-  },
-  quickIconBox: {
-    width: '44px',
-    height: '44px',
+  cameraBtn: {
+    flexShrink: 0,
+    width: '46px',
+    height: '46px',
     borderRadius: '12px',
+    backgroundColor: '#1A6B3C',
+    border: 'none',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    cursor: 'pointer',
   },
-  quickLabel: {
-    fontSize: '13px',
-    fontWeight: '600',
-    color: '#1A1A1A',
-    lineHeight: '1.3',
+
+  comingSoonBox: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    textAlign: 'center',
+    padding: '24px 20px',
+  },
+  comingSoonTitle: {
+    fontSize: '15px',
+    fontWeight: '700',
+    color: '#555555',
+    margin: 0,
+  },
+  comingSoonDesc: {
+    fontSize: '12px',
+    color: '#999999',
+    margin: 0,
+    maxWidth: '220px',
+    lineHeight: '1.5',
   },
 
   // Section
@@ -734,130 +655,6 @@ const s = {
     paddingBottom: '4px',
     scrollbarWidth: 'none',
     msOverflowStyle: 'none',
-  },
-
-  // Store Card
-  storeCard: {
-    minWidth: '240px',
-    backgroundColor: '#FFFFFF',
-    borderRadius: '14px',
-    padding: '14px',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
-    display: 'flex',
-    gap: '12px',
-    flexShrink: 0,
-  },
-  storeAvatar: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '10px',
-    backgroundColor: '#E8F5EE',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  storeInitial: {
-    fontSize: '18px',
-    fontWeight: '700',
-    color: '#1A6B3C',
-  },
-  storeName: {
-    fontSize: '13px',
-    fontWeight: '700',
-    color: '#1A1A1A',
-    margin: 0,
-    lineHeight: '1.3',
-    flex: 1,
-  },
-  storeAddress: {
-    fontSize: '11px',
-    color: '#888888',
-    margin: '3px 0 6px',
-  },
-  storeMetaRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    marginBottom: '8px',
-  },
-  dotSep: {
-    color: '#CCCCCC',
-    fontSize: '11px',
-  },
-  reviewCount: {
-    fontSize: '11px',
-    color: '#999999',
-  },
-  distanceBadge: {
-    fontSize: '11px',
-    color: '#1A6B3C',
-    fontWeight: '600',
-    backgroundColor: '#E8F5EE',
-    padding: '1px 7px',
-    borderRadius: '20px',
-  },
-  storeFooter: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  verifiedTag: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '3px',
-    fontSize: '11px',
-    color: '#1A6B3C',
-    fontWeight: '600',
-  },
-  badge: {
-    fontSize: '10px',
-    fontWeight: '700',
-    padding: '2px 8px',
-    borderRadius: '20px',
-    flexShrink: 0,
-  },
-  badgeOpen: {
-    backgroundColor: '#E8F5EE',
-    color: '#1A6B3C',
-  },
-  badgeClosed: {
-    backgroundColor: '#FFEEEE',
-    color: '#EF4444',
-  },
-  orderBtn: {
-    backgroundColor: '#1A6B3C',
-    color: '#FFFFFF',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '5px 12px',
-    fontSize: '11px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-
-  // Category Pills
-  categoryPill: {
-    flexShrink: 0,
-    padding: '7px 16px',
-    borderRadius: '20px',
-    fontSize: '13px',
-    fontWeight: '500',
-    cursor: 'pointer',
-    border: 'none',
-    fontFamily: 'inherit',
-    transition: 'background-color 0.15s ease, color 0.15s ease',
-  },
-  categoryPillActive: {
-    backgroundColor: '#1A6B3C',
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  categoryPillInactive: {
-    backgroundColor: '#FFFFFF',
-    color: '#555555',
-    border: '1.5px solid #E8E8E8',
   },
 
   // Offer Cards
@@ -901,40 +698,5 @@ const s = {
     color: '#1A1A1A',
     alignSelf: 'flex-start',
     fontFamily: 'inherit',
-  },
-
-  // Bottom Nav
-  bottomNav: {
-    position: 'sticky',
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    borderTop: '1px solid #F0F0F0',
-    display: 'flex',
-    padding: '8px 0 12px',
-    boxShadow: '0 -4px 16px rgba(0,0,0,0.06)',
-  },
-  navTab: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '3px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '4px 0',
-    position: 'relative',
-    fontFamily: 'inherit',
-  },
-  navLabel: {
-    fontSize: '10px',
-  },
-  navActiveDot: {
-    position: 'absolute',
-    top: '-8px',
-    width: '20px',
-    height: '3px',
-    backgroundColor: '#1A6B3C',
-    borderRadius: '2px',
   },
 };
