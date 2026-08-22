@@ -167,11 +167,13 @@ export function AuthProvider({ children }) {
 
             try {
               // Same atomic insert-or-skip pattern as the email branches below.
-              await supabase
+              const { error: upsertErr } = await supabase
                 .from('users')
                 .upsert({ phone: rawPhone, role: 'customer', auth_id: emailUser.id }, { onConflict: 'phone', ignoreDuplicates: true });
-              let { data: row } = await supabase
+              console.log('[PHONE-DEBUG] upsert error=', upsertErr);
+              let { data: row, error: selectErr } = await supabase
                 .from('users').select('*').eq('phone', rawPhone).maybeSingle();
+              console.log('[PHONE-DEBUG] select row=', row, 'select error=', selectErr);
 
               // Same backfill as the email branches — ignoreDuplicates means
               // an existing pre-bridge row never gets auth_id from the upsert.
@@ -181,8 +183,11 @@ export function AuthProvider({ children }) {
                 if (patched) row = patched;
               }
 
+              console.log('[PHONE-DEBUG] about to save medsetu_user, row=', row);
               if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
-            } catch {}
+            } catch (e) {
+              console.log('[PHONE-DEBUG] CAUGHT ERROR in phone branch:', e?.message, e);
+            }
 
             markResolved();
             const currentPath = window.location.pathname;
