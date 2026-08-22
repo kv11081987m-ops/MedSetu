@@ -26,6 +26,8 @@ export const createOrder = async (orderData) => {
       delivery_type:    orderData.deliveryType,
       delivery_address: orderData.deliveryAddress || null,
       delivery_pincode: orderData.deliveryPincode || null,
+      delivery_latitude:  orderData.deliveryLatitude  ?? null,
+      delivery_longitude: orderData.deliveryLongitude ?? null,
       prescription_url: orderData.prescriptionUrl || null,
       assigned_at:        orderData.assignedAt       || null,
       routing_expires_at: orderData.routingExpiresAt || null,
@@ -115,7 +117,11 @@ export const fetchOrders = async (customerId) => {
       sellers!seller_id (
         store_name,
         address,
-        phone
+        phone,
+        owner_name,
+        drug_license,
+        gst_number,
+        invoice_prefix
       )
     `)
     .eq('customer_id', customerId)
@@ -128,7 +134,7 @@ export const fetchOrders = async (customerId) => {
 export const fetchOrderById = async (orderIdentifier) => {
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderIdentifier);
 
-  const sel = `*, order_items (*), sellers!seller_id (store_name, address, phone, district)`;
+  const sel = `*, order_items (*), sellers!seller_id (store_name, address, phone, district, owner_name, drug_license, gst_number, invoice_prefix)`;
 
   if (isUUID) {
     const { data, error } = await supabase
@@ -157,16 +163,17 @@ export const updateOrderStatus = async (orderId, status) => {
 };
 
 // ── Map DB order row → UI shape ────────────────────────────────
+// Real status values pass through 1:1 now (used to collapse pending/
+// confirmed/preparing/out_for_delivery into one 'processing' bucket —
+// that's why sellers saw "Pending" while customers saw "Processing" for
+// the same order; OrderHistory.jsx's STATUS_MAP now has its own
+// label/colour per real status instead). 'pending' is the fallback for
+// any value outside the known set — it's the DB column's own default,
+// the least-presumptuous guess for something unexpected.
+const KNOWN_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
+
 export function mapOrder(row) {
   const itemNames = (row.order_items || []).map((i) => i.name);
-  const statusMap = {
-    pending:           'processing',
-    confirmed:         'processing',
-    preparing:         'processing',
-    out_for_delivery:  'processing',
-    delivered:         'delivered',
-    cancelled:         'cancelled',
-  };
   const date = row.created_at
     ? formatIST(row.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '';
@@ -174,7 +181,7 @@ export function mapOrder(row) {
   return {
     id:             row.order_number || row.id,
     dbId:           row.id,
-    status:         statusMap[row.status] || 'processing',
+    status:         KNOWN_ORDER_STATUSES.includes(row.status) ? row.status : 'pending',
     date,
     store:          row.sellers?.store_name || 'Unknown Store',
     items:          itemNames.length ? itemNames : ['Order items'],
@@ -183,5 +190,10 @@ export function mapOrder(row) {
     paymentDone:    row.payment_status === 'paid',
     isPrescription: !!row.prescription_url,
     refund:         row.status === 'cancelled' ? row.final_amount : null,
+    // R4-B: bill/invoice PDF needs fields this shape doesn't otherwise
+    // carry (sellers legal block, order_items MRP/qty, buyer_type,
+    // invoice_number, customer/delivery fields) — kept as the untouched
+    // DB row rather than widening every field above individually.
+    raw: row,
   };
 }

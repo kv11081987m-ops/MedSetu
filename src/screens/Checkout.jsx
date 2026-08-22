@@ -8,15 +8,22 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
+import { updateUserPhone, isDuplicatePhoneError } from '../lib/auth';
+import { saveAddress, setDefaultAddress } from '../lib/addresses';
 import { supabase } from '../lib/supabase';
-import { fetchMrpMode } from '../lib/api';
+import AddressForm from '../components/AddressForm';
 
 
+// B15 Part B: launch is COD-only — no payment gateway wired up yet.
+// UPI/Card/Wallet stay visible (so customers know they're coming) but
+// disabled: true blocks selection both in the UI (below) and as the
+// placeOrder safety clamp's source of truth (single place to flip when
+// a gateway actually goes live).
 const PAYMENT_OPTS = [
   { id: 'cod',    Icon: Banknote,    label: 'Cash on Delivery', hint: 'Delivery pe cash dein' },
-  { id: 'upi',    Icon: Smartphone,  label: 'UPI',              hint: 'Google Pay, PhonePe, Paytm' },
-  { id: 'card',   Icon: CreditCard,  label: 'Card',             hint: 'Credit / Debit card' },
-  { id: 'wallet', Icon: Wallet,      label: 'Wallet',           hint: 'MedSetu wallet' },
+  { id: 'upi',    Icon: Smartphone,  label: 'UPI',              hint: 'Google Pay, PhonePe, Paytm', disabled: true },
+  { id: 'card',   Icon: CreditCard,  label: 'Card',             hint: 'Credit / Debit card',        disabled: true },
+  { id: 'wallet', Icon: Wallet,      label: 'Wallet',           hint: 'MedSetu wallet',              disabled: true },
 ];
 
 
@@ -160,6 +167,61 @@ function OffersModal({ offers, cartTotal, onApply, onClose }) {
   );
 }
 
+// ─── Address Picker Modal (A4a) — "Chuno" picks this order's delivery
+// address (doesn't touch is_default); "Default Banao" calls
+// set_default_address (038's RPC, via lib/addresses.js) and only changes
+// what future orders default to — the two are deliberately independent.
+function AddressPickerModal({ addresses, loading, makingDefaultId, onChoose, onMakeDefault, onAddNew, onClose }) {
+  return (
+    <div style={s.offersOverlay} onClick={onClose}>
+      <div style={s.offersSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={s.offersHeader}>
+          <span style={s.offersTitle}>Address Chuno</span>
+          <button style={s.offersCloseBtn} onClick={onClose}>
+            <X size={18} color="#666666" />
+          </button>
+        </div>
+
+        {loading ? (
+          <p style={s.offersEmpty}>Addresses load ho rahe hain...</p>
+        ) : addresses.length === 0 ? (
+          <p style={s.offersEmpty}>Koi saved address nahi mila</p>
+        ) : (
+          <div style={s.offersList}>
+            {addresses.map((addr) => (
+              <div key={addr.id} style={s.addrPickItem}>
+                <div style={s.addrPickBadgeRow}>
+                  <span style={s.addrPickLabel}>{addr.label}</span>
+                  {addr.is_default && <span style={s.addrPickDefaultBadge}>Default</span>}
+                </div>
+                <p style={s.addrPickText}>{addr.address_line}, {addr.city} — {addr.pincode}</p>
+                {addr.phone && <p style={s.addrPickPhone}>📞 {addr.phone}</p>}
+                <div style={s.addrPickBtnRow}>
+                  <button style={s.addrPickChooseBtn} onClick={() => onChoose(addr)}>Chuno</button>
+                  {!addr.is_default && (
+                    <button
+                      style={{ ...s.addrPickDefaultBtn, opacity: makingDefaultId === addr.id ? 0.6 : 1 }}
+                      onClick={() => onMakeDefault(addr.id)}
+                      disabled={makingDefaultId === addr.id}
+                    >
+                      {makingDefaultId === addr.id ? '...' : 'Default Banao'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button style={s.addrPickAddNewBtn} onClick={onAddNew}>
+          <Plus size={14} color="#1A6B3C" />
+          Naya Address Add Karo
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function Checkout() {
   const navigate  = useNavigate();
@@ -174,13 +236,33 @@ export default function Checkout() {
       iconColor: i.iconColor || '#1A6B3C',
       IconComp: i.IconComp || Pill,
       sub: i.sub || `${i.type || 'Tablet'} — per strip`,
-      rx: i.rx || false,
+      rx: i.rxRequired || false,
     }))
   );
 
   const [selectedAddress,     setSelectedAddress]     = useState('');
   const [selectedPincode,     setSelectedPincode]     = useState('');
+  const [selectedLatitude,    setSelectedLatitude]    = useState(null);
+  const [selectedLongitude,   setSelectedLongitude]   = useState(null);
+  // Captured on "Chuno" (A4a) — A4b now reads this for orderData.customerPhone.
+  const [selectedPhone,       setSelectedPhone]       = useState('');
   const [addressLoading,      setAddressLoading]      = useState(true);
+  // Address picker popup (A4a) — replaces the old "Change" -> /profile
+  // redirect (which didn't even work — UserProfile.jsx never reads the
+  // openAddress state it was sending).
+  const [showAddressPicker,    setShowAddressPicker]    = useState(false);
+  const [savedAddresses,       setSavedAddresses]       = useState([]);
+  const [addressPickerLoading, setAddressPickerLoading] = useState(false);
+  const [makingDefaultId,      setMakingDefaultId]      = useState(null);
+  // "Naya Address" popup (A4b) — AddressForm reused from A3b, in-place
+  // instead of the old navigate('/profile') stopgap.
+  const [showNewAddressForm,  setShowNewAddressForm]  = useState(false);
+  const [newCheckoutAddress,  setNewCheckoutAddress]  = useState({
+    label: 'Ghar', address_line: '', city: 'Deoria',
+    district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
+    latitude: null, longitude: null, phone: '',
+  });
+  const [newAddressPhoneError, setNewAddressPhoneError] = useState('');
   const [prescriptionUploaded, setPrescriptionUploaded] = useState(
     !!location.state?.prescriptionUrl
   );
@@ -200,13 +282,15 @@ export default function Checkout() {
   const [ordering, setOrdering]         = useState(false);
   const [orderError, setOrderError]     = useState('');
   const [orderDbId, setOrderDbId]       = useState('');
+  // Mandatory-mobile safety net — order's delivery-phone comes only from
+  // users.phone (address has no phone field), so a null/invalid phone
+  // must block placing the order rather than silently going through.
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+  const [phoneInput,      setPhoneInput]      = useState('');
+  const [phoneSaving,     setPhoneSaving]     = useState(false);
+  const [phoneInputError, setPhoneInputError] = useState('');
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
-  const [mrpMode, setMrpMode] = useState(false);
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
-
-  useEffect(() => {
-    fetchMrpMode().then(setMrpMode);
-  }, []);
 
   // ── Fetch platform delivery settings ──────────────────────
   useEffect(() => {
@@ -259,15 +343,103 @@ export default function Checkout() {
           data ? `${data.address_line}, ${data.city} — ${data.pincode}` : ''
         );
         setSelectedPincode(data?.pincode || '');
+        // R6-B3: optional — address may not have a pin dropped (R6-B2),
+        // never blocks checkout the way a missing pincode does.
+        setSelectedLatitude(data?.latitude ?? null);
+        setSelectedLongitude(data?.longitude ?? null);
+        // Kept in step with selectedAddress even though nothing reads it
+        // yet (A4b) — so if the customer never opens the picker at all,
+        // this is still correctly the default address's own phone rather
+        // than staying blank.
+        setSelectedPhone(data?.phone || '');
       } catch {
         setSelectedAddress('');
         setSelectedPincode('');
+        setSelectedLatitude(null);
+        setSelectedLongitude(null);
+        setSelectedPhone('');
       } finally {
         setAddressLoading(false);
       }
     };
     fetchDefaultAddress();
   }, []);
+
+  // ── Address Picker (A4a) — fetch on open, same query shape
+  // UserProfile.jsx's fetchAddresses uses ──────────────────────
+  const fetchSavedAddresses = async () => {
+    setAddressPickerLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+      if (!user?.id) { setSavedAddresses([]); return; }
+      const { data } = await supabase
+        .from('addresses')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('is_default', { ascending: false });
+      setSavedAddresses(data || []);
+    } catch {
+      setSavedAddresses([]);
+    } finally {
+      setAddressPickerLoading(false);
+    }
+  };
+
+  // "Chuno" — this order's delivery address only. Does not touch
+  // is_default (that's handleMakeDefault below, deliberately separate).
+  const handleChooseAddress = (addr) => {
+    setSelectedAddress(`${addr.address_line}, ${addr.city} — ${addr.pincode}`);
+    setSelectedPincode(addr.pincode || '');
+    setSelectedLatitude(addr.latitude ?? null);
+    setSelectedLongitude(addr.longitude ?? null);
+    setSelectedPhone(addr.phone || '');
+    setShowAddressPicker(false);
+  };
+
+  // "Default Banao" — changes what future orders default to. Refreshes
+  // the picker's own list on success so the moved Default badge shows
+  // immediately; does not select this address for the current order.
+  const handleMakeDefault = async (addressId) => {
+    setMakingDefaultId(addressId);
+    const result = await setDefaultAddress(addressId);
+    setMakingDefaultId(null);
+    if (result?.success) {
+      await fetchSavedAddresses();
+    } else {
+      alert(result?.message || 'Default set nahi hua, dobara try karo');
+    }
+  };
+
+  // "Naya Address Add Karo" (A4b) — same validation UserProfile.jsx's
+  // addAddress() uses (address_line required, phone mandatory 10-digit),
+  // via the same saveAddress() helper. On success, the new address is
+  // auto-selected for this order (handleChooseAddress) instead of making
+  // the customer tap "Chuno" again, and appended to savedAddresses so
+  // it's already there if they reopen the picker later this session.
+  const handleSaveNewAddress = async () => {
+    if (!newCheckoutAddress.address_line.trim()) { alert('Address daalo'); return; }
+    if (!/^\d{10}$/.test(newCheckoutAddress.phone || '')) {
+      setNewAddressPhoneError('Sahi 10-digit mobile number daalein');
+      return;
+    }
+    setNewAddressPhoneError('');
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+      if (!storedUser?.id) { alert('Login session problem — dobara login karein'); return; }
+      const { data, error } = await saveAddress({
+        userId: storedUser.id,
+        address: { ...newCheckoutAddress, is_default: savedAddresses.length === 0 },
+      });
+      if (error || !data) {
+        alert('Address save nahi hua: ' + (error?.message || 'Unknown error'));
+        return;
+      }
+      setSavedAddresses((prev) => [...prev, data]);
+      handleChooseAddress(data);
+      setShowNewAddressForm(false);
+      setNewCheckoutAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '', latitude: null, longitude: null, phone: '' });
+    } catch (err) { alert('Save nahi hua: ' + err.message); }
+  };
 
   // ── Calculations (must be before the Rx useEffect) ──
   const hasRxItems     = items.some((it) => it.rx);
@@ -277,9 +449,7 @@ export default function Checkout() {
   const amountForFree  = delivery === 'home' && platformDelivery.threshold > 0 && !isFreeDelivery
     ? platformDelivery.threshold - cartTotal
     : 0;
-  // mrp_mode: offers/discount are fully bypassed — customer pays exactly
-  // cartTotal + delivFee, no matter what appliedOffer state holds.
-  const discount     = (!mrpMode && appliedOffer)
+  const discount     = appliedOffer
     ? (appliedOffer.discount_type === 'percentage'
         ? cartTotal * (Number(appliedOffer.discount_value) / 100)
         : Number(appliedOffer.discount_value))
@@ -287,22 +457,6 @@ export default function Checkout() {
   const safeDiscount = Math.min(discount, cartTotal);
   const grandTotal   = cartTotal + delivFee - safeDiscount;
   const totalItems  = items.reduce((sum, it) => sum + it.qty, 0);
-
-  // ── Check if user has uploaded a prescription (for Rx items) ──
-  useEffect(() => {
-    if (!hasRxItems || prescriptionUploaded) return;
-    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-    if (!user?.id) return;
-    supabase
-      .from('prescriptions')
-      .select('id')
-      .eq('customer_id', user.id)
-      .limit(1)
-      .then(({ data }) => {
-        if (data?.length) setPrescriptionUploaded(true);
-      })
-      .catch((err) => console.error('Prescription check failed:', err));
-  }, [hasRxItems, prescriptionUploaded]);
 
   const handleQty = (id, delta) => {
     const current = items.find((it) => it.id === id);
@@ -367,6 +521,22 @@ export default function Checkout() {
       setOrderError('Delivery address add karo');
       return;
     }
+
+    // Mandatory mobile — A5: checks the EFFECTIVE delivery-phone now, not
+    // just users.phone. Home delivery already prefers the selected
+    // address's own phone (orderData.customerPhone below uses the same
+    // selectedPhone || storedUser.phone fallback) — this guard now mirrors
+    // that exactly, so a customer who picked an address with its own
+    // valid phone is never blocked just because their profile's
+    // users.phone happens to be null. Store-pickup has no selected
+    // address to prefer, so it's unchanged — still users.phone only.
+    const preCheckUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    const effectivePhone = delivery === 'home' ? (selectedPhone || preCheckUser?.phone) : preCheckUser?.phone;
+    if (!/^\d{10}$/.test(effectivePhone || '')) {
+      setShowPhonePrompt(true);
+      return;
+    }
+
     setOrdering(true);
     setOrderError('');
 
@@ -434,17 +604,29 @@ export default function Checkout() {
       const orderData = {
         customerId,
         customerName:   storedUser?.name  || null,
-        customerPhone:  storedUser?.phone || null,
+        // A4b: home delivery now prefers the SELECTED address's own
+        // phone over users.phone — that's the whole point of giving each
+        // address its own number. Falls back to users.phone if that
+        // particular address predates the phone column and hasn't been
+        // edited since (migration 037/038). Store-pickup has no selected
+        // address to speak of, so it's untouched — still users.phone.
+        customerPhone:  delivery === 'home' ? (selectedPhone || storedUser?.phone || null) : (storedUser?.phone || null),
         sellerId:       routedSellerId,
         totalAmount:    cartTotal,
         deliveryCharge: delivFee,
         discount:       safeDiscount,
-        promoCode:      (!mrpMode && appliedOffer) ? appliedOffer.promo_code : null,
+        promoCode:      appliedOffer ? appliedOffer.promo_code : null,
         finalAmount:    grandTotal,
-        paymentMethod:  payment,
+        // Safety clamp: launch is COD-only (PAYMENT_OPTS' disabled flags
+        // block selecting UPI/Card/Wallet in the UI already) — this is
+        // the last line of defence so an order can never place with a
+        // payment method that has no working gateway behind it yet.
+        paymentMethod: PAYMENT_OPTS.some((o) => o.id === payment && !o.disabled) ? payment : 'cod',
         deliveryType:   delivery,
         deliveryAddress: delivery === 'home' ? selectedAddress : 'Store Pickup',
         deliveryPincode: delivery === 'home' ? (selectedPincode || null) : null,
+        deliveryLatitude:  delivery === 'home' ? selectedLatitude  : null,
+        deliveryLongitude: delivery === 'home' ? selectedLongitude : null,
         prescriptionUrl,
         ...routingFields,
       };
@@ -504,6 +686,38 @@ export default function Checkout() {
     }
   };
 
+  // ── Save mobile from the mandatory-phone prompt, then retry the order ──
+  const handleSavePhone = async () => {
+    if (!/^\d{10}$/.test(phoneInput)) {
+      setPhoneInputError('Sahi 10-digit mobile number daalein');
+      return;
+    }
+    setPhoneSaving(true);
+    setPhoneInputError('');
+    const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    const { error } = await updateUserPhone(storedUser?.id, phoneInput);
+    setPhoneSaving(false);
+    if (error) {
+      console.error('[savePhone]', error);
+      if (isDuplicatePhoneError(error)) {
+        // users.phone UNIQUE constraint (users_phone_key) — this number
+        // already belongs to a different account.
+        setPhoneInputError('Yeh number pehle se registered hai. Doosra number daalein ya us account se login karein.');
+      } else if (error.message === 'userId missing') {
+        // updateUserPhone's own guard — localStorage.medsetu_user has no
+        // .id (e.g. SuperAdmin's "Customer View" session shape).
+        setPhoneInputError('Kuch gadbad hui, dobara login karke try karein.');
+      } else {
+        setPhoneInputError('Save nahi hua, dobara try karo');
+      }
+      return;
+    }
+    localStorage.setItem('medsetu_user', JSON.stringify({ ...storedUser, phone: phoneInput }));
+    setShowPhonePrompt(false);
+    setPhoneInput('');
+    placeOrder();
+  };
+
   if (success) {
     return (
       <SuccessOverlay
@@ -521,11 +735,11 @@ export default function Checkout() {
         {/* ── Header ── */}
         <div style={s.header}>
           <button style={s.iconBtn} onClick={() => navigate(-1)}>
-            <ArrowLeft size={22} color="#1A1A1A" />
+            <ArrowLeft size={22} color="#0C447C" />
           </button>
           <span style={s.headerTitle}>Aapka Cart</span>
           <div style={s.cartBadgeWrap}>
-            <ShoppingCart size={22} color="#1A1A1A" />
+            <ShoppingCart size={22} color="#0C447C" />
             {totalItems > 0 && <span style={s.cartBadge}>{totalItems}</span>}
           </div>
         </div>
@@ -570,9 +784,17 @@ export default function Checkout() {
                   ? 'Address load ho raha hai...'
                   : selectedAddress || 'Koi address nahi mila — naya add karo'}
               </p>
-              <button style={s.changeLink} onClick={() => navigate('/profile', { state: { openAddress: true } })}>Change</button>
+              <button style={s.changeLink} onClick={() => { setShowAddressPicker(true); fetchSavedAddresses(); }}>Change</button>
             </div>
-            <button style={s.addAddrBtn} onClick={() => navigate('/profile', { state: { openAddress: true } })}>
+            <button
+              style={s.addAddrBtn}
+              onClick={() => {
+                const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+                setNewCheckoutAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '', latitude: null, longitude: null, phone: storedUser?.phone || '' });
+                setNewAddressPhoneError('');
+                setShowNewAddressForm(true);
+              }}
+            >
               <Plus size={14} color="#1A6B3C" />
               Naya Address Add Karo
             </button>
@@ -584,26 +806,33 @@ export default function Checkout() {
             <div style={s.deliveryGrid}>
               {[
                 { id: 'home',   Icon: Truck,  label: 'Home Delivery',   hint: '30–60 min mein', charge: isFreeDelivery ? 'FREE Delivery 🎉' : `₹${platformDelivery.charge} delivery charge` },
-                { id: 'pickup', Icon: Store,  label: 'Store Se Pickup', hint: 'Ready in 15 min', charge: 'Free' },
-              ].map(({ id, Icon, label, hint, charge }) => (
+                { id: 'pickup', Icon: Store,  label: 'Store Se Pickup', hint: 'Ready in 15 min', charge: 'Free', disabled: true },
+              ].map(({ id, Icon, label, hint, charge, disabled }) => (
                 <button
                   key={id}
                   style={{
                     ...s.delivOption,
-                    border: delivery === id ? '1.5px solid #1A6B3C' : '1.5px solid #E0E0E0',
-                    backgroundColor: delivery === id ? '#E8F5EE' : '#FFFFFF',
+                    border: disabled ? '1.5px solid rgba(12,68,124,0.1)' : (delivery === id ? '1.5px solid #1A6B3C' : '1.5px solid rgba(12,68,124,0.18)'),
+                    backgroundColor: disabled ? '#FAFAFA' : (delivery === id ? '#E8F5EE' : '#FFFFFF'),
+                    opacity: disabled ? 0.6 : 1,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
                   }}
-                  onClick={() => setDelivery(id)}
+                  onClick={() => !disabled && setDelivery(id)}
+                  disabled={disabled}
                 >
-                  <Icon size={22} color={delivery === id ? '#1A6B3C' : '#888888'} />
-                  <span style={{ ...s.delivLabel, color: delivery === id ? '#1A6B3C' : '#1A1A1A' }}>
+                  <Icon size={22} color={disabled ? '#AAAAAA' : (delivery === id ? '#1A6B3C' : '#0C447C')} />
+                  <span style={{ ...s.delivLabel, color: disabled ? '#999999' : (delivery === id ? '#1A6B3C' : '#1A1A1A') }}>
                     {label}
                   </span>
                   <span style={s.delivHint}>{hint}</span>
                   <span style={{ ...s.delivCharge, color: delivery === id ? '#1A6B3C' : '#888888' }}>
                     {charge}
                   </span>
-                  {delivery === id && (
+                  {disabled ? (
+                    <div style={s.delivCheck}>
+                      <span style={s.jaldiBadge}>Jald hi</span>
+                    </div>
+                  ) : delivery === id && (
                     <div style={s.delivCheck}>
                       <CheckCircle size={14} color="#1A6B3C" fill="#1A6B3C" />
                     </div>
@@ -655,48 +884,46 @@ export default function Checkout() {
             )}
           </div>}
 
-          {/* Promo Code — mrp_mode mein poori tarah hidden, discount 0 rehta hai */}
-          {!mrpMode && (
-            <div style={s.card}>
-              <div style={s.promoRow}>
-                <Tag size={16} color="#1A6B3C" />
-                <span style={s.promoHeading}>Promo Code</span>
-                <button style={s.viewOffersBtn} onClick={() => setShowOffers(true)}>
-                  <Gift size={13} color="#1A6B3C" />
-                  Offers Dekho
+          {/* Promo Code */}
+          <div style={s.card}>
+            <div style={s.promoRow}>
+              <Tag size={16} color="#1A6B3C" />
+              <span style={s.promoHeading}>Promo Code</span>
+              <button style={s.viewOffersBtn} onClick={() => setShowOffers(true)}>
+                <Gift size={13} color="#1A6B3C" />
+                Offers Dekho
+              </button>
+            </div>
+            {appliedOffer ? (
+              <div style={s.promoApplied}>
+                <CheckCircle size={16} color="#1A6B3C" />
+                <span style={s.promoAppliedText}>
+                  {appliedOffer.promo_code} applied! ₹{safeDiscount.toFixed(0)} off
+                </span>
+                <button style={s.removePromo} onClick={() => { setAppliedOffer(null); setPromoInput(''); }}>
+                  <Trash2 size={13} color="#EF4444" />
                 </button>
               </div>
-              {appliedOffer ? (
-                <div style={s.promoApplied}>
-                  <CheckCircle size={16} color="#1A6B3C" />
-                  <span style={s.promoAppliedText}>
-                    {appliedOffer.promo_code} applied! ₹{safeDiscount.toFixed(0)} off
-                  </span>
-                  <button style={s.removePromo} onClick={() => { setAppliedOffer(null); setPromoInput(''); }}>
-                    <Trash2 size={13} color="#EF4444" />
-                  </button>
+            ) : (
+              <>
+                <div style={s.promoInputRow}>
+                  <input
+                    style={s.promoInput}
+                    placeholder="Promo code daalo"
+                    value={promoInput}
+                    onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(''); }}
+                  />
+                  <button
+                    style={{ ...s.applyBtn, opacity: promoInput ? 1 : 0.5 }}
+                    onClick={() => applyPromo()}
+                    disabled={!promoInput}
+                  >Apply</button>
                 </div>
-              ) : (
-                <>
-                  <div style={s.promoInputRow}>
-                    <input
-                      style={s.promoInput}
-                      placeholder="Promo code daalo"
-                      value={promoInput}
-                      onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(''); }}
-                    />
-                    <button
-                      style={{ ...s.applyBtn, opacity: promoInput ? 1 : 0.5 }}
-                      onClick={() => applyPromo()}
-                      disabled={!promoInput}
-                    >Apply</button>
-                  </div>
-                  {promoError && <p style={s.promoError}>{promoError}</p>}
-                  <p style={s.promoHint}>Promo code hai to daaliye</p>
-                </>
-              )}
-            </div>
-          )}
+                {promoError && <p style={s.promoError}>{promoError}</p>}
+                <p style={s.promoHint}>Promo code hai to daaliye</p>
+              </>
+            )}
+          </div>
 
           {/* Order Summary */}
           <div style={s.card}>
@@ -710,7 +937,7 @@ export default function Checkout() {
                 <span style={s.summaryKey}>Delivery Charge</span>
                 <span style={s.summaryVal}>{delivFee === 0 ? 'Free' : `₹${delivFee.toFixed(2)}`}</span>
               </div>
-              {!mrpMode && appliedOffer && (
+              {appliedOffer && (
                 <div style={s.summaryRow}>
                   <span style={s.summaryKey}>Discount ({appliedOffer.promo_code})</span>
                   <span style={{ ...s.summaryVal, color: '#1A6B3C' }}>− ₹{safeDiscount.toFixed(2)}</span>
@@ -728,31 +955,41 @@ export default function Checkout() {
           <div style={s.card}>
             <p style={s.cardTitle}>Payment Kaise Karein?</p>
             <div style={s.paymentList}>
-              {PAYMENT_OPTS.map(({ id, Icon, label, hint }) => (
-                <button
-                  key={id}
-                  style={{
-                    ...s.payOption,
-                    border: payment === id ? '1.5px solid #1A6B3C' : '1.5px solid #F0F0F0',
-                    backgroundColor: payment === id ? '#F0FBF4' : '#FFFFFF',
-                  }}
-                  onClick={() => setPayment(id)}
-                >
-                  <div style={{ ...s.payIconBox, backgroundColor: payment === id ? '#E8F5EE' : '#F5F5F5' }}>
-                    <Icon size={18} color={payment === id ? '#1A6B3C' : '#888888'} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ ...s.payLabel, color: payment === id ? '#1A6B3C' : '#1A1A1A' }}>{label}</p>
-                    <p style={s.payHint}>{hint}</p>
-                  </div>
-                  <div style={{
-                    ...s.radioCircle,
-                    border: payment === id ? '2px solid #1A6B3C' : '2px solid #CCCCCC',
-                  }}>
-                    {payment === id && <div style={s.radioDot} />}
-                  </div>
-                </button>
-              ))}
+              {PAYMENT_OPTS.map(({ id, Icon, label, hint, disabled }) => {
+                const isSelected = payment === id;
+                return (
+                  <button
+                    key={id}
+                    style={{
+                      ...s.payOption,
+                      border: disabled ? '1.5px solid rgba(12,68,124,0.1)' : (isSelected ? '1.5px solid #1A6B3C' : '1.5px solid rgba(12,68,124,0.15)'),
+                      backgroundColor: disabled ? '#FAFAFA' : (isSelected ? '#F0FBF4' : '#FFFFFF'),
+                      opacity: disabled ? 0.6 : 1,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                    }}
+                    onClick={() => !disabled && setPayment(id)}
+                    disabled={disabled}
+                  >
+                    <div style={{ ...s.payIconBox, backgroundColor: disabled ? '#F0F0F0' : (isSelected ? '#E8F5EE' : '#EAF2FB') }}>
+                      <Icon size={18} color={disabled ? '#AAAAAA' : (isSelected ? '#1A6B3C' : '#0C447C')} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ ...s.payLabel, color: disabled ? '#999999' : (isSelected ? '#1A6B3C' : '#1A1A1A') }}>{label}</p>
+                      <p style={s.payHint}>{hint}</p>
+                    </div>
+                    {disabled ? (
+                      <span style={s.jaldiBadge}>Jald hi</span>
+                    ) : (
+                      <div style={{
+                        ...s.radioCircle,
+                        border: isSelected ? '2px solid #1A6B3C' : '2px solid rgba(12,68,124,0.3)',
+                      }}>
+                        {isSelected && <div style={s.radioDot} />}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -782,15 +1019,95 @@ export default function Checkout() {
           </button>
         </div>
 
-        {/* Offers Modal — trigger button is hidden under mrp_mode, but this
-            guard is kept as a defensive backstop */}
-        {!mrpMode && showOffers && (
+        {/* Offers Modal */}
+        {showOffers && (
           <OffersModal
             offers={availableOffers}
             cartTotal={cartTotal}
             onApply={applyOfferFromList}
             onClose={() => setShowOffers(false)}
           />
+        )}
+
+        {/* Address Picker (A4a) */}
+        {showAddressPicker && (
+          <AddressPickerModal
+            addresses={savedAddresses}
+            loading={addressPickerLoading}
+            makingDefaultId={makingDefaultId}
+            onChoose={handleChooseAddress}
+            onMakeDefault={handleMakeDefault}
+            onAddNew={() => {
+              const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+              setShowAddressPicker(false);
+              setNewCheckoutAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '', latitude: null, longitude: null, phone: storedUser?.phone || '' });
+              setNewAddressPhoneError('');
+              setShowNewAddressForm(true);
+            }}
+            onClose={() => setShowAddressPicker(false)}
+          />
+        )}
+
+        {/* "Naya Address" popup (A4b) — reuses AddressForm from A3b (same
+            component UserProfile.jsx uses) inside the same offers-modal
+            sheet shell. Saving auto-selects it for this order (see
+            handleSaveNewAddress) — no need to reopen the picker and tap
+            "Chuno" separately. */}
+        {showNewAddressForm && (
+          <div style={s.offersOverlay} onClick={() => setShowNewAddressForm(false)}>
+            <div
+              style={{ ...s.offersSheet, padding: '18px', overflowY: 'auto', gap: '10px' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <AddressForm
+                value={newCheckoutAddress}
+                onChange={setNewCheckoutAddress}
+                onSave={handleSaveNewAddress}
+                onCancel={() => setShowNewAddressForm(false)}
+                isEditing={false}
+                phoneError={newAddressPhoneError}
+                setPhoneError={setNewAddressPhoneError}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Mandatory-mobile prompt — only ever shown when placeOrder's
+            phone check above fails (customers who already have a valid
+            phone, phone+OTP or filled in via UserProfile, never see this
+            at all). Reuses the same offers-modal sheet shell + the promo
+            card's input/button/error styles instead of new ones. */}
+        {showPhonePrompt && (
+          <div style={s.offersOverlay} onClick={() => { setShowPhonePrompt(false); setPhoneInputError(''); }}>
+            <div style={s.offersSheet} onClick={(e) => e.stopPropagation()}>
+              <div style={s.offersHeader}>
+                <span style={s.offersTitle}>Mobile Number Chahiye</span>
+                <button style={s.offersCloseBtn} onClick={() => { setShowPhonePrompt(false); setPhoneInputError(''); }}>
+                  <X size={18} color="#666666" />
+                </button>
+              </div>
+              <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <p style={s.promoHint}>Delivery ke liye mobile number zaroori hai — store aur delivery partner isi number par sampark karenge.</p>
+                <div style={s.promoInputRow}>
+                  <input
+                    style={s.promoInput}
+                    placeholder="10-digit mobile number"
+                    value={phoneInput}
+                    onChange={(e) => { setPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 10)); setPhoneInputError(''); }}
+                    type="tel"
+                    inputMode="numeric"
+                    autoFocus
+                  />
+                  <button
+                    style={{ ...s.applyBtn, opacity: (phoneSaving || phoneInput.length !== 10) ? 0.5 : 1 }}
+                    onClick={handleSavePhone}
+                    disabled={phoneSaving || phoneInput.length !== 10}
+                  >{phoneSaving ? '...' : 'Save'}</button>
+                </div>
+                {phoneInputError && <p style={s.promoError}>{phoneInputError}</p>}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -815,14 +1132,14 @@ const s = {
     position: 'relative',
   },
 
-  // Header
+  // Header — same soft gradient patti as Home/Categories
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '14px 14px 12px',
-    backgroundColor: '#FFFFFF',
-    borderBottom: '1px solid #F0F0F0',
+    padding: '10px 16px',
+    background: 'linear-gradient(90deg, #FFF1E6 0%, #EAF2FB 100%)',
+    borderBottom: '1px solid rgba(12,68,124,0.08)',
     position: 'sticky',
     top: 0,
     zIndex: 10,
@@ -830,7 +1147,7 @@ const s = {
   headerTitle: {
     fontSize: '17px',
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#0C447C',
   },
   iconBtn: {
     background: 'none',
@@ -889,6 +1206,7 @@ const s = {
     backgroundColor: '#FFFFFF',
     borderRadius: '14px',
     padding: '16px',
+    border: '1px solid rgba(12,68,124,0.08)',
     boxShadow: '0 1px 5px rgba(0,0,0,0.05)',
     display: 'flex',
     flexDirection: 'column',
@@ -1135,15 +1453,15 @@ const s = {
 
   // Free delivery nudge
   freeDelivNudge: {
-    backgroundColor: '#FFFBEA',
-    border: '1px solid #F59E0B',
+    backgroundColor: '#FFF8E1',
+    border: '1px solid #E0A818',
     borderRadius: '10px',
     padding: '10px 14px',
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
     fontSize: '13px',
-    color: '#92400E',
+    color: '#8A6D1D',
   },
 
   // Rx status
@@ -1207,7 +1525,7 @@ const s = {
   promoInput: {
     flex: 1,
     padding: '11px 14px',
-    border: '1.5px solid #E0E0E0',
+    border: '1.5px solid rgba(12,68,124,0.18)',
     borderRadius: '10px',
     fontSize: '14px',
     color: '#1A1A1A',
@@ -1371,6 +1689,97 @@ const s = {
     flexShrink: 0,
   },
 
+  // Address picker modal (A4a) — reuses offersOverlay/offersSheet/
+  // offersHeader/offersTitle/offersCloseBtn/offersEmpty/offersList as-is
+  addrPickItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '14px',
+    border: '1.5px solid rgba(12,68,124,0.1)',
+    borderRadius: '12px',
+    backgroundColor: '#FAFBFF',
+  },
+  addrPickBadgeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  addrPickLabel: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: '#1A6B3C',
+    backgroundColor: '#E8F5EE',
+    padding: '2px 9px',
+    borderRadius: '20px',
+  },
+  addrPickDefaultBadge: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#555555',
+    backgroundColor: '#EEEEEE',
+    padding: '2px 9px',
+    borderRadius: '20px',
+  },
+  addrPickText: {
+    fontSize: '13px',
+    color: '#1A1A1A',
+    fontWeight: '600',
+    margin: 0,
+    lineHeight: '1.4',
+  },
+  addrPickPhone: {
+    fontSize: '12px',
+    color: '#1A6B3C',
+    fontWeight: '600',
+    margin: 0,
+  },
+  addrPickBtnRow: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '4px',
+  },
+  addrPickChooseBtn: {
+    flex: 1,
+    padding: '9px',
+    backgroundColor: '#1A6B3C',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '12.5px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  addrPickDefaultBtn: {
+    flex: 1,
+    padding: '9px',
+    backgroundColor: '#FFFFFF',
+    color: '#0C447C',
+    border: '1.5px solid #0C447C',
+    borderRadius: '8px',
+    fontSize: '12.5px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  addrPickAddNewBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    margin: '4px 18px 18px',
+    padding: '12px',
+    border: '1.5px dashed #1A6B3C',
+    borderRadius: '12px',
+    backgroundColor: 'transparent',
+    color: '#1A6B3C',
+    fontSize: '13px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+
   // Summary
   summaryRows: {
     display: 'flex',
@@ -1466,6 +1875,16 @@ const s = {
     height: '10px',
     borderRadius: '50%',
     backgroundColor: '#1A6B3C',
+  },
+  jaldiBadge: {
+    flexShrink: 0,
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '10.5px',
+    fontWeight: '700',
+    color: '#8A6D1D',
+    backgroundColor: '#FFF3D6',
+    border: '1px solid #E0A818',
   },
 
   // Bottom bar

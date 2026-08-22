@@ -12,6 +12,7 @@ import { getCurrentSeller } from '../lib/auth';
 import { fetchMrpMode } from '../lib/api';
 import { reserveStock, releaseStock, addLotToRetailerInventory } from '../lib/inventory';
 import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/orders';
+import { getSignedRxUrl } from '../lib/prescriptions';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import { formatIST } from '../lib/formatTime';
 
@@ -28,9 +29,9 @@ const QUICK_ACTIONS = [
 // navigations (to /inventory, /wholesalers), never an activeTab value.
 const VALID_TABS = ['home', 'orders', 'earnings', 'profile'];
 
-const STATUS_LABEL = { pending: 'Pending', confirmed: 'Confirmed', delivered: 'Delivered', cancelled: 'Cancelled' };
-const STATUS_COLOR = { pending: '#E65100', confirmed: '#2563EB', delivered: '#1A6B3C', cancelled: '#888888' };
-const STATUS_BG    = { pending: '#FFF3E0', confirmed: '#EAF2FF', delivered: '#E8F5EE', cancelled: '#F5F5F5' };
+const STATUS_LABEL = { pending: 'Pending', confirmed: 'Confirmed', out_for_delivery: 'Delivery Pe Hai', delivered: 'Delivered', cancelled: 'Cancelled' };
+const STATUS_COLOR = { pending: '#E65100', confirmed: '#2563EB', out_for_delivery: '#7C3AED', delivered: '#1A6B3C', cancelled: '#888888' };
+const STATUS_BG    = { pending: '#FFF3E0', confirmed: '#EAF2FF', out_for_delivery: '#F3EEFF', delivered: '#E8F5EE', cancelled: '#F5F5F5' };
 
 const ORDER_FILTERS = [
   { label: 'Sab',       value: 'sab' },
@@ -65,6 +66,11 @@ const mapOrderDisplay = (order) => {
         ]
       : [{ label: '💊 Medicine', color: '#2563EB', bg: '#EAF2FF' }],
     prescriptionUrl: order.prescription_url || null,
+    // B15: OrderCard's confirmed-status buttons need to know B2B vs B2C —
+    // B2B (this seller fulfilling a retailer's purchase order) keeps the
+    // old direct confirmed -> delivered flow untouched; only B2C gets the
+    // new out_for_delivery middle step.
+    isB2B:    isB2B,
     _id:      order.id,
   };
 };
@@ -84,7 +90,7 @@ const mapB2BPurchase = (order) => ({
 });
 
 // ─── Sub-components ───────────────────────────────────────────
-function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed, busy }) {
+function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, onCancelConfirmed, busy }) {
   const statusColor = STATUS_COLOR[order.status] || '#888888';
   const statusBg    = STATUS_BG[order.status]    || '#F5F5F5';
   const statusLabel = STATUS_LABEL[order.status] || order.status;
@@ -123,7 +129,12 @@ function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed, b
         {order.prescriptionUrl && (
           <span
             style={{ ...s.badge, color: '#7C3AED', backgroundColor: '#F3EEFF', cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={() => window.open(order.prescriptionUrl, '_blank', 'noopener,noreferrer')}
+            onClick={async () => {
+              console.log('[RX-SIGN] order.prescriptionUrl=', order.prescriptionUrl);
+              const url = await getSignedRxUrl(order.prescriptionUrl);
+              if (url) window.open(url, '_blank', 'noopener,noreferrer');
+              else alert('Prescription abhi khul nahi paa rahi');
+            }}
           >
             🩺 Rx Dekho
           </span>
@@ -141,7 +152,32 @@ function OrderCard({ order, onAccept, onDecline, onDeliver, onCancelConfirmed, b
         </div>
       )}
 
-      {order.status === 'confirmed' && (
+      {/* B2B (this seller fulfilling a retailer's purchase order) keeps
+          the old direct confirmed -> delivered flow, untouched — the new
+          out_for_delivery middle step is B2C-only. */}
+      {order.status === 'confirmed' && order.isB2B && (
+        <div style={s.pendBtns}>
+          <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onDeliver(order._id)}>
+            <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Mark Delivered'}
+          </button>
+          <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCancelConfirmed(order._id)}>
+            <X size={15} color="#DC3545" /> {busy ? '...' : 'Cancel'}
+          </button>
+        </div>
+      )}
+
+      {order.status === 'confirmed' && !order.isB2B && (
+        <div style={s.pendBtns}>
+          <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onOutForDelivery(order._id)}>
+            <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Out for Delivery'}
+          </button>
+          <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCancelConfirmed(order._id)}>
+            <X size={15} color="#DC3545" /> {busy ? '...' : 'Cancel'}
+          </button>
+        </div>
+      )}
+
+      {order.status === 'out_for_delivery' && (
         <div style={s.pendBtns}>
           <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onDeliver(order._id)}>
             <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Mark Delivered'}
@@ -650,6 +686,14 @@ export default function SellerDashboard() {
         p_type: isB2B ? 'b2b_update' : 'order_accepted', p_ref_id: orderId,
       }).then(({ error }) => { if (error) console.warn('[notify accept]', error); });
 
+      // R4-A: B2C only, best-effort — invoice numbering must never block
+      // an already-confirmed accept, so this is fire-and-forget same as
+      // the notification call above, not awaited.
+      if (!isB2B) {
+        supabase.rpc('generate_invoice_number', { p_order_id: orderId })
+          .then(({ error }) => { if (error) console.warn('[invoice generate]', error); });
+      }
+
       await fetchAllOrders(sellerData.id, orderFilter);
     } else {
       console.error('acceptOrder failed:', error);
@@ -706,6 +750,30 @@ export default function SellerDashboard() {
   };
 
   const declineOrder = (orderId) => withOrderBusy(orderId, () => declineOrderImpl(orderId));
+
+  // future: yeh action rider app se bhi trigger hoga — kept as its own
+  // clean status-update function (same shape as cancelConfirmedOrderImpl
+  // below) rather than folded into markDeliveredImpl, so a rider app can
+  // call this exact same transition independently later.
+  const markOutForDeliveryImpl = async (orderId) => {
+    const { error } = await updateOrderStatus(orderId, 'out_for_delivery');
+    if (error) {
+      console.error('markOutForDelivery failed:', error);
+      alert('Status update nahi hua: ' + (error.message || 'Unknown error'));
+      return;
+    }
+    const rawOrder = allOrders.find((o) => o.id === orderId) || pendingOrders.find((o) => o.id === orderId);
+    if (rawOrder) {
+      supabase.rpc('create_notification', {
+        p_title: 'Order Raaste Mein! 🛵',
+        p_body: 'Aapka order delivery ke liye nikal gaya',
+        p_type: 'order_out_for_delivery', p_ref_id: orderId,
+      }).then(({ error }) => { if (error) console.warn('[notify out_for_delivery]', error); });
+    }
+    await fetchAllOrders(sellerData.id, orderFilter);
+  };
+
+  const markOutForDelivery = (orderId) => withOrderBusy(orderId, () => markOutForDeliveryImpl(orderId));
 
   const markDeliveredImpl = async (orderId) => {
     // Commission math now happens server-side (mark_order_delivered RPC,
@@ -965,7 +1033,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {pendingDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1070,7 +1138,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {allDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}

@@ -1001,6 +1001,10 @@ function TabRouting() {
   const [saving,        setSaving]        = useState(false);
   const [timeoutMinutes,  setTimeoutMinutes]  = useState('15');
   const [savingTimeout,   setSavingTimeout]   = useState(false);
+  const [autoReassign,       setAutoReassign]       = useState(true);
+  const [savingAutoReassign, setSavingAutoReassign] = useState(false);
+  const [holdEnabled,        setHoldEnabled]        = useState(false);
+  const [savingHoldEnabled,  setSavingHoldEnabled]  = useState(false);
 
   const [pincodes,        setPincodes]        = useState([]);
   const [loadingPincodes, setLoadingPincodes] = useState(true);
@@ -1010,7 +1014,38 @@ function TabRouting() {
   const [newAreaName,     setNewAreaName]     = useState('');
   const [addingPincode,   setAddingPincode]   = useState(false);
 
-  useEffect(() => { loadSellers(); loadTimeout(); loadPincodes(); }, []);
+  // needs_admin orders (R2-F) — reject chain exhausted, no seller
+  // currently assigned, waiting on manual assignment.
+  const [needsAdminOrders,    setNeedsAdminOrders]    = useState([]);
+  const [loadingNeedsAdmin,   setLoadingNeedsAdmin]   = useState(true);
+  const [assignPick,          setAssignPick]          = useState({}); // orderId -> sellerId
+  const [assigningId,         setAssigningId]         = useState(null);
+
+  useEffect(() => { loadSellers(); loadTimeout(); loadPincodes(); loadNeedsAdminOrders(); }, []);
+
+  const loadNeedsAdminOrders = async () => {
+    setLoadingNeedsAdmin(true);
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*), users(name)')
+      .eq('routing_status', 'needs_admin')
+      .order('created_at', { ascending: false });
+    if (error) { console.error('TabRouting loadNeedsAdminOrders error:', error); setLoadingNeedsAdmin(false); return; }
+    setNeedsAdminOrders(data || []);
+    setLoadingNeedsAdmin(false);
+  };
+
+  const assignOrder = async (orderId) => {
+    const sellerId = assignPick[orderId];
+    if (!sellerId) { alert('Pehle seller chuno'); return; }
+    setAssigningId(orderId);
+    const { data, error } = await supabase.rpc('assign_order_to_seller', {
+      p_order_id: orderId, p_seller_id: sellerId,
+    });
+    setAssigningId(null);
+    if (error || !data?.success) { alert('Assign nahi hua: ' + (error?.message || data?.message || 'Unknown error')); return; }
+    setNeedsAdminOrders((prev) => prev.filter((o) => o.id !== orderId));
+  };
 
   const loadSellers = async () => {
     setLoading(true);
@@ -1027,11 +1062,31 @@ function TabRouting() {
   const loadTimeout = async () => {
     const { data, error } = await supabase
       .from('platform_settings')
-      .select('routing_timeout_minutes')
+      .select('routing_timeout_minutes, routing_auto_reassign, routing_hold_enabled')
       .eq('id', 1)
       .maybeSingle();
     if (error) { console.error('TabRouting loadTimeout error:', error); return; }
     setTimeoutMinutes(String(data?.routing_timeout_minutes ?? 15));
+    setAutoReassign(data?.routing_auto_reassign ?? true);
+    setHoldEnabled(data?.routing_hold_enabled ?? false);
+  };
+
+  const toggleAutoReassign = async () => {
+    setSavingAutoReassign(true);
+    const next = !autoReassign;
+    const { error } = await supabase.from('platform_settings').update({ routing_auto_reassign: next }).eq('id', 1);
+    setSavingAutoReassign(false);
+    if (error) { alert('Update nahi hua: ' + error.message); return; }
+    setAutoReassign(next);
+  };
+
+  const toggleHoldEnabled = async () => {
+    setSavingHoldEnabled(true);
+    const next = !holdEnabled;
+    const { error } = await supabase.from('platform_settings').update({ routing_hold_enabled: next }).eq('id', 1);
+    setSavingHoldEnabled(false);
+    if (error) { alert('Update nahi hua: ' + error.message); return; }
+    setHoldEnabled(next);
   };
 
   const setWeightInput = (sellerId, value) => {
@@ -1124,6 +1179,58 @@ function TabRouting() {
         Yeh sirf neev hai — abhi koi order automatically route nahi hota. Weights/timeout yahin set karo, aage ke phase inhe use karenge.
       </p>
 
+      <div style={{ ...s.formCard, borderLeft: needsAdminOrders.length > 0 ? '3px solid #DC2626' : undefined }}>
+        <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 4px' }}>Attention Chahiye ⚠️</p>
+        <p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>
+          Yeh orders har seller ne reject kar diya hai — koi seller currently assigned nahi hai, manually assign karo.
+        </p>
+        {loadingNeedsAdmin ? (
+          <p style={s.emptyText}>Loading...</p>
+        ) : needsAdminOrders.length === 0 ? (
+          <p style={s.emptyText}>Koi order attention nahi maang raha 👍</p>
+        ) : (
+          needsAdminOrders.map((order) => {
+            const rejectCount = (order.routing_history || []).filter((h) => h.result === 'rejected' || h.result === 'timeout').length;
+            const items = (order.order_items || []).map((i) => `${i.medicine_name || i.name || 'Item'} x${i.quantity || 1}`).join(', ');
+            return (
+              <div key={order.id} style={{ padding: '10px 0', borderBottom: '1px solid #F0F0F0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: '14px', color: '#333', margin: 0, fontWeight: '600' }}>
+                      #{order.order_number || String(order.id).slice(0, 8).toUpperCase()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
+                      {order.users?.name || 'Customer'} · Pincode: {order.delivery_pincode || '—'}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#555', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {items || 'Items —'}
+                    </p>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: '700', flexShrink: 0 }}>{rejectCount} reject</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <select
+                    style={{ ...s.inputSm, flex: 1 }}
+                    value={assignPick[order.id] || ''}
+                    onChange={(e) => setAssignPick((prev) => ({ ...prev, [order.id]: e.target.value }))}
+                  >
+                    <option value="">Seller chuno...</option>
+                    {sellers.map((s2) => <option key={s2.id} value={s2.id}>{s2.store_name}</option>)}
+                  </select>
+                  <button
+                    style={{ ...s.approveBtn, opacity: assigningId === order.id ? 0.7 : 1 }}
+                    onClick={() => assignOrder(order.id)}
+                    disabled={assigningId === order.id}
+                  >
+                    {assigningId === order.id ? 'Assign Ho Raha Hai...' : 'Assign Karo'}
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
       <div style={s.formCard}>
         <p style={{ fontSize: '13px', fontWeight: '700', color: '#444', margin: '0 0 12px' }}>Seller Weights (Retailer)</p>
         {loading ? (
@@ -1180,6 +1287,32 @@ function TabRouting() {
         <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: savingTimeout ? 0.7 : 1 }} onClick={saveTimeout} disabled={savingTimeout}>
           {savingTimeout ? 'Save Ho Raha Hai...' : 'Save Karo'}
         </button>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 0', marginTop: '14px', borderTop: '1px solid #F0F0F0', gap: '10px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: '13px', color: '#333', margin: 0, fontWeight: '600' }}>Auto-reassign (timeout par)</p>
+            <p style={{ fontSize: '11px', color: '#888', margin: '2px 0 0' }}>Off karne par expired orders admin ke paas hi rahenge, apne aap reassign nahi honge</p>
+          </div>
+          <div
+            style={{ width: '44px', height: '24px', borderRadius: '12px', backgroundColor: autoReassign ? '#1A6B3C' : '#ccc', cursor: savingAutoReassign ? 'default' : 'pointer', position: 'relative', transition: 'background 0.2s', opacity: savingAutoReassign ? 0.6 : 1, flexShrink: 0 }}
+            onClick={() => { if (!savingAutoReassign) toggleAutoReassign(); }}
+          >
+            <div style={{ position: 'absolute', top: '3px', left: autoReassign ? '23px' : '3px', width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 0', marginTop: '14px', borderTop: '1px solid #F0F0F0', gap: '10px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: '13px', color: '#333', margin: 0, fontWeight: '600' }}>Seller Hold (jald aa raha)</p>
+            <p style={{ fontSize: '11px', color: '#888', margin: '2px 0 0' }}>Future feature — abhi kuch is toggle ko padhta nahi</p>
+          </div>
+          <div
+            style={{ width: '44px', height: '24px', borderRadius: '12px', backgroundColor: holdEnabled ? '#1A6B3C' : '#ccc', cursor: savingHoldEnabled ? 'default' : 'pointer', position: 'relative', transition: 'background 0.2s', opacity: savingHoldEnabled ? 0.6 : 1, flexShrink: 0 }}
+            onClick={() => { if (!savingHoldEnabled) toggleHoldEnabled(); }}
+          >
+            <div style={{ position: 'absolute', top: '3px', left: holdEnabled ? '23px' : '3px', width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+          </div>
+        </div>
       </div>
 
       <div style={s.formCard}>

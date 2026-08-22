@@ -677,6 +677,16 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
     onDone();
   };
 
+  // ── Unmatched-names export — same Blob+anchor pattern as the outer
+  // downloadTemplate(), just scoped to this modal's own results state.
+  const downloadUnmatched = () => {
+    const csv = ['unmatched_name', ...results.unmatched].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'medsetu_unmatched_medicines.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const validCount   = csvData.filter((r) => r._valid).length;
   const invalidCount = csvData.filter((r) => !r._valid).length;
 
@@ -701,6 +711,16 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
                 {results.unmatched.map((n, i) => (
                   <p key={i} style={{ fontSize: '12px', color: '#555555', margin: '2px 0', paddingLeft: '8px' }}>• {n}</p>
                 ))}
+                <button
+                  style={{
+                    marginTop: '8px', padding: '8px 12px', backgroundColor: '#FFF3E0',
+                    color: '#E65100', border: '1px solid #E65100', borderRadius: '8px',
+                    fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                  onClick={downloadUnmatched}
+                >
+                  Unmatched Download
+                </button>
               </div>
             )}
             {results.failed.length > 0 && (
@@ -738,9 +758,11 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
           <>
             <div style={bs.infoCard}>
               <p style={bs.infoTitle}>CSV Format Guide</p>
-              <p style={bs.infoLine}>Columns: <strong>name, brand, category, stock, max_stock, mrp, selling_price, expiry_date</strong></p>
+              <p style={bs.infoLine}>Columns: <strong>name, stock, mrp, selling_price, expiry_date, unit, batch_number</strong></p>
               <p style={bs.infoLine}>• <strong>name, stock, mrp</strong> — required fields</p>
-              <p style={bs.infoLine}>• expiry_date format: <strong>YYYY-MM</strong> (e.g. 2025-12)</p>
+              <p style={bs.infoLine}>• <strong>selling_price</strong> — optional, khali ho to MRP use hoga</p>
+              <p style={bs.infoLine}>• expiry_date format: <strong>YYYY-MM</strong> (e.g. 2025-12) — optional</p>
+              <p style={bs.infoLine}>• unit (default: strip), batch_number — optional</p>
             </div>
 
             {uploadStatus === 'idle' && (
@@ -1021,9 +1043,9 @@ export default function InventoryManagement() {
   // ── CSV Template Download ─────────────────────────────────────
   const downloadTemplate = () => {
     const csv = [
-      'name,brand,category,stock,max_stock,mrp,selling_price,expiry_date',
-      'Paracetamol 500mg,Crocin,Tablets,100,200,15.00,12.00,2025-12',
-      'Amoxicillin 250mg,Amoxil,Capsules,50,150,45.00,38.00,2026-06',
+      'name,stock,mrp,selling_price,expiry_date,unit,batch_number',
+      'Paracetamol 500mg,100,15.00,12.00,2025-12,strip,B2025A',
+      'Amoxicillin 250mg,50,45.00,38.00,2026-06,strip,B2026C',
     ].join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');

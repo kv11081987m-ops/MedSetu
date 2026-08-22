@@ -4,10 +4,11 @@ import { fetchOrderById } from '../lib/orders';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import { generateInvoicePDF } from '../lib/invoicePdf';
 import BottomNav from '../components/BottomNav';
 import {
   ArrowLeft, CheckCircle, Clock, Phone, MessageCircle,
-  MapPin, Package, IndianRupee, CreditCard, Store, X,
+  MapPin, Package, IndianRupee, CreditCard, Store, X, Download,
 } from 'lucide-react';
 
 // ─── Steps ────────────────────────────────────────────────────
@@ -65,7 +66,15 @@ function buildSteps(order) {
   const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;
   const fmt        = (d) => d ? formatIST(d, { hour: '2-digit', minute: '2-digit' }) : '- -';
   return [
-    { id: 1, title: 'Order Confirm Hua',    sub: 'Order Accept Ho Gaya',                   time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
+    // Bug fix: step 1 used to always read "Order Confirm Hua" / "Order
+    // Accept Ho Gaya" — including while status is still 'pending' (seller
+    // hasn't confirmed yet), which falsely told the customer their order
+    // was already accepted. It's "Order Placed" now, always — same
+    // wording OrderHistory.jsx's STATUS_MAP uses for 'pending' — active
+    // (LIVE) while pending, done (green ✓) once confirmed+, so the
+    // "order got confirmed" moment is now communicated by step 2 turning
+    // LIVE instead of by relabeling step 1.
+    { id: 1, title: 'Order Placed',         sub: 'Store confirm karega',                   time: fmt(order?.created_at),  state: activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending' },
     { id: 2, title: 'Taiyari Ho Rahi Hai',  sub: 'Store aapki medicine pack kar raha hai', time: '- -',                   state: activeStep > 2 ? 'done' : activeStep === 2 ? 'active' : 'pending' },
     { id: 3, title: 'Delivery Pe Hai',      sub: 'Delivery boy aapke paas aa raha hai',    time: 'Expected soon',         state: activeStep > 3 ? 'done' : activeStep === 3 ? 'active' : 'pending' },
     { id: 4, title: 'Deliver Ho Gaya',      sub: 'Order aapko mil gaya',                   time: '- -',                   state: activeStep >= 4 ? 'done' : 'pending' },
@@ -125,6 +134,20 @@ export default function OrderTracking() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
+  const [billLoading, setBillLoading] = useState(false);
+
+  const handleDownloadBill = async () => {
+    if (!order || billLoading) return;
+    setBillLoading(true);
+    try {
+      await generateInvoicePDF(order);
+    } catch (e) {
+      console.error('[bill download]', e);
+      alert('Bill download nahi hua, dobara try karo');
+    } finally {
+      setBillLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchSupportWhatsapp().then(setSupportWhatsapp);
@@ -223,7 +246,7 @@ export default function OrderTracking() {
         <div style={s.screen}>
           <div style={s.header}>
             <button style={s.iconBtn} onClick={() => navigate('/home')}>
-              <ArrowLeft size={22} color="#1A1A1A" />
+              <ArrowLeft size={22} color="#0C447C" />
             </button>
             <div>
               <p style={s.headerTitle}>Order Track Karo</p>
@@ -255,7 +278,7 @@ export default function OrderTracking() {
         {/* ── Header ── */}
         <div style={s.header}>
           <button style={s.iconBtn} onClick={() => navigate('/home')}>
-            <ArrowLeft size={22} color="#1A1A1A" />
+            <ArrowLeft size={22} color="#0C447C" />
           </button>
           <div style={{ textAlign: 'center' }}>
             <p style={s.headerTitle}>Order Track Karo</p>
@@ -269,7 +292,7 @@ export default function OrderTracking() {
 
           {/* ETA Banner — conditional on real order status */}
           {order?.status === 'delivered' ? (
-            <div style={{ ...s.etaBanner, backgroundColor: '#1A6B3C' }}>
+            <div style={s.etaBanner}>
               <CheckCircle size={18} color="#FFFFFF" />
               <p style={{ ...s.etaText, margin: 0 }}>🎉 Order deliver ho gaya!</p>
             </div>
@@ -314,7 +337,7 @@ export default function OrderTracking() {
                       <p style={{
                         ...s.stepTitle,
                         color: step.state === 'active'
-                          ? '#1A6B3C'
+                          ? '#F26C0A'
                           : step.state === 'pending'
                             ? '#AAAAAA'
                             : '#1A1A1A',
@@ -324,7 +347,7 @@ export default function OrderTracking() {
                       </p>
                       <span style={{
                         ...s.stepTime,
-                        color: step.state === 'active' ? '#1A6B3C' : '#AAAAAA',
+                        color: step.state === 'active' ? '#F26C0A' : '#AAAAAA',
                         fontWeight: step.state === 'active' ? '600' : '400',
                       }}>
                         {step.time}
@@ -393,6 +416,14 @@ export default function OrderTracking() {
                 <span style={s.summaryText}>{text}</span>
               </div>
             ))}
+
+            {/* R4-B: bill download — delivered B2C orders only */}
+            {order?.status === 'delivered' && order?.buyer_type !== 'retailer' && (
+              <button style={s.billBtn} onClick={handleDownloadBill} disabled={billLoading}>
+                <Download size={14} color="#FFFFFF" />
+                {billLoading ? 'Bill Ban Raha Hai...' : 'Bill Download (PDF)'}
+              </button>
+            )}
           </div>
 
           {/* Help Section */}
@@ -400,7 +431,7 @@ export default function OrderTracking() {
             <p style={s.cardTitle}>Koi Samasya?</p>
             <div style={s.helpRow}>
               <button style={s.helpBtnGreen}
-                onClick={() => window.open('tel:+919876543210')}>
+                onClick={() => window.open(`tel:${order?.sellers?.phone || ''}`)}>
                 <Phone size={15} color="#1A6B3C" />
                 Store Ko Call Karo
               </button>
@@ -408,14 +439,18 @@ export default function OrderTracking() {
                 const msg = encodeURIComponent('Namaste, mujhe apne order ke baare mein poochna tha. Kya aap help kar sakte hain?');
                 window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');
               }}>
-                <MessageCircle size={15} color="#2563EB" />
+                <MessageCircle size={15} color="#0C447C" />
                 Support Se Baat Karo
               </button>
             </div>
           </div>
 
-          {/* Cancel — only before out_for_delivery */}
-          {activeStep < 3 && (
+          {/* Cancel — only before the seller accepts (status still
+              'pending' / step 1). getEtaBanner's own "Order accept ho
+              gaya!" message fires at 'confirmed', so that's the accept
+              moment — activeStep is 2 from there on (confirmed and
+              preparing share step 2), so `=== 1` is the exact cutoff. */}
+          {activeStep === 1 && (
             <button style={s.cancelBtn} onClick={() => setShowCancel(true)}>
               Order Cancel Karo
             </button>
@@ -458,14 +493,14 @@ const s = {
     position: 'relative',
   },
 
-  // Header
+  // Header — same soft gradient patti as Home/Categories/Checkout/OrderHistory
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '14px 14px 12px',
-    backgroundColor: '#FFFFFF',
-    borderBottom: '1px solid #F0F0F0',
+    padding: '10px 16px',
+    background: 'linear-gradient(90deg, #FFF1E6 0%, #EAF2FB 100%)',
+    borderBottom: '1px solid rgba(12,68,124,0.08)',
     position: 'sticky',
     top: 0,
     zIndex: 10,
@@ -473,7 +508,7 @@ const s = {
   headerTitle: {
     fontSize: '16px',
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#0C447C',
     margin: 0,
     textAlign: 'center',
   },
@@ -503,9 +538,9 @@ const s = {
     padding: '12px',
   },
 
-  // ETA Banner
+  // ETA Banner — same soft green->blue gradient as OrderHistory's summary card
   etaBanner: {
-    backgroundColor: '#1A6B3C',
+    background: 'linear-gradient(135deg, #1A6B3C 0%, #156B4A 45%, #0C447C 100%)',
     borderRadius: '14px',
     padding: '14px 16px',
     display: 'flex',
@@ -527,7 +562,7 @@ const s = {
   progressFill: {
     width: '70%',
     height: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#E0A818',
     borderRadius: '3px',
   },
 
@@ -536,6 +571,7 @@ const s = {
     backgroundColor: '#FFFFFF',
     borderRadius: '14px',
     padding: '16px',
+    border: '1px solid rgba(12,68,124,0.08)',
     boxShadow: '0 1px 5px rgba(0,0,0,0.05)',
     display: 'flex',
     flexDirection: 'column',
@@ -571,11 +607,12 @@ const s = {
     justifyContent: 'center',
     flexShrink: 0,
   },
+  // Active/LIVE stage = brand orange (distinct from done=green, pending=grey)
   circleActive: {
     position: 'absolute',
     inset: 0,
     borderRadius: '50%',
-    backgroundColor: '#1A6B3C',
+    backgroundColor: '#F26C0A',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -590,7 +627,7 @@ const s = {
     position: 'absolute',
     inset: '-4px',
     borderRadius: '50%',
-    backgroundColor: 'rgba(26,107,60,0.25)',
+    backgroundColor: 'rgba(242,108,10,0.25)',
     animation: 'pulse 1.6s ease-in-out infinite',
   },
   circlePending: {
@@ -630,7 +667,7 @@ const s = {
     fontSize: '9px',
     fontWeight: '800',
     color: '#FFFFFF',
-    backgroundColor: '#1A6B3C',
+    backgroundColor: '#F26C0A',
     padding: '2px 6px',
     borderRadius: '4px',
     letterSpacing: '0.5px',
@@ -753,6 +790,23 @@ const s = {
     fontSize: '13px',
     color: '#333333',
   },
+  billBtn: {
+    width: '100%',
+    marginTop: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    padding: '11px',
+    backgroundColor: '#1A6B3C',
+    border: 'none',
+    borderRadius: '10px',
+    color: '#FFFFFF',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
 
   // Help
   helpRow: {
@@ -783,9 +837,9 @@ const s = {
     gap: '6px',
     padding: '11px',
     backgroundColor: '#FFFFFF',
-    border: '1.5px solid #2563EB',
+    border: '1.5px solid #0C447C',
     borderRadius: '10px',
-    color: '#2563EB',
+    color: '#0C447C',
     fontSize: '12px',
     fontWeight: '600',
     cursor: 'pointer',

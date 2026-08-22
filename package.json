@@ -13,10 +13,14 @@
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/supabase-js": "^2.108.0",
     "firebase": "^12.15.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.17.0",
     "papaparse": "^5.5.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.17.0"
   },
   "devDependencies": {

@@ -6,8 +6,11 @@ import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import MedicineCard from '../components/MedicineCard';
 import BottomNav from '../components/BottomNav';
+import PhoneCollectModal from '../components/PhoneCollectModal';
+import logo from '../assets/logo.png';
+import slogan from '../assets/slogan.png';
 import {
-  Bell, MapPin, Search, Camera,
+  Bell, MapPin, Search, Camera, X,
   Pill, ShoppingCart,
   Droplet, Leaf, Phone, Calendar,
 } from 'lucide-react';
@@ -23,6 +26,12 @@ const NOTIF_COLORS = {
 };
 const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 
+// R3-CORE: hardcoded for now — 026_serviceablePincodes.sql already has a
+// serviceable_pincodes table with these same 2 rows, but nothing reads it
+// yet. Move this to a platform_settings/table read later instead of
+// duplicating the list.
+const SERVICEABLE_PINCODES = ['274001', '274201'];
+
 // R3-C1: colourful horizontal service tabs — each its own MedSetu-palette
 // colour. Allopath is the only one with real content (best-selling
 // medicines below, shared MedicineCard); the rest show a "Jald Aa Raha
@@ -34,7 +43,7 @@ const SERVICE_TABS = [
   { id: 'homeopath',   label: 'Homeopath',        Icon: Droplet,  color: '#0C447C', bg: '#EAF2FF', desc: 'Yeh feature jald available hoga' },
   { id: 'ayurved',     label: 'Ayurved',          Icon: Leaf,     color: '#E0A818', bg: '#FFF8E1', desc: 'Yeh feature jald available hoga' },
   { id: 'pharmacist',  label: 'Call Pharmacist',  Icon: Phone,    color: '#F26C0A', bg: '#FFF1E8', desc: 'Yeh feature jald available hoga' },
-  { id: 'appointment', label: 'Book Appointment', Icon: Calendar, color: '#7C3AED', bg: '#F3EEFF', desc: 'Yeh feature jald available hoga' },
+  { id: 'appointment', label: 'Book Appointment', Icon: Calendar, color: '#B54708', bg: '#FDECE3', desc: 'Yeh feature jald available hoga' },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────
@@ -64,8 +73,25 @@ export default function CustomerHome() {
   const [offers, setOffers]           = useState([]);
   const [mrpMode, setMrpMode]         = useState(false);
   const [popularMeds, setPopularMeds] = useState([]);
+  const [pincode, setPincode]         = useState(null);
+  const [addressLabel, setAddressLabel] = useState('');
+  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [modalPincode, setModalPincode] = useState('');
+  // Hard-mandatory mobile gate (Fix 1) — Google/magic-link customers land
+  // here with users.phone still null (AuthContext's customer upsert never
+  // sets it). phoneGateUser holds the cached user row so the modal has an
+  // id to update; stays null/unused for anyone who already has a phone.
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [phoneGateUser, setPhoneGateUser] = useState(null);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
   const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
+  // null = no default address/pincode on file yet (neutral display).
+  // true/false = pincode known, in/out of the serviceable list. `pincode`
+  // doubles as the "Change" popup's live-preview value (R3-CORE, not
+  // persisted — see modalPincode's onChange below) as well as the real
+  // default address's pincode fetched on load.
+  const isPincodeServiceable = pincode ? SERVICEABLE_PINCODES.includes(pincode) : null;
+  const modalIsServiceable = modalPincode.length === 6 ? SERVICEABLE_PINCODES.includes(modalPincode) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +109,13 @@ export default function CustomerHome() {
           return;
         }
 
+        // Fix 1 — Google/magic-link customer with no phone on file yet.
+        // devSession/no-id sessions have nothing to update, so skip them.
+        if (!cancelled && storedUser?.id && !storedUser?.phone) {
+          setPhoneGateUser(storedUser);
+          setShowPhoneModal(true);
+        }
+
         // mrpMode must be known before fetching best-selling medicines —
         // fetchPopularMedicines' stock-vs-seller_hidden filter depends on
         // it (same ordering MedicineSearch.jsx's Popular Medicines uses).
@@ -96,6 +129,25 @@ export default function CustomerHome() {
 
         // Fetch real notifications (only if user has a DB id)
         const userId = storedUser?.id;
+
+        // Default address's pincode — same table/query shape as
+        // Checkout.jsx's fetchDefaultAddress. No pincode on file leaves
+        // `pincode` at its null default (neutral display, no green/red).
+        if (userId) {
+          try {
+            const { data: addrData } = await supabase
+              .from('addresses')
+              .select('pincode, city, state')
+              .eq('user_id', userId)
+              .eq('is_default', true)
+              .maybeSingle();
+            if (!cancelled) {
+              setPincode(addrData?.pincode || null);
+              setAddressLabel(addrData?.city && addrData?.state ? `${addrData.city}, ${addrData.state}` : '');
+            }
+          } catch {}
+        }
+
         if (userId) {
           try {
             const { data } = await fetchUserNotifications(userId);
@@ -157,10 +209,11 @@ export default function CustomerHome() {
 
         {/* ── Header ── */}
         <div style={s.header}>
-          <div style={{ background: '#FFFFFF', borderRadius: '8px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center' }}>
-            <img src="/logo.png" alt="MedSetu Logo" style={{ height: '30px', width: 'auto', display: 'block' }} />
+          <img src={logo} alt="MedSetu" style={s.headerLogo} />
+          <div style={s.headerSloganWrap}>
+            <img src={slogan} alt="Aapki Dawai Aapke Dwar" style={s.headerSlogan} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <button style={s.iconBtn} aria-label="Cart" onClick={() => navigate('/checkout')}>
               <div style={{ position: 'relative' }}>
                 <ShoppingCart size={22} color="#1A1A1A" />
@@ -211,17 +264,44 @@ export default function CustomerHome() {
             })}
           </div>
 
-          {/* Address row — thin, static for now (tap does nothing yet) */}
-          <div style={s.addressRow}>
-            <MapPin size={13} color="#888888" />
-            <span style={s.addressText}>274001 · Deoria, Uttar Pradesh</span>
+          {/* Location block — gradient-bordered pincode/address + Change,
+              serviceability check (R3-CORE, no GPS auto-detect yet) shown
+              as a thin line just below. Tap on the row itself does nothing yet. */}
+          <div style={s.locationBlock}>
+            <div style={s.addressRowWrap}>
+              <div style={s.addressRowInner}>
+                <div style={s.addressInfoGroup}>
+                  <MapPin size={13} color="#888888" style={{ flexShrink: 0 }} />
+                  <span style={s.addressText}>
+                    {pincode ? `${pincode}${addressLabel ? ' · ' + addressLabel : ''}` : '274001 · Deoria, Uttar Pradesh'}
+                  </span>
+                </div>
+                <button
+                  style={s.changeBtn}
+                  onClick={() => { setModalPincode(pincode || ''); setShowChangeModal(true); }}
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+
+            {isPincodeServiceable !== null && (
+              <p style={{
+                ...s.serviceabilityLine,
+                color: isPincodeServiceable ? '#1A6B3C' : '#DC3545',
+              }}>
+                {isPincodeServiceable
+                  ? '✓ Aapke area me delivery uplabdh hai'
+                  : 'Abhi aapke area me service uplabdh nahi hai. Ham jald hi shuru karenge.'}
+              </p>
+            )}
           </div>
 
           {/* Search Bar + Camera (prescription scan entry) */}
           <div style={s.searchRow}>
             <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
               <Search size={18} color="#AAAAAA" />
-              <span style={s.searchPlaceholder}>Medicine ya store dhundho...</span>
+              <span style={s.searchPlaceholder}>Kya dhundh rahe hain?</span>
             </button>
             <button style={s.cameraBtn} aria-label="Prescription Upload" onClick={() => navigate('/prescription')}>
               <Camera size={20} color="#FFFFFF" />
@@ -346,6 +426,67 @@ export default function CustomerHome() {
             </div>
           </div>
         )}
+
+        {/* ── Pincode "Change" Popup (R3-CORE) ──
+            Local-only preview: typing a 6-digit pincode here just updates
+            `pincode` (in-memory, same state the location block already
+            reads) so the serviceability line reflects it immediately —
+            nothing is written to the addresses table. Saving a real
+            address is left entirely to the existing R6 form on
+            /profile — this only links there. */}
+        {showChangeModal && (
+          <div style={s.modalOverlay} onClick={() => setShowChangeModal(false)}>
+            <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+              <div style={s.modalHeader}>
+                <span style={s.modalTitle}>Pincode Check Karein</span>
+                <button style={s.modalCloseBtn} onClick={() => setShowChangeModal(false)} aria-label="Band karein">
+                  <X size={18} color="#888888" />
+                </button>
+              </div>
+              <input
+                style={s.modalInput}
+                type="text"
+                inputMode="numeric"
+                placeholder="6-digit pincode"
+                value={modalPincode}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setModalPincode(digits);
+                  if (digits.length === 6) setPincode(digits);
+                }}
+                maxLength={6}
+                autoFocus
+              />
+              {modalIsServiceable !== null && (
+                <p style={{
+                  ...s.modalServiceMsg,
+                  color: modalIsServiceable ? '#1A6B3C' : '#DC3545',
+                  backgroundColor: modalIsServiceable ? '#E8F5EE' : '#FDEDED',
+                }}>
+                  {modalIsServiceable
+                    ? '✓ Aapke area me delivery uplabdh hai'
+                    : 'Abhi aapke area me service uplabdh nahi hai. Ham jald hi shuru karenge.'}
+                </p>
+              )}
+              <button
+                style={s.modalAddressLink}
+                onClick={() => { setShowChangeModal(false); navigate('/profile', { state: { openAddress: true } }); }}
+              >
+                Poora address add karna hai? → Address form kholein
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showPhoneModal && (
+          <PhoneCollectModal
+            user={phoneGateUser}
+            onSaved={(phone) => {
+              setPhoneGateUser((p) => ({ ...p, phone }));
+              setShowPhoneModal(false);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -374,14 +515,30 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '16px 20px 12px',
-    backgroundColor: '#FFFFFF',
+    padding: '6px 16px',
+    background: 'linear-gradient(90deg, #FFF1E6 0%, #EAF2FB 100%)',
+    borderBottom: '1px solid rgba(12,68,124,0.08)',
   },
-  logo: {
-    fontSize: '22px',
-    fontWeight: '800',
-    color: '#1A6B3C',
-    letterSpacing: '-0.4px',
+  headerLogo: {
+    height: '36px',
+    width: 'auto',
+    display: 'block',
+    flexShrink: 0,
+  },
+  headerSloganWrap: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 10px',
+  },
+  headerSlogan: {
+    height: '22px',
+    width: 'auto',
+    maxWidth: '100%',
+    objectFit: 'contain',
+    display: 'block',
   },
   iconBtn: {
     background: 'none',
@@ -510,21 +667,17 @@ const s = {
     gap: '16px',
   },
 
-  // Service Tabs (R3-C1) — colourful horizontal row
+  // Service Tabs (R3-C1) — colourful row, edge-to-edge
   serviceTabsRow: {
     display: 'flex',
-    gap: '14px',
-    overflowX: 'auto',
-    paddingBottom: '4px',
-    scrollbarWidth: 'none',
-    msOverflowStyle: 'none',
+    justifyContent: 'space-between',
+    width: '100%',
   },
   serviceTab: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: '6px',
-    flexShrink: 0,
     width: '64px',
     background: 'none',
     border: 'none',
@@ -547,16 +700,134 @@ const s = {
     lineHeight: '1.25',
   },
 
-  // Address row — thin, static
-  addressRow: {
+  // Location block — gradient-bordered pincode/address row + Change,
+  // plus a thin serviceability line just below it. Edges match the
+  // search bar underneath (same width, no extra outer padding).
+  locationBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  addressRowWrap: {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '1.5px',
+    borderRadius: '10px',
+    background: 'linear-gradient(90deg, #F26C0A 0%, #0C447C 50%, #E0A818 100%)',
+  },
+  addressRowInner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    borderRadius: '8.5px',
+    padding: '8px 12px',
+    backgroundColor: '#FFFFFF',
+  },
+  addressInfoGroup: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '0 2px',
+    minWidth: 0,
+    flex: 1,
   },
   addressText: {
     fontSize: '11.5px',
     color: '#666666',
+    lineHeight: '1.4',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  changeBtn: {
+    flexShrink: 0,
+    background: '#EAF2FB',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '4px 10px',
+    fontSize: '11.5px',
+    fontWeight: '700',
+    color: '#0C447C',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  serviceabilityLine: {
+    fontSize: '11px',
+    fontWeight: '600',
+    margin: 0,
+    padding: '0 4px',
+    lineHeight: '1.4',
+  },
+
+  // Pincode "Change" popup
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+    padding: '20px',
+  },
+  modalBox: {
+    width: '100%',
+    maxWidth: '340px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '16px',
+    padding: '18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    fontSize: '15px',
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  modalCloseBtn: {
+    background: 'none',
+    border: 'none',
+    padding: '2px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  modalInput: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1.5px solid rgba(12,68,124,0.25)',
+    borderRadius: '10px',
+    padding: '11px 14px',
+    fontSize: '15px',
+    letterSpacing: '1px',
+    color: '#1A1A1A',
+    fontFamily: 'inherit',
+    outline: 'none',
+  },
+  modalServiceMsg: {
+    fontSize: '12.5px',
+    fontWeight: '600',
+    margin: 0,
+    padding: '8px 10px',
+    borderRadius: '8px',
+    lineHeight: '1.4',
+  },
+  modalAddressLink: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    fontSize: '12.5px',
+    fontWeight: '600',
+    color: '#F26C0A',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    textAlign: 'left',
   },
 
   // Search + Camera
@@ -570,7 +841,7 @@ const s = {
     alignItems: 'center',
     gap: '10px',
     backgroundColor: '#FFFFFF',
-    border: '1.5px solid #E8E8E8',
+    border: '1.5px solid rgba(12,68,124,0.25)',
     borderRadius: '12px',
     padding: '13px 16px',
     flex: 1,

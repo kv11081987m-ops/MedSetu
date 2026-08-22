@@ -2,11 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import {
-  ArrowLeft, X, Clock, TrendingUp, Pill, Wrench,
+  ArrowLeft, X, Clock, TrendingUp,
   Search, RefreshCw,
 } from 'lucide-react';
-import { searchMedicines, fetchPopularMedicines, mapMedicine, getRatePerDose, fetchSellersForMedicine, fetchSupportWhatsapp, fetchMrpMode } from '../lib/api';
-import MedicineCard, { badge } from '../components/MedicineCard';
+import { searchMedicines, fetchPopularMedicines, mapMedicine, fetchSupportWhatsapp, fetchMrpMode } from '../lib/api';
+import MedicineCard from '../components/MedicineCard';
 import CartBar from '../components/CartBar';
 import BottomNav from '../components/BottomNav';
 
@@ -31,68 +31,6 @@ function SectionHeader({ bg, borderColor, icon, title, subtitle, tag }) {
           {tag}
         </span>
       )}
-    </div>
-  );
-}
-
-// ─── PopularCard ──────────────────────────────────────────────
-// R3-A: same no-store-picker redesign as MedicineCard, compact 2-col
-// grid version — Generic/Branded + Rx badges, price + rate/dose, Add.
-function PopularCard({ item, mrpMode }) {
-  const { addToCart } = useCart();
-  const [added,      setAdded]      = useState(false);
-  const [addLoading, setAddLoading] = useState(false);
-  const isEquip = item.type === 'equipment';
-
-  const handleQuickAdd = async () => {
-    if (addLoading || added) return;
-    setAddLoading(true);
-    const sellerList = await fetchSellersForMedicine(item.id, mrpMode, item.mrp);
-    setAddLoading(false);
-    if (sellerList.length === 0) return;
-    const cheapest = sellerList[0];
-    addToCart({ ...item, price: cheapest.price, quantity: 1 });
-    setAdded(true);
-    setTimeout(() => setAdded(false), 2000);
-  };
-
-  return (
-    <div style={s.popCard}>
-      <div style={{ ...s.popIconBox, backgroundColor: isEquip ? '#EAF2FF' : '#E8F5EE' }}>
-        {isEquip ? <Wrench size={18} color="#2563EB" /> : <Pill size={18} color="#1A6B3C" />}
-      </div>
-      <p style={s.popName}>
-        {item.name}
-        {item.strength && <span style={{ color: '#888', fontWeight: '500' }}> · {item.strength}</span>}
-      </p>
-      <p style={s.popSalt}>{item.salt}</p>
-      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        <span style={badge(item.is_generic ? '#E8F5E9' : '#F5F5F5', item.is_generic ? '#1A6B3C' : '#666666')}>
-          {item.is_generic ? 'Generic' : 'Branded'}
-        </span>
-        {item.rxRequired && <span style={badge('#FFF3E0', '#FF8C00')}>Rx</span>}
-      </div>
-      {/* item.price = cheapest available seller's real price (mapMedicine,
-          sourced from fetchPopularMedicines' sellerPrice) — same price
-          handleQuickAdd above will actually charge. */}
-      <div style={s.popFooter}>
-        <span style={s.popPrice}>₹{item.price || 0}</span>
-        {item.perDose && <span style={s.popRate}>₹{item.perDose}/{item.doseUnit}</span>}
-      </div>
-      {/* R3-A2: same tablet-count-vs-raw-unit rule as MedicineCard —
-          computed count for tablet packs, raw unit string (or nothing)
-          otherwise, never a fabricated count. */}
-      {item.doseUnit === 'tablet' && item.doseTotal > 0 ? (
-        <p style={s.popPack}>📦 {item.doseTotal} tablet{item.doseTotal > 1 ? 's' : ''}/strip</p>
-      ) : item.rawUnit ? (
-        <p style={s.popPack}>📦 {item.rawUnit}</p>
-      ) : null}
-      <button
-        onClick={handleQuickAdd}
-        style={{ marginTop: '4px', padding: '7px', width: '100%', background: added ? '#E8F5EE' : '#1A6B3C', border: 'none', borderRadius: '6px', color: added ? '#1A6B3C' : '#fff', fontSize: '12px', fontWeight: '600', cursor: addLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
-      >
-        {addLoading ? '...' : added ? 'Added ✓' : 'Add'}
-      </button>
     </div>
   );
 }
@@ -125,12 +63,12 @@ export default function MedicineSearch() {
       const mrpModeOn = await fetchMrpMode();
       setMrpMode(mrpModeOn);
       const { data } = await fetchPopularMedicines(12, mrpModeOn);
+      // Raw rows (same shape searchMedicines' sections and Home already
+      // pass straight into MedicineCard) plus a derived `.type` — kept
+      // only so the existing Tablets/Syrup/Injection filter chips above
+      // keep matching the same way they always have (applyFilter below).
       if (data?.length > 0) {
-        setPopularMeds(data.map(m => {
-          const mapped = mapMedicine(m);
-          const rateInfo = getRatePerDose(m, mapped.price);
-          return { ...mapped, perDose: rateInfo.perDose, doseUnit: rateInfo.unit, doseTotal: rateInfo.total, rawUnit: m.unit || '' };
-        }));
+        setPopularMeds(data.map(m => ({ ...m, type: mapMedicine(m).type })));
       }
     })();
   }, []);
@@ -198,7 +136,6 @@ export default function MedicineSearch() {
               </button>
             )}
           </div>
-          <button style={s.cancelBtn} onClick={() => navigate('/home')}>Cancel</button>
         </div>
 
         {/* ── Filter Chips ── */}
@@ -222,7 +159,7 @@ export default function MedicineSearch() {
               {recent.length > 0 && (
                 <div style={s.section}>
                   <div style={s.sectionHead}>
-                    <Clock size={14} color="#888888" />
+                    <Clock size={14} color="#0C447C" />
                     <span style={s.sectionTitle}>Recent Searches</span>
                   </div>
                   <div style={s.recentList}>
@@ -251,9 +188,14 @@ export default function MedicineSearch() {
                     🌱 Jald hi naye medicines available honge
                   </p>
                 ) : (
-                  <div style={s.popGrid}>
+                  <div>
                     {applyFilter(popularMeds).map(item => (
-                      <PopularCard key={item.id} item={item} mrpMode={mrpMode} />
+                      <MedicineCard
+                        key={item.id}
+                        medicine={item}
+                        type={item.source === 'janaushadhi' ? 'janaushadhi' : item.is_generic ? 'generic' : 'branded'}
+                        mrpMode={mrpMode}
+                      />
                     ))}
                   </div>
                 )}
@@ -300,15 +242,12 @@ export default function MedicineSearch() {
                 </div>
               )}
 
-              {/* Branded */}
+              {/* Branded — no banner (B15): generic/sasta is the mission,
+                  branded results still show, just without a promoted
+                  header pushing them. Cards start straight after
+                  Jan Aushadhi/Generic above. */}
               {searchResults.branded.length > 0 && (
                 <div style={{ marginBottom: '16px' }}>
-                  <SectionHeader
-                    bg="#FFF3E0" borderColor="#FF8C00"
-                    icon="🏷️"
-                    title="Branded Medicines"
-                    subtitle="Popular brands"
-                  />
                   {searchResults.branded.map(med => (
                     <MedicineCard key={med.id} medicine={med} type="branded" mrpMode={mrpMode} />
                   ))}
@@ -371,11 +310,10 @@ const s = {
   searchBox:    { flex: 1, display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F5F5F5', border: '1.5px solid #E8E8E8', borderRadius: '10px', padding: '9px 12px' },
   searchInput:  { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '14px', color: '#1A1A1A', fontFamily: 'inherit', minWidth: 0 },
   clearBtn:     { background: 'none', border: 'none', padding: '0 2px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 },
-  cancelBtn:    { background: 'none', border: 'none', fontSize: '14px', color: '#666666', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, padding: '6px 2px' },
   filtersWrap:  { display: 'flex', gap: '8px', overflowX: 'auto', padding: '10px 14px', borderBottom: '1px solid #F5F5F5', scrollbarWidth: 'none' },
   chip:         { flexShrink: 0, padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s ease' },
   chipActive:   { backgroundColor: '#1A6B3C', color: '#FFFFFF', border: '1.5px solid #1A6B3C', fontWeight: '600' },
-  chipInactive: { backgroundColor: '#FFFFFF', color: '#555555', border: '1.5px solid #E0E0E0' },
+  chipInactive: { backgroundColor: '#FFFFFF', color: '#555555', border: '1.5px solid rgba(12,68,124,0.18)' },
   body:         { flex: 1, overflowY: 'auto', backgroundColor: '#F5F5F5' },
   section:      { backgroundColor: '#FFFFFF', marginBottom: '8px', padding: '16px' },
   sectionHead:  { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' },
@@ -384,16 +322,6 @@ const s = {
   recentRow:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #F5F5F5' },
   recentTerm:   { display: 'flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', fontSize: '14px', color: '#444444', cursor: 'pointer', fontFamily: 'inherit', padding: 0, flex: 1, textAlign: 'left' },
   recentX:      { background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' },
-  popGrid:      { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-  popCard:      { border: '1.5px solid #F0F0F0', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#FAFAFA' },
-  popIconBox:   { width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' },
-  popName:      { fontSize: '13px', fontWeight: '700', color: '#1A1A1A', margin: 0, lineHeight: '1.3' },
-  popSalt:      { fontSize: '11px', color: '#888888', margin: 0 },
-  popFooter:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' },
-  popPrice:     { fontSize: '14px', fontWeight: '700', color: '#1A6B3C' },
-  popRate:      { fontSize: '10px', fontWeight: '500', color: '#888888' },
-  popPack:      { fontSize: '10px', color: '#999999', margin: '2px 0 0' },
-  addBtn:       { backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   emptyState:   { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '60px 32px', backgroundColor: '#FFFFFF' },
   emptyTitle:   { fontSize: '17px', fontWeight: '700', color: '#333333', margin: 0 },
   emptySubtitle:{ fontSize: '13px', color: '#888888', margin: '0 0 12px', textAlign: 'center' },

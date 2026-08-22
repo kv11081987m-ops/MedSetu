@@ -1,41 +1,62 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchOrders, mapOrder, updateOrderStatus } from '../lib/orders';
+import { generateInvoicePDF } from '../lib/invoicePdf';
 import BottomNav from '../components/BottomNav';
 import {
-  ArrowLeft, SlidersHorizontal, Search, CheckCircle,
+  ArrowLeft, Search, CheckCircle,
   Clock, XCircle, RefreshCw, ChevronRight,
   ShoppingBag, MapPin, RotateCcw,
-  Banknote, Smartphone, FileText,
+  Banknote, Smartphone, FileText, Download,
+  Package, PackageCheck, Truck,
 } from 'lucide-react';
 
 
-const FILTERS = ['Sab', 'Delivered', 'Processing', 'Cancelled'];
-
+// Bug fix: every real orders.status used to collapse into one
+// "processing" bucket here (lib/orders.js's mapOrder() did the collapsing)
+// — that's why sellers saw "Pending" while customers saw "Processing" for
+// the exact same order. Each real status now gets its own label/colour,
+// matching OrderTracking.jsx's per-status language (getEtaBanner/
+// buildSteps) instead of contradicting it.
 const STATUS_MAP = {
-  delivered:  { label: 'Delivered',  color: '#1A6B3C', bg: '#E8F5EE', Icon: CheckCircle },
-  processing: { label: 'Processing', color: '#E65100', bg: '#FFF3E0', Icon: Clock      },
-  cancelled:  { label: 'Cancelled',  color: '#C62828', bg: '#FFEBEE', Icon: XCircle    },
+  pending:           { label: 'Order Placed',   sub: 'Store confirm karega',                   color: '#0C447C', bg: '#EAF2FB', Icon: Package      },
+  confirmed:         { label: 'Confirmed',       sub: 'Taiyari ho rahi hai',                    color: '#F26C0A', bg: '#FFF1E8', Icon: Clock        },
+  preparing:         { label: 'Pack ho raha hai', sub: 'Store aapki medicine pack kar raha hai', color: '#F26C0A', bg: '#FFF1E8', Icon: PackageCheck },
+  out_for_delivery:  { label: 'Raaste mein',      sub: 'Delivery boy aapke paas aa raha hai',    color: '#7C3AED', bg: '#F3EEFF', Icon: Truck        },
+  delivered:         { label: 'Delivered',        sub: 'Order mil gaya',                         color: '#1A6B3C', bg: '#E8F5EE', Icon: CheckCircle  },
+  cancelled:         { label: 'Cancelled',        sub: 'Order cancel ho gaya',                    color: '#C62828', bg: '#FFEBEE', Icon: XCircle      },
 };
 
+// "Chal Rahe" (was "Processing") now covers every not-yet-delivered,
+// not-cancelled status — the filter chip's own grouping, and the same
+// grouping OrderCard's action buttons below use so Track/Cancel Karo
+// still show up for all of them (previously gated on the now-gone
+// 'processing' bucket value).
+const ACTIVE_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery'];
+
+const FILTERS = ['Sab', 'Delivered', 'Chal Rahe', 'Cancelled'];
+
 const FILTER_STATUS = {
-  'Sab': null, 'Delivered': 'delivered', 'Processing': 'processing', 'Cancelled': 'cancelled',
+  'Sab': null, 'Delivered': ['delivered'], 'Chal Rahe': ACTIVE_STATUSES, 'Cancelled': ['cancelled'],
 };
 
 // ─── Order Card ───────────────────────────────────────────────
-function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
+function OrderCard({ order, onTrack, onReorder, onCancel, onDetail, onDownloadBill, downloadingId }) {
   const [expanded, setExpanded] = useState(false);
   const st = STATUS_MAP[order.status];
   const displayItems = order.items.slice(0, 2);
   const extra = order.items.length - 2;
 
   return (
-    <div style={s.orderCard}>
+    <div style={{ ...s.orderCard, borderLeft: `4px solid ${st.color}`, backgroundColor: st.bg }}>
       {/* Top row */}
       <div style={s.cardTop}>
-        <div style={{ ...s.statusBadge, backgroundColor: st.bg }}>
-          <st.Icon size={12} color={st.color} />
-          <span style={{ ...s.statusText, color: st.color }}>{st.label}</span>
+        <div style={s.statusCol}>
+          <div style={{ ...s.statusBadge, backgroundColor: st.bg }}>
+            <st.Icon size={12} color={st.color} />
+            <span style={{ ...s.statusText, color: st.color }}>{st.label}</span>
+          </div>
+          {st.sub && <span style={{ ...s.statusSub, color: st.color }}>{st.sub}</span>}
         </div>
         <div style={s.cardTopRight}>
           <span style={s.orderId}>#{order.id}</span>
@@ -80,7 +101,7 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
 
       {/* Actions */}
       <div style={s.cardActions}>
-        {order.status === 'processing' && (
+        {ACTIVE_STATUSES.includes(order.status) && (
           <>
             <button style={s.btnFilled} onClick={() => onTrack(order)}>
               <MapPin size={13} color="#FFFFFF" />
@@ -95,13 +116,24 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail }) {
 
         {order.status === 'delivered' && (
           <>
-            <button style={s.btnGreenOutlined} onClick={() => onReorder(order)}>
-              <RotateCcw size={13} color="#1A6B3C" />
+            <button style={s.btnFilled} onClick={() => onReorder(order)}>
+              <RotateCcw size={13} color="#FFFFFF" />
               Dobara Order Karo
             </button>
             <button style={s.btnTextGray} onClick={() => onDetail(order)}>
               Detail Dekho
             </button>
+            {/* R4-B: bill download — delivered B2C orders only */}
+            {order.raw?.buyer_type !== 'retailer' && (
+              <button
+                style={s.btnFilled}
+                onClick={() => onDownloadBill(order)}
+                disabled={downloadingId === order.dbId}
+              >
+                <Download size={13} color="#FFFFFF" />
+                {downloadingId === order.dbId ? 'Bill Ban Raha Hai...' : 'Bill (PDF)'}
+              </button>
+            )}
           </>
         )}
 
@@ -134,6 +166,7 @@ export default function OrderHistory() {
   const [query, setQuery]               = useState('');
   const [dbOrders, setDbOrders]         = useState([]);
   const [dbLoading, setDbLoading]       = useState(true);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   useEffect(() => {
     const userId = getCurrentUserId();
@@ -156,12 +189,25 @@ export default function OrderHistory() {
     }
   };
 
+  const handleDownloadBill = async (order) => {
+    if (!order.raw || downloadingId) return;
+    setDownloadingId(order.dbId);
+    try {
+      await generateInvoicePDF(order.raw);
+    } catch (e) {
+      console.error('[bill download]', e);
+      alert('Bill download nahi hua, dobara try karo');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const allOrders = dbOrders;
 
   const filtered = useMemo(() => {
-    const statusKey = FILTER_STATUS[activeFilter];
+    const statuses = FILTER_STATUS[activeFilter];
     return allOrders.filter((o) => {
-      const matchStatus = !statusKey || o.status === statusKey;
+      const matchStatus = !statuses || statuses.includes(o.status);
       const q = query.toLowerCase();
       const matchQuery = !q || o.id.toLowerCase().includes(q)
         || o.items.some((it) => it.toLowerCase().includes(q))
@@ -177,12 +223,14 @@ export default function OrderHistory() {
         {/* ── Header ── */}
         <div style={s.header}>
           <button style={s.iconBtn} onClick={() => navigate('/home')}>
-            <ArrowLeft size={22} color="#1A1A1A" />
+            <ArrowLeft size={22} color="#0C447C" />
           </button>
           <span style={s.headerTitle}>Order History</span>
-          <button style={s.iconBtn}>
-            <SlidersHorizontal size={20} color="#1A6B3C" />
-          </button>
+          {/* Non-functional filter/hamburger icon removed (B15) — had no
+              onClick at all, and the filter chips + search below already
+              cover it. Spacer keeps the title visually centered the same
+              way the old 3-icon layout did. */}
+          <div style={{ width: '34px' }} />
         </div>
 
         {/* ── Body ── */}
@@ -193,11 +241,12 @@ export default function OrderHistory() {
             <p style={s.summaryLabel}>Aapke Saare Orders</p>
             <div style={s.metricsRow}>
               {[
-                { label: `${allOrders.length} Total` },
-                { label: `${allOrders.filter(o => o.status === 'delivered').length} Delivered` },
-                { label: `₹${allOrders.reduce((s, o) => s + (o.amount || 0), 0).toLocaleString('en-IN')} Spent` },
-              ].map(({ label }) => (
-                <div key={label} style={{ ...s.metricPill, backgroundColor: 'rgba(255,255,255,0.25)' }}>
+                { label: `${allOrders.length} Total`, Icon: ShoppingBag, accent: '#FFFFFF' },
+                { label: `${allOrders.filter(o => o.status === 'delivered').length} Delivered`, Icon: CheckCircle, accent: '#E0A818' },
+                { label: `₹${allOrders.reduce((s, o) => s + (o.amount || 0), 0).toLocaleString('en-IN')} Spent`, Icon: Banknote, accent: '#F26C0A' },
+              ].map(({ label, Icon, accent }) => (
+                <div key={label} style={{ ...s.metricPill, borderColor: accent }}>
+                  <Icon size={12} color={accent} />
                   <span style={s.metricText}>{label}</span>
                 </div>
               ))}
@@ -223,9 +272,9 @@ export default function OrderHistory() {
           {/* Filter Chips */}
           <div style={s.filtersScroll}>
             {FILTERS.map((f) => {
-              const statusKey = FILTER_STATUS[f];
-              const count = statusKey
-                ? allOrders.filter((o) => o.status === statusKey).length
+              const statuses = FILTER_STATUS[f];
+              const count = statuses
+                ? allOrders.filter((o) => statuses.includes(o.status)).length
                 : allOrders.length;
               return (
                 <button
@@ -241,8 +290,8 @@ export default function OrderHistory() {
                     ...s.chipCount,
                     backgroundColor: activeFilter === f
                       ? 'rgba(255,255,255,0.3)'
-                      : '#F0F0F0',
-                    color: activeFilter === f ? '#FFFFFF' : '#888888',
+                      : 'rgba(12,68,124,0.08)',
+                    color: activeFilter === f ? '#FFFFFF' : '#0C447C',
                   }}>
                     {count}
                   </span>
@@ -281,17 +330,17 @@ export default function OrderHistory() {
             </div>
           ) : (
             <div style={s.ordersList}>
-              {filtered.map((order, i) => (
-                <div key={order.id}>
-                  <OrderCard
-                    order={order}
-                    onTrack={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
-                    onReorder={() => navigate('/medicine-search')}
-                    onCancel={handleCancel}
-                    onDetail={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
-                  />
-                  {i < filtered.length - 1 && <div style={s.divider} />}
-                </div>
+              {filtered.map((order) => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  onTrack={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
+                  onReorder={() => navigate('/medicine-search')}
+                  onCancel={handleCancel}
+                  onDetail={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
+                  onDownloadBill={handleDownloadBill}
+                  downloadingId={downloadingId}
+                />
               ))}
             </div>
           )}
@@ -323,14 +372,14 @@ const s = {
     backgroundColor: '#F5F5F5',
   },
 
-  // Header
+  // Header — same soft gradient patti as Home/Categories/Checkout
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '14px 14px 12px',
-    backgroundColor: '#FFFFFF',
-    borderBottom: '1px solid #F0F0F0',
+    padding: '10px 16px',
+    background: 'linear-gradient(90deg, #FFF1E6 0%, #EAF2FB 100%)',
+    borderBottom: '1px solid rgba(12,68,124,0.08)',
     position: 'sticky',
     top: 0,
     zIndex: 10,
@@ -338,7 +387,7 @@ const s = {
   headerTitle: {
     fontSize: '17px',
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#0C447C',
   },
   iconBtn: {
     background: 'none',
@@ -362,7 +411,7 @@ const s = {
 
   // Summary card
   summaryCard: {
-    backgroundColor: '#1A6B3C',
+    background: 'linear-gradient(135deg, #1A6B3C 0%, #156B4A 45%, #0C447C 100%)',
     borderRadius: '16px',
     padding: '16px 18px',
     display: 'flex',
@@ -382,8 +431,12 @@ const s = {
     flexWrap: 'wrap',
   },
   metricPill: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
     padding: '5px 12px',
     borderRadius: '20px',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     border: '1px solid rgba(255,255,255,0.3)',
   },
   metricText: {
@@ -398,7 +451,7 @@ const s = {
     alignItems: 'center',
     gap: '10px',
     backgroundColor: '#FFFFFF',
-    border: '1.5px solid #E8E8E8',
+    border: '1.5px solid rgba(12,68,124,0.25)',
     borderRadius: '12px',
     padding: '11px 14px',
   },
@@ -449,7 +502,7 @@ const s = {
   chipInactive: {
     backgroundColor: '#FFFFFF',
     color: '#555555',
-    border: '1.5px solid #E0E0E0',
+    border: '1.5px solid rgba(12,68,124,0.18)',
   },
   chipCount: {
     fontSize: '11px',
@@ -460,31 +513,38 @@ const s = {
     textAlign: 'center',
   },
 
-  // Orders list
+  // Orders list — each order is now its own separated card (own border/
+  // radius/shadow below), so this is just a gapped column, not a shared box.
   ordersList: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: '16px',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
-    overflow: 'hidden',
-  },
-  divider: {
-    height: '1px',
-    backgroundColor: '#F5F5F5',
-    margin: '0 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
   },
 
   // Order card
+  // Base border is thin brand-tinted on all sides; the inline
+  // borderLeft override (status colour, thicker) + backgroundColor
+  // (status tint) are applied per-card in OrderCard below.
   orderCard: {
     padding: '16px',
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
+    borderRadius: '14px',
+    border: '1px solid rgba(12,68,124,0.1)',
+    boxShadow: '0 1px 5px rgba(0,0,0,0.05)',
   },
   cardTop: {
     display: 'flex',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: '8px',
+  },
+  statusCol: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px',
+    alignItems: 'flex-start',
   },
   statusBadge: {
     display: 'flex',
@@ -497,6 +557,13 @@ const s = {
   statusText: {
     fontSize: '12px',
     fontWeight: '700',
+  },
+  statusSub: {
+    fontSize: '10.5px',
+    fontWeight: '500',
+    opacity: 0.85,
+    margin: 0,
+    paddingLeft: '2px',
   },
   cardTopRight: {
     display: 'flex',
@@ -568,7 +635,7 @@ const s = {
   amount: {
     fontSize: '16px',
     fontWeight: '800',
-    color: '#1A6B3C',
+    color: '#C4581E',
   },
   payment: {
     display: 'flex',
@@ -636,7 +703,7 @@ const s = {
   btnTextGray: {
     background: 'none',
     border: 'none',
-    color: '#888888',
+    color: '#0C447C',
     fontSize: '12px',
     fontWeight: '600',
     cursor: 'pointer',

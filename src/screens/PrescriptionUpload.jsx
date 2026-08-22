@@ -6,6 +6,7 @@ import {
   Calendar, Home, ShoppingBag, Check,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { uploadPrescription } from '../lib/prescriptions';
 import BottomNav from '../components/BottomNav';
 
 // Module-level (NOT React state) — persists across SPA remounts of this
@@ -153,23 +154,15 @@ export default function PrescriptionUpload() {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
 
       // Upload file to Supabase Storage — unique per customer + timestamp,
-      // so two uploads never overwrite/guess each other's path.
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user?.id || 'anonymous'}/rx_${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('prescriptions')
-        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+      // so two uploads never overwrite/guess each other's path. Stores only
+      // the PATH (not a public URL) — getSignedRxUrl() turns it back into
+      // an openable URL fresh on every read (Rx-Security Tukda 1).
+      const { path, error: uploadError } = await uploadPrescription(file, user?.id);
 
       if (uploadError) {
         alert('Prescription upload nahi hui: ' + uploadError.message);
         return;
       }
-
-      const { data: urlData } = supabase.storage
-        .from('prescriptions')
-        .getPublicUrl(filePath);
-      const imageUrl = urlData.publicUrl;
 
       const { data, error } = await supabase
         .from('prescriptions')
@@ -179,7 +172,7 @@ export default function PrescriptionUpload() {
           prescribed_date:   form.date           || null,
           review_notes:      form.medicines      || null,
           status:            'pending',
-          image_url:         imageUrl,
+          image_url:         path,
         })
         .select()
         .maybeSingle();
@@ -188,7 +181,7 @@ export default function PrescriptionUpload() {
 
       const rx = 'RX-' + (data?.id ? String(data.id).slice(0, 8).toUpperCase() : Date.now());
       setRxNumber(rx);
-      setUploadedUrl(imageUrl);
+      setUploadedUrl(path);
       setSubmitted(true);
     } catch (err) {
       alert('Submit nahi hua: ' + err.message);

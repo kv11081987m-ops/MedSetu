@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import { fetchSupportWhatsapp } from '../lib/api';
+import { isDuplicatePhoneError } from '../lib/auth';
+import { saveAddress, updateAddress } from '../lib/addresses';
 import BottomNav from '../components/BottomNav';
+import AddressForm from '../components/AddressForm';
 import {
   ArrowLeft, Pencil, Camera, User, Phone, Mail,
   Home, Briefcase, Heart, AlertCircle, Activity,
@@ -13,11 +17,18 @@ import {
 
 // ─── Data ─────────────────────────────────────────────────────
 
+// B15 Part B: recolored to the brand palette (Orange/Blue/Gold) + green —
+// same 4-colour set already used for Home's service tabs / Categories'
+// rail. Only Help & Support has a real destination (WhatsApp) right now —
+// Notifications (no preferences screen yet), Rate App (not on Play Store
+// yet), and Privacy & Security (not needed yet — Google login) are all
+// `disabled: true`, same "visible but not selectable, Jald hi badge"
+// treatment Checkout.jsx's PAYMENT_OPTS already uses for UPI/Card/Wallet.
 const SETTINGS_ROWS = [
-  { Icon: Bell,       label: 'Notifications',      sub: 'Order updates, offers',    color: '#E65100', bg: '#FFF3E0' },
-  { Icon: Shield,     label: 'Privacy & Security',  sub: 'Password, data',          color: '#2563EB', bg: '#EAF2FF' },
-  { Icon: Star,       label: 'Rate App',            sub: 'Humein 5★ do!',           color: '#F59E0B', bg: '#FFFBEB' },
-  { Icon: HelpCircle, label: 'Help & Support',      sub: 'FAQ, contact us',         color: '#7C3AED', bg: '#F3EEFF' },
+  { id: 'notifications', Icon: Bell,       label: 'Notifications',      sub: 'Order updates, offers',    color: '#F26C0A', bg: '#FFF1E8', disabled: true },
+  { id: 'privacy',       Icon: Shield,     label: 'Privacy & Security',  sub: 'Password, data',          color: '#0C447C', bg: '#EAF2FB', disabled: true },
+  { id: 'rate',          Icon: Star,       label: 'Rate App',            sub: 'Humein 5★ do!',           color: '#E0A818', bg: '#FFF8E1', disabled: true },
+  { id: 'help',          Icon: HelpCircle, label: 'Help & Support',      sub: 'FAQ, contact us',         color: '#1A6B3C', bg: '#E8F5EE' },
 ];
 
 // ─── Main Screen ──────────────────────────────────────────────
@@ -35,11 +46,21 @@ export default function UserProfile() {
   const [newAddress,      setNewAddress]      = useState({
     label: 'Ghar', address_line: '', city: 'Deoria',
     district: 'Deoria', state: 'Uttar Pradesh', pincode: '',
+    latitude: null, longitude: null, phone: '',
   });
+  const [addressPhoneError, setAddressPhoneError] = useState('');
   const [orderStats,     setOrderStats]     = useState({ totalOrders: 0, totalSpent: 0 });
   const [prescriptions,  setPrescriptions]  = useState([]);
   const [addressesError,     setAddressesError]     = useState(false);
   const [prescriptionsError, setPrescriptionsError] = useState(false);
+  const [phoneError,     setPhoneError]     = useState('');
+  const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
+
+  // Same fetch as OrderTracking.jsx/CustomerHome.jsx's Help & Support —
+  // Settings' "Help & Support" row below reuses this exact number/pattern.
+  useEffect(() => {
+    fetchSupportWhatsapp().then(setSupportWhatsapp);
+  }, []);
 
   // ── Fetch user ───────────────────────────────────────────────
   useEffect(() => {
@@ -119,18 +140,33 @@ export default function UserProfile() {
   }, []);
 
   // ── Profile update ───────────────────────────────────────────
+  // B15 Part B: mobile is now mandatory — needed for delivery. Google-
+  // login customers (AuthContext.jsx's Google branch inserts phone:null)
+  // are the main case this closes: this form was the only place they
+  // could ever set one, and the field was read-only until this change.
   const updateProfile = async () => {
     if (!userData) return;
+    if (!userData.phone || !/^\d{10}$/.test(userData.phone)) {
+      setPhoneError('Mobile number zaroori hai');
+      return;
+    }
     const { error } = await supabase
       .from('users')
-      .update({ name: userData.name, email: userData.email, blood_group: userData.blood_group })
+      .update({ name: userData.name, phone: userData.phone, email: userData.email, blood_group: userData.blood_group })
       .eq('id', userData.id);
     if (!error) {
       localStorage.setItem('medsetu_user', JSON.stringify(userData));
       setEditMode(false);
       alert('Profile update ho gaya!');
     } else {
-      alert('Update nahi hua — dobara try karo');
+      console.error('[updateProfile]', error);
+      if (isDuplicatePhoneError(error)) {
+        // users.phone UNIQUE constraint (users_phone_key) — this number
+        // already belongs to a different account.
+        alert('Yeh number pehle se registered hai. Doosra number daalein ya us account se login karein.');
+      } else {
+        alert('Update nahi hua — dobara try karo');
+      }
     }
   };
 
@@ -154,29 +190,34 @@ export default function UserProfile() {
 
   const addAddress = async () => {
     if (!newAddress.address_line.trim()) { alert('Address daalo'); return; }
+    // A2: per-address mobile is mandatory — this is what Checkout/orders
+    // will eventually read for delivery contact (A4/A5), so an address
+    // with no valid number defeats the point. No duplicate-check here —
+    // unlike users.phone, addresses.phone has no UNIQUE constraint, and
+    // the same number legitimately repeating across a customer's own
+    // addresses is expected, not an error.
+    if (!/^\d{10}$/.test(newAddress.phone || '')) {
+      setAddressPhoneError('Sahi 10-digit mobile number daalein');
+      return;
+    }
+    setAddressPhoneError('');
     try {
       const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
       const resetForm = () => {
         setShowAddAddress(false);
         setEditingAddressId(null);
-        setNewAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '' });
+        setNewAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '', latitude: null, longitude: null, phone: '' });
       };
       if (editingAddressId) {
-        const { error } = await supabase
-          .from('addresses')
-          .update({ label: newAddress.label, address_line: newAddress.address_line, city: newAddress.city, district: newAddress.district, state: newAddress.state, pincode: newAddress.pincode })
-          .eq('id', editingAddressId);
+        const { error } = await updateAddress({ addressId: editingAddressId, address: newAddress });
         if (!error) {
           setAddresses((prev) => prev.map((a) => a.id === editingAddressId ? { ...a, ...newAddress } : a));
           resetForm();
         }
       } else {
-        const { data, error } = await supabase
-          .from('addresses')
-          .insert({ user_id: user.id, ...newAddress, is_default: addresses.length === 0 })
-          .select();
+        const { data, error } = await saveAddress({ userId: user.id, address: { ...newAddress, is_default: addresses.length === 0 } });
         if (!error && data) {
-          setAddresses((prev) => [...prev, data[0]]);
+          setAddresses((prev) => [...prev, data]);
           resetForm();
         }
       }
@@ -215,36 +256,42 @@ export default function UserProfile() {
         {/* ── Header ── */}
         <div style={s.header}>
           <button style={s.iconBtn} onClick={() => navigate('/home')}>
-            <ArrowLeft size={22} color="#1A1A1A" />
+            <ArrowLeft size={22} color="#0C447C" />
           </button>
           <p style={s.headerTitle}>Mera Profile</p>
           <button style={s.iconBtn} onClick={() => setEditMode((v) => !v)}>
-            <Pencil size={20} color={editMode ? '#1A6B3C' : '#1A1A1A'} />
+            <Pencil size={20} color={editMode ? '#1A6B3C' : '#0C447C'} />
           </button>
         </div>
 
         <div style={s.body}>
 
-          {/* ── Hero Card ── */}
+          {/* ── Hero Card (B15: compact — horizontal avatar+info row,
+              stats below, instead of the old tall vertical stack) ── */}
           <div style={s.hero}>
-            {/* Avatar */}
-            <div style={s.avatarWrap}>
-              <div style={s.avatarCircle}>
-                <span style={s.avatarInitials}>{initials}</span>
+            <div style={s.heroTop}>
+              {/* Avatar */}
+              <div style={s.avatarWrap}>
+                <div style={s.avatarCircle}>
+                  <span style={s.avatarInitials}>{initials}</span>
+                </div>
+                <button style={s.cameraBtn}>
+                  <Camera size={11} color="#FFFFFF" />
+                </button>
               </div>
-              <button style={s.cameraBtn}>
-                <Camera size={13} color="#FFFFFF" />
-              </button>
-            </div>
 
-            <p style={s.heroName}>{userData.name || 'User'}</p>
-            <p style={s.heroPhone}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
-            <p style={s.heroCity}>{userData.city || 'Deoria, Uttar Pradesh'}</p>
-            <p style={s.heroMember}>
-              {userData.created_at
-                ? `Member since ${formatIST(userData.created_at, { month: 'short', year: 'numeric' })}`
-                : 'Member since —'}
-            </p>
+              <div style={s.heroInfo}>
+                <p style={s.heroName}>{userData.name || 'User'}</p>
+                <p style={s.heroPhone}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
+                <p style={s.heroCity}>
+                  {userData.city || 'Deoria, Uttar Pradesh'}
+                  {' · '}
+                  {userData.created_at
+                    ? `Member since ${formatIST(userData.created_at, { month: 'short', year: 'numeric' })}`
+                    : 'Member since —'}
+                </p>
+              </div>
+            </div>
 
             {/* Quick Stats */}
             <div style={s.statsRow}>
@@ -281,12 +328,31 @@ export default function UserProfile() {
               </div>
             </div>
 
-            {/* Mobile (read-only) */}
+            {/* Mobile — B15 Part B: now editable + mandatory (was
+                read-only before, so Google-login accounts with phone:null
+                had no way to ever set one). Required for delivery. */}
             <div style={s.infoRow}>
               <div style={s.infoIconBox}><Phone size={15} color="#1A6B3C" /></div>
               <div style={s.infoText}>
                 <p style={s.infoLabel}>Mobile</p>
-                <p style={s.infoVal}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
+                {editMode ? (
+                  <>
+                    <input
+                      value={userData.phone || ''}
+                      onChange={(e) => {
+                        setUserData((prev) => ({ ...prev, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
+                        setPhoneError('');
+                      }}
+                      style={{ ...s.infoInput, border: phoneError ? '1.5px solid #DC3545' : s.infoInput.border }}
+                      placeholder="10-digit mobile number"
+                      type="tel"
+                      inputMode="numeric"
+                    />
+                    {phoneError && <p style={s.fieldError}>{phoneError}</p>}
+                  </>
+                ) : (
+                  <p style={s.infoVal}>{userData.phone ? `+91 ${userData.phone}` : '—'}</p>
+                )}
               </div>
             </div>
 
@@ -314,7 +380,7 @@ export default function UserProfile() {
 
             {editMode && (
               <button style={{ padding: '10px', backgroundColor: '#F5F5F5', color: '#555555', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
-                onClick={() => setEditMode(false)}>
+                onClick={() => { setEditMode(false); setPhoneError(''); }}>
                 Cancel
               </button>
             )}
@@ -324,7 +390,12 @@ export default function UserProfile() {
           <div style={s.card}>
             <div style={s.cardHead}>
               <p style={s.cardTitle}>Mere Addresses</p>
-              <button style={s.greenBtn} onClick={() => setShowAddAddress(true)}>
+              <button style={s.greenBtn} onClick={() => {
+                const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+                setNewAddress((p) => ({ ...p, phone: storedUser?.phone || '' }));
+                setAddressPhoneError('');
+                setShowAddAddress(true);
+              }}>
                 <Plus size={13} color="#FFFFFF" />
                 Naya Add
               </button>
@@ -357,11 +428,14 @@ export default function UserProfile() {
                       </div>
                       <p style={s.addrLine1}>{addr.address_line}</p>
                       <p style={s.addrLine2}>{addr.city} — {addr.pincode}</p>
+                      {addr.phone && <p style={s.addrPhone}>📞 {addr.phone}</p>}
                     </div>
                     <div style={s.addrActions}>
                       <button style={s.addrIconBtn} onClick={() => {
+                        const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
                         setEditingAddressId(addr.id);
-                        setNewAddress({ label: addr.label, address_line: addr.address_line, city: addr.city, district: addr.district, state: addr.state, pincode: addr.pincode || '' });
+                        setNewAddress({ label: addr.label, address_line: addr.address_line, city: addr.city, district: addr.district, state: addr.state, pincode: addr.pincode || '', latitude: addr.latitude ?? null, longitude: addr.longitude ?? null, phone: addr.phone || storedUser?.phone || '' });
+                        setAddressPhoneError('');
                         setShowAddAddress(true);
                       }}><Pencil size={14} color="#888888" /></button>
                       <button style={s.addrIconBtn} onClick={() => deleteAddress(addr.id)}>
@@ -373,7 +447,12 @@ export default function UserProfile() {
               })
             )}
 
-            <button style={s.dashedAddBtn} onClick={() => setShowAddAddress(true)}>
+            <button style={s.dashedAddBtn} onClick={() => {
+              const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+              setNewAddress((p) => ({ ...p, phone: storedUser?.phone || '' }));
+              setAddressPhoneError('');
+              setShowAddAddress(true);
+            }}>
               <Plus size={16} color="#1A6B3C" />
               Naya Address Add Karo
             </button>
@@ -395,8 +474,9 @@ export default function UserProfile() {
             </div>
           </div>
 
-          {/* ── Saved Prescriptions ── */}
-          <div style={s.card}>
+          {/* ── Saved Prescriptions (B15 tweak: tighter gap than the
+              shared card default — Personal Jankari/Addresses untouched) ── */}
+          <div style={{ ...s.card, gap: '8px' }}>
             <div style={s.cardHead}>
               <p style={s.cardTitle}>Saved Prescriptions</p>
               <button style={s.editLink} onClick={() => navigate('/orders')}>
@@ -437,19 +517,31 @@ export default function UserProfile() {
             </button>
           </div>
 
-          {/* ── App Settings ── */}
-          <div style={s.card}>
+          {/* ── App Settings (B15 tweak: tighter gap than the shared
+              card default — Personal Jankari/Addresses untouched) ── */}
+          <div style={{ ...s.card, gap: '2px' }}>
             <p style={s.cardTitle}>Settings</p>
-            {SETTINGS_ROWS.map(({ Icon, label, sub, color, bg }) => (
-              <button key={label} style={s.settingRow}>
+            {SETTINGS_ROWS.map(({ id, Icon, label, sub, color, bg, disabled }) => (
+              <button
+                key={label}
+                style={{ ...s.settingRow, opacity: disabled ? 0.6 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  if (id === 'help') {
+                    const msg = encodeURIComponent('Namaste, mujhe MedSetu se madad chahiye');
+                    window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');
+                  }
+                }}
+              >
                 <div style={{ ...s.settingIconBox, backgroundColor: bg }}>
-                  <Icon size={17} color={color} />
+                  <Icon size={16} color={color} />
                 </div>
                 <div style={{ flex: 1, textAlign: 'left' }}>
                   <p style={s.settingLabel}>{label}</p>
                   <p style={s.settingSub}>{sub}</p>
                 </div>
-                <ChevronRight size={16} color="#CCCCCC" />
+                {disabled ? <span style={s.jaldiBadge}>Jald hi</span> : <ChevronRight size={16} color="#CCCCCC" />}
               </button>
             ))}
           </div>
@@ -471,49 +563,18 @@ export default function UserProfile() {
         {/* ── Add Address Sheet ── */}
         {showAddAddress && (
           <>
-            <div style={{ ...s.overlay, zIndex: 59 }} onClick={() => { setShowAddAddress(false); setEditingAddressId(null); }} />
+            <div style={{ ...s.overlay, zIndex: 59 }} onClick={() => { setShowAddAddress(false); setEditingAddressId(null); setAddressPhoneError(''); }} />
             <div style={{ ...s.modal, zIndex: 60, position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '480px' }}>
               <div style={s.modalHandle} />
-              <p style={s.modalTitle}>{editingAddressId ? 'Address Edit Karo' : 'Naya Address Add Karo'}</p>
-
-              {/* Label */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
-                {['Ghar', 'Office', 'Other'].map((lbl) => (
-                  <button
-                    key={lbl}
-                    style={{
-                      flex: 1, padding: '8px',
-                      border: newAddress.label === lbl ? '1.5px solid #1A6B3C' : '1.5px solid #E0E0E0',
-                      backgroundColor: newAddress.label === lbl ? '#E8F5EE' : '#FFFFFF',
-                      color: newAddress.label === lbl ? '#1A6B3C' : '#888888',
-                      borderRadius: '8px', fontSize: '13px', fontWeight: '600',
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                    onClick={() => setNewAddress((p) => ({ ...p, label: lbl }))}
-                  >{lbl}</button>
-                ))}
-              </div>
-
-              {/* Address Line */}
-              <textarea
-                style={{ ...s.infoInput, resize: 'none', lineHeight: '1.5', padding: '10px 12px' }}
-                rows={3}
-                placeholder="Gali, Mohalla, Landmark..."
-                value={newAddress.address_line}
-                onChange={(e) => setNewAddress((p) => ({ ...p, address_line: e.target.value }))}
+              <AddressForm
+                value={newAddress}
+                onChange={setNewAddress}
+                onSave={addAddress}
+                onCancel={() => { setShowAddAddress(false); setEditingAddressId(null); setAddressPhoneError(''); }}
+                isEditing={!!editingAddressId}
+                phoneError={addressPhoneError}
+                setPhoneError={setAddressPhoneError}
               />
-
-              {/* Pincode */}
-              <input
-                style={s.infoInput}
-                placeholder="Pincode (6 digits)"
-                maxLength={6}
-                value={newAddress.pincode}
-                onChange={(e) => setNewAddress((p) => ({ ...p, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-              />
-
-              <button style={s.modalPrimary} onClick={addAddress}>Save Karo</button>
-              <button style={s.modalSecondary} onClick={() => { setShowAddAddress(false); setEditingAddressId(null); }}>Cancel</button>
             </div>
           </>
         )}
@@ -560,46 +621,50 @@ const s = {
   // Body
   body: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', padding: '0 0 12px' },
 
-  // Hero
+  // Hero — B15: compact, same soft green->blue gradient as OrderHistory/
+  // OrderTracking's cards instead of the old tall solid-green stack.
   hero: {
-    background: 'linear-gradient(160deg, #1A6B3C 0%, #2D9B5A 100%)',
-    padding: '28px 20px 24px',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+    background: 'linear-gradient(135deg, #1A6B3C 0%, #156B4A 45%, #0C447C 100%)',
+    padding: '16px 18px 14px',
+    display: 'flex', flexDirection: 'column', gap: '10px',
   },
-  avatarWrap: { position: 'relative', marginBottom: '8px' },
+  heroTop: { display: 'flex', alignItems: 'center', gap: '12px' },
+  heroInfo: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1px' },
+  avatarWrap: { position: 'relative', flexShrink: 0 },
   avatarCircle: {
-    width: '80px', height: '80px', borderRadius: '40px',
+    width: '52px', height: '52px', borderRadius: '26px',
     backgroundColor: 'rgba(255,255,255,0.25)',
-    border: '3px solid #FFFFFF',
+    border: '2px solid #FFFFFF',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
-  avatarInitials: { fontSize: '26px', fontWeight: '800', color: '#FFFFFF' },
+  avatarInitials: { fontSize: '18px', fontWeight: '800', color: '#FFFFFF' },
   cameraBtn: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: '26px', height: '26px', borderRadius: '13px',
+    position: 'absolute', bottom: '-2px', right: '-2px',
+    width: '20px', height: '20px', borderRadius: '10px',
     backgroundColor: '#1A6B3C', border: '2px solid #FFFFFF',
     display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
   },
-  heroName:   { fontSize: '20px', fontWeight: '800', color: '#FFFFFF', margin: 0 },
-  heroPhone:  { fontSize: '14px', color: 'rgba(255,255,255,0.85)', margin: 0 },
-  heroCity:   { fontSize: '12px', color: 'rgba(255,255,255,0.75)', margin: 0 },
-  heroMember: { fontSize: '12px', color: 'rgba(255,255,255,0.6)',  margin: 0 },
-  statsRow: { display: 'flex', gap: '10px', marginTop: '10px' },
+  heroName:   { fontSize: '16px', fontWeight: '800', color: '#FFFFFF', margin: 0, lineHeight: '1.3' },
+  heroPhone:  { fontSize: '12.5px', color: 'rgba(255,255,255,0.85)', margin: 0, lineHeight: '1.4' },
+  heroCity:   { fontSize: '11px', color: 'rgba(255,255,255,0.7)', margin: 0, lineHeight: '1.4' },
+  statsRow: { display: 'flex', gap: '8px' },
   statPill: {
-    backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: '20px',
-    padding: '8px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: '12px',
+    padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px',
   },
-  statVal:   { fontSize: '15px', fontWeight: '800', color: '#FFFFFF' },
+  statVal:   { fontSize: '13px', fontWeight: '800', color: '#FFFFFF' },
   statLabel: { fontSize: '11px', color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
 
   // White card
   card: {
     backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '16px',
+    border: '1px solid rgba(12,68,124,0.08)',
     boxShadow: '0 1px 5px rgba(0,0,0,0.05)', margin: '0 12px',
     display: 'flex', flexDirection: 'column', gap: '12px',
   },
   cardHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { fontSize: '15px', fontWeight: '700', color: '#1A1A1A', margin: 0 },
+  cardTitle: { fontSize: '15px', fontWeight: '700', color: '#0C447C', margin: 0 },
   cardTitleSub: { fontSize: '12px', color: '#888888', margin: '1px 0 0', fontWeight: '400' },
   editLink: {
     background: 'none', border: 'none', color: '#1A6B3C',
@@ -626,6 +691,7 @@ const s = {
     padding: '6px 10px', fontSize: '14px', color: '#1A1A1A',
     fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
   },
+  fieldError: { fontSize: '11px', color: '#DC3545', margin: '4px 0 0', fontWeight: '600' },
 
   // Address card
   addrCard: {
@@ -638,6 +704,7 @@ const s = {
   defaultBadge: { fontSize: '11px', fontWeight: '600', color: '#555555', backgroundColor: '#EEEEEE', padding: '2px 9px', borderRadius: '20px' },
   addrLine1:    { fontSize: '13px', color: '#1A1A1A', fontWeight: '600', margin: 0 },
   addrLine2:    { fontSize: '12px', color: '#888888', margin: '2px 0 0' },
+  addrPhone:    { fontSize: '12px', color: '#1A6B3C', fontWeight: '600', margin: '3px 0 0' },
   addrActions:  { display: 'flex', flexDirection: 'column', gap: '8px' },
   addrIconBtn:  { background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' },
   dashedAddBtn: {
@@ -649,10 +716,10 @@ const s = {
 
   // Rx rows
   rxRow: {
-    display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '10px 0', borderBottom: '1px solid #F5F5F5',
+    display: 'flex', alignItems: 'center', gap: '10px',
+    padding: '7px 0', borderBottom: '1px solid #F5F5F5',
   },
-  rxIconBox: { width: '42px', height: '42px', borderRadius: '12px', backgroundColor: '#E8F5EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rxIconBox: { width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#E8F5EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   rxDoctor:  { fontSize: '13px', fontWeight: '700', color: '#1A1A1A', margin: 0 },
   rxHosp:    { fontSize: '11px', color: '#888888', margin: '2px 0 4px' },
   rxMeta:    { display: 'flex', gap: '10px', alignItems: 'center' },
@@ -661,14 +728,24 @@ const s = {
 
   // Settings
   settingRow: {
-    display: 'flex', alignItems: 'center', gap: '12px',
+    display: 'flex', alignItems: 'center', gap: '10px',
     background: 'none', border: 'none', cursor: 'pointer',
-    padding: '8px 0', borderBottom: '1px solid #F5F5F5',
+    padding: '6px 0', borderBottom: '1px solid #F5F5F5',
     fontFamily: 'inherit', width: '100%',
   },
-  settingIconBox: { width: '38px', height: '38px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  settingIconBox: { width: '32px', height: '32px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   settingLabel:   { fontSize: '14px', fontWeight: '600', color: '#1A1A1A', margin: 0 },
   settingSub:     { fontSize: '12px', color: '#888888', margin: '1px 0 0' },
+  jaldiBadge: {
+    flexShrink: 0,
+    padding: '4px 10px',
+    borderRadius: '20px',
+    fontSize: '10.5px',
+    fontWeight: '700',
+    color: '#8A6D1D',
+    backgroundColor: '#FFF3D6',
+    border: '1px solid #E0A818',
+  },
 
   // Logout
   logoutBtn: {

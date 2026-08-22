@@ -48,6 +48,39 @@ export const getCurrentUser = async () => {
   return user;
 };
 
+// Shared phone-update — same shape as UserProfile.jsx's updateProfile()
+// uses for the phone field, extracted so Checkout.jsx's mandatory-mobile
+// prompt can call the exact same DB write instead of duplicating it.
+export const updateUserPhone = async (userId, phone) => {
+  if (!userId) return { error: new Error('userId missing') };
+  const { error } = await supabase.from('users').update({ phone }).eq('id', userId);
+  return { error };
+};
+
+// Shared duplicate-phone detection — users.phone has a UNIQUE constraint
+// (users_phone_key), and PostgREST reports a violation of it
+// inconsistently: sometimes the Postgres SQLSTATE ('23505') lands in
+// error.code, sometimes it's just a plain HTTP 409 (error.status, or
+// error.code as a stringified '409') with the real reason only in the
+// message/details text. Checked here once so Checkout.jsx's mandatory-
+// mobile prompt and UserProfile.jsx's profile-edit save recognize the
+// exact same set of shapes instead of two copies of this list drifting
+// apart.
+export const isDuplicatePhoneError = (error) => {
+  if (!error) return false;
+  const msg = `${error.message || ''} ${error.details || ''}`.toLowerCase();
+  return (
+    error.code === '23505' ||
+    error.status === 409 ||
+    error.code === '409' ||
+    msg.includes('duplicate') ||
+    msg.includes('unique') ||
+    msg.includes('already exists') ||
+    msg.includes('conflict') ||
+    msg.includes('phone')
+  );
+};
+
 export const logout = async () => {
   const { error } = await supabase.auth.signOut();
   return { error };
