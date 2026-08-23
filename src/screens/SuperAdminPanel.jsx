@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { intentionalSignOut } from '../context/AuthContext';
 import { formatIST } from '../lib/formatTime';
+import { updateOrderStatus } from '../lib/orders';
 import {
   approveCommissionRequest as approveCommissionRequestDb,
   rejectCommissionRequest  as rejectCommissionRequestDb,
@@ -1033,6 +1034,7 @@ function TabRouting() {
   const [loadingNeedsAdmin,   setLoadingNeedsAdmin]   = useState(true);
   const [assignPick,          setAssignPick]          = useState({}); // orderId -> sellerId
   const [assigningId,         setAssigningId]         = useState(null);
+  const [cancellingId,        setCancellingId]        = useState(null);
 
   useEffect(() => { loadSellers(); loadTimeout(); loadPincodes(); loadNeedsAdminOrders(); }, []);
 
@@ -1057,6 +1059,15 @@ function TabRouting() {
     });
     setAssigningId(null);
     if (error || !data?.success) { alert('Assign nahi hua: ' + (error?.message || data?.message || 'Unknown error')); return; }
+    setNeedsAdminOrders((prev) => prev.filter((o) => o.id !== orderId));
+  };
+
+  const cancelOrder = async (orderId) => {
+    if (!window.confirm('Yeh order cancel karein? (Cancel = order khatm, wapas nahi hoga)')) return;
+    setCancellingId(orderId);
+    const { error } = await updateOrderStatus(orderId, 'cancelled');
+    setCancellingId(null);
+    if (error) { alert('Cancel nahi hua: ' + error.message); return; }
     setNeedsAdminOrders((prev) => prev.filter((o) => o.id !== orderId));
   };
 
@@ -1218,6 +1229,9 @@ function TabRouting() {
                     <p style={{ fontSize: '11px', color: '#999', margin: '2px 0 0' }}>
                       🕐 {formatIST(order.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
+                    <p style={{ fontSize: '12px', color: '#1A6B3C', margin: '2px 0 0', fontWeight: '600' }}>
+                      💰 Total: ₹{(order.total_amount || 0).toLocaleString('en-IN')} · Delivery: {order.delivery_charge > 0 ? `₹${order.delivery_charge.toLocaleString('en-IN')}` : 'FREE'}
+                    </p>
                     <p style={{ fontSize: '12px', color: '#555', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {items || 'Items —'}
                     </p>
@@ -1239,6 +1253,13 @@ function TabRouting() {
                     disabled={assigningId === order.id}
                   >
                     {assigningId === order.id ? 'Assign Ho Raha Hai...' : 'Assign Karo'}
+                  </button>
+                  <button
+                    style={{ padding: '10px 16px', backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', opacity: cancellingId === order.id ? 0.7 : 1 }}
+                    onClick={() => cancelOrder(order.id)}
+                    disabled={cancellingId === order.id}
+                  >
+                    {cancellingId === order.id ? 'Cancel Ho Raha Hai...' : 'Cancel Karo'}
                   </button>
                 </div>
               </div>
