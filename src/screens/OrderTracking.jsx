@@ -430,11 +430,13 @@ export default function OrderTracking() {
           <div style={s.card}>
             <p style={s.cardTitle}>Koi Samasya?</p>
             <div style={s.helpRow}>
-              <button style={s.helpBtnGreen}
-                onClick={() => window.open(`tel:${order?.sellers?.phone || ''}`)}>
-                <Phone size={15} color="#1A6B3C" />
-                Store Ko Call Karo
-              </button>
+              {order?.sellers?.phone && (
+                <button style={s.helpBtnGreen}
+                  onClick={() => window.open(`tel:${order.sellers.phone}`)}>
+                  <Phone size={15} color="#1A6B3C" />
+                  Store Ko Call Karo
+                </button>
+              )}
               <button style={s.helpBtnBlue} onClick={() => {
                 const msg = encodeURIComponent('Namaste, mujhe apne order ke baare mein poochna tha. Kya aap help kar sakte hain?');
                 window.open(`https://wa.me/${supportWhatsapp}?text=${msg}`, '_blank');

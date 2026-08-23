@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { intentionalSignOut } from '../context/AuthContext';
+import { formatIST } from '../lib/formatTime';
 import {
   approveCommissionRequest as approveCommissionRequestDb,
   rejectCommissionRequest  as rejectCommissionRequestDb,
@@ -772,6 +773,7 @@ function TabSellers({ sellers, filter, setFilter, loading, onApprove, onReject }
             <span>📱 {reg.mobile}</span>
             <span>📧 {reg.email}</span>
             <span>📋 {reg.drug_license_number || '—'}</span>
+            <span>🕐 Registered: {formatIST(reg.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
           </div>
 
           <button style={s.expandBtn} onClick={() => setExpanded(expanded === reg.id ? null : reg.id)}>
@@ -826,6 +828,7 @@ function TabPharmacists({ pharmacists, loading, onApprove, onReject }) {
           <div style={{ fontSize: '12px', color: '#666', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             <span>📧 {ph.email}</span>
             {ph.phone && <span>📱 {ph.phone}</span>}
+            <span>🕐 Registered: {formatIST(ph.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
             <button style={s.approveBtn} onClick={() => onApprove(ph.id)}>✓ Approve</button>
@@ -1211,6 +1214,9 @@ function TabRouting() {
                     </p>
                     <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
                       {order.users?.name || 'Customer'} · Pincode: {order.delivery_pincode || '—'}
+                    </p>
+                    <p style={{ fontSize: '11px', color: '#999', margin: '2px 0 0' }}>
+                      🕐 {formatIST(order.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
                     <p style={{ fontSize: '12px', color: '#555', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {items || 'Items —'}
