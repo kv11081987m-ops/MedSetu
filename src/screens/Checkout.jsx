@@ -263,7 +263,7 @@ export default function Checkout() {
     latitude: null, longitude: null, phone: '',
   });
   const [newAddressPhoneError, setNewAddressPhoneError] = useState('');
-  const [prescriptionUploaded, setPrescriptionUploaded] = useState(
+  const [prescriptionUploaded] = useState(
     !!location.state?.prescriptionUrl
   );
   // The URL for *this* order only comes from a fresh upload just now

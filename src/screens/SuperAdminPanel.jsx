@@ -55,6 +55,7 @@ export default function SuperAdminPanel() {
     tierHighRate: 20, tierModRate: 10, tierLowRate: 5,
     supportWhatsapp: '919196103234',
   });
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
 
   // ── Offer form state ──────────────────────────────────────
@@ -224,7 +225,7 @@ export default function SuperAdminPanel() {
       .maybeSingle();
     if (error) { console.error('loadSettings error:', error); return; }
     if (data) {
-      setSettings({
+      const loaded = {
         newRegistrations: data.new_registrations,
         homeDelivery:     data.home_delivery,
         pharmacistCalls:  data.pharmacist_calls,
@@ -237,7 +238,9 @@ export default function SuperAdminPanel() {
         tierModRate:  data.tier_mod_rate  ?? 10,
         tierLowRate:  data.tier_low_rate  ?? 5,
         supportWhatsapp: data.support_whatsapp || '919196103234',
-      });
+      };
+      setSettings(loaded);
+      setSavedSnapshot(loaded);
     }
   };
 
@@ -418,6 +421,12 @@ export default function SuperAdminPanel() {
   const filteredSellers = sellerFilter === 'all' ? allSellers : allSellers.filter((s) => s.status === sellerFilter);
   const displayedCount = sellerFilter === 'pending' ? stats.pendingSellers : sellerFilter === 'approved' ? stats.activeSellers : filteredSellers.length;
 
+  // Save button dirty-check (Fix 10a) — savedSnapshot is only set once
+  // loadSettings() resolves, so there's nothing meaningful to compare
+  // against before that.
+  const settingsDirty = savedSnapshot !== null &&
+    JSON.stringify(settings) !== JSON.stringify(savedSnapshot);
+
   return (
     <div style={s.wrapper}>
 
@@ -471,6 +480,7 @@ export default function SuperAdminPanel() {
           <TabSettings
             settings={settings} setSettings={setSettings}
             saving={savingSettings} setSaving={setSavingSettings}
+            dirty={settingsDirty} setSavedSnapshot={setSavedSnapshot}
             onLogout={handleLogout}
           />
         )}
@@ -1372,9 +1382,10 @@ function TabRouting() {
 // ══════════════════════════════════════════════════════════════
 // TAB: Settings
 // ══════════════════════════════════════════════════════════════
-function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
+function TabSettings({ settings, setSettings, saving, setSaving, dirty, setSavedSnapshot, onLogout }) {
   const navigate = useNavigate()
   const toggle = (key) => setSettings((p) => ({ ...p, [key]: !p[key] }));
+  const isDisabled = saving || !dirty;
 
   const saveSettings = async () => {
     setSaving(true);
@@ -1401,6 +1412,7 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
       console.error('saveSettings error:', error);
       alert('Settings save nahi hui: ' + (error.message || 'error'));
     } else {
+      setSavedSnapshot(settings);
       alert('Settings save ho gayi!');
     }
   };
@@ -1480,7 +1492,17 @@ function TabSettings({ settings, setSettings, saving, setSaving, onLogout }) {
           </div>
         </div>
 
-        <button style={{ ...s.approveBtn, marginTop: '16px', width: '100%', opacity: saving ? 0.7 : 1 }} onClick={saveSettings} disabled={saving}>
+        <button
+          style={{
+            ...s.approveBtn,
+            marginTop: '16px', width: '100%',
+            backgroundColor: isDisabled ? '#9CA3AF' : s.approveBtn.backgroundColor,
+            opacity: isDisabled ? 0.6 : 1,
+            cursor: isDisabled ? 'not-allowed' : 'pointer',
+          }}
+          onClick={saveSettings}
+          disabled={isDisabled}
+        >
           {saving ? 'Save Ho Raha Hai...' : 'Save Karo'}
         </button>
       </div>
