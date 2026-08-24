@@ -42,3 +42,13 @@ backups/
 # supabase/functions/, is still tracked normally).
 supabase/.temp/
 supabase/.branches/
+signing.keystore
+*.keystore
+*.jks
+
+# Fix 26 — Android/Gradle build junk
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
