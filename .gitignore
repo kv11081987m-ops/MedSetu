@@ -52,3 +52,5 @@ build/
 local.properties
 *.apk
 *.aab
+*.idsig
+desktop.ini
