@@ -7,6 +7,14 @@ export const setupRecaptcha = () => {
     window.recaptchaVerifier = null
   }
 
+  // clear() can no-op on a detached container (e.g. after a route change
+  // unmounted the old #recaptcha-container div) — grecaptcha still thinks a
+  // widget occupies it, causing "reCAPTCHA has already been rendered in
+  // this element". Wiping the container's DOM directly guarantees a clean
+  // slate before rendering a new widget into it.
+  const container = document.getElementById('recaptcha-container')
+  if (container) container.innerHTML = ''
+
   window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
     size: 'invisible',
   })

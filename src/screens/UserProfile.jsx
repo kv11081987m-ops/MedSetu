@@ -67,18 +67,44 @@ export default function UserProfile() {
     const fetchUserProfile = async () => {
       try {
         const stored = localStorage.getItem('medsetu_user');
-        if (!stored) {
-          if (devSession?.phone) {
-            setUserData({ name: 'Demo User', phone: devSession.phone, email: '', blood_group: '' });
-          }
-          setLoading(false);
-          return;
+        let localUser = null;
+        if (stored) {
+          try { localUser = JSON.parse(stored); } catch { localUser = null; }
         }
-        const localUser = JSON.parse(stored);
-        const { data, error } = await supabase
-          .from('users').select('*').eq('id', localUser.id).maybeSingle();
-        if (!error && data) setUserData(data);
-        else setUserData(localUser);
+
+        let profileData = null;
+
+        // STEP 1 — localStorage has a usable id: trust it first (fast path).
+        if (localUser?.id) {
+          const { data } = await supabase
+            .from('users').select('*').eq('id', localUser.id).maybeSingle();
+          if (data) profileData = data;
+        }
+
+        // STEP 2 — localStorage missing/corrupt/id-less, or its id found no
+        // row: fall back to the live Supabase session (auth_id — same
+        // column the users_select_own_or_staff RLS policy checks) so a
+        // valid session survives a cleared/stale localStorage.
+        if (!profileData) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            const { data } = await supabase
+              .from('users').select('*').eq('auth_id', user.id).maybeSingle();
+            if (data) {
+              profileData = data;
+              localStorage.setItem('medsetu_user', JSON.stringify(data));
+            }
+          }
+        }
+
+        if (profileData) {
+          setUserData(profileData);
+        } else if (devSession?.phone) {
+          setUserData({ name: 'Demo User', phone: devSession.phone, email: '', blood_group: '' });
+        }
+        // STEP 3 — neither localStorage, session, nor devSession resolved a
+        // user: userData stays null (initial state), showing the "please
+        // login" screen — the genuine logged-out case.
       } catch {
         navigate('/login');
       } finally {

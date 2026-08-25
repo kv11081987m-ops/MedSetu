@@ -248,6 +248,7 @@ export default function OTPScreen() {
         </button>
       </div>
 
+      <div id="recaptcha-container" />
     </div>
   );
 }
