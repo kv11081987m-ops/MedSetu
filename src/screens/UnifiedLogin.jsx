@@ -65,7 +65,10 @@ export default function UnifiedLogin() {
           <div style={s.logoBox}>
             <img src="/logo.png" alt="MedSetu" style={s.logo} />
           </div>
-          <p style={s.tagline}>Aapke mohalle ki dawai dukaan, ab online</p>
+          <div style={s.pilotNotice}>
+            <p style={s.pilotTitle}>यह एक पायलट प्रोजेक्ट है</p>
+            <p style={s.pilotSub}>आपका फीडबैक हमें बेहतर बनाता है</p>
+          </div>
         </div>
 
         {/* Card */}
@@ -127,10 +130,15 @@ export default function UnifiedLogin() {
 
           {/* Terms */}
           <p style={s.terms}>
-            Login karke aap hamare{' '}
-            <span style={s.termLink}>Terms &amp; Conditions</span>
-            {' '}aur{' '}
-            <span style={s.termLink}>Privacy Policy</span>
+            Login karke aap hamari{' '}
+            <a
+              href="/privacy-policy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ ...s.termLink, textDecoration: 'underline' }}
+            >
+              Privacy Policy
+            </a>
             {' '}se agree karte hain
           </p>
         </div>
@@ -163,7 +171,9 @@ const s = {
   header:     { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' },
   logoBox:    { background: '#FFFFFF', borderRadius: '16px', padding: '12px 20px', display: 'inline-block', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   logo:       { width: '180px', height: 'auto', display: 'block' },
-  tagline:    { fontSize: '13px', fontWeight: '600', color: BLUE, margin: 0, textAlign: 'center' },
+  pilotNotice:{ background: '#FFF4E5', border: `1px solid ${ORANGE}33`, borderRadius: '10px', padding: '6px 14px', textAlign: 'center' },
+  pilotTitle: { fontSize: '13px', fontWeight: '700', color: ORANGE, margin: 0 },
+  pilotSub:   { fontSize: '11px', fontWeight: '400', color: '#666', margin: '2px 0 0' },
   card:       { backgroundColor: '#FFFFFF', borderRadius: '20px', padding: '28px 24px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: '0' },
   googleBtn:  { width: '100%', padding: '16px', background: 'white', border: `2px solid ${ORANGE}`, borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', fontSize: '16px', fontWeight: '600', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' },
   hint:       { textAlign: 'center', color: '#666', fontSize: '12px', marginTop: '6px', marginBottom: 0 },

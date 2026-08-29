@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.medsetu.app",
+      "sha256_cert_fingerprints": [
+        "B4:36:7C:D9:EA:3E:BA:BF:CD:93:CC:0E:27:3B:57:DA:AE:88:74:E7:D4:EF:E9:62:C5:5F:22:0A:BF:67:A7:B8"
+      ]
+    }
+  }
+]

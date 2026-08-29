@@ -9,4 +9,10 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true, // Google/email (admin+staff) sessions need supabase-js auto-refresh. Phone sessions stay fresh via the Firebase re-bridge timer (~5 min before expiry, ahead of supabase-js's ~90s window), so the phone placeholder refresh token is never exercised.
+    detectSessionInUrl: true,
+  },
+});

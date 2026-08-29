@@ -8,10 +8,10 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder, createOrderItems } from '../lib/orders';
-import { updateUserPhone, isDuplicatePhoneError } from '../lib/auth';
 import { saveAddress, setDefaultAddress } from '../lib/addresses';
 import { supabase } from '../lib/supabase';
 import AddressForm from '../components/AddressForm';
+import AttachPhoneModal from '../components/AttachPhoneModal';
 
 
 // B15 Part B: launch is COD-only — no payment gateway wired up yet.
@@ -286,9 +286,6 @@ export default function Checkout() {
   // users.phone (address has no phone field), so a null/invalid phone
   // must block placing the order rather than silently going through.
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
-  const [phoneInput,      setPhoneInput]      = useState('');
-  const [phoneSaving,     setPhoneSaving]     = useState(false);
-  const [phoneInputError, setPhoneInputError] = useState('');
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
 
@@ -686,35 +683,11 @@ export default function Checkout() {
     }
   };
 
-  // ── Save mobile from the mandatory-phone prompt, then retry the order ──
-  const handleSavePhone = async () => {
-    if (!/^\d{10}$/.test(phoneInput)) {
-      setPhoneInputError('Sahi 10-digit mobile number daalein');
-      return;
-    }
-    setPhoneSaving(true);
-    setPhoneInputError('');
-    const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-    const { error } = await updateUserPhone(storedUser?.id, phoneInput);
-    setPhoneSaving(false);
-    if (error) {
-      console.error('[savePhone]', error);
-      if (isDuplicatePhoneError(error)) {
-        // users.phone UNIQUE constraint (users_phone_key) — this number
-        // already belongs to a different account.
-        setPhoneInputError('Yeh number pehle se registered hai. Doosra number daalein ya us account se login karein.');
-      } else if (error.message === 'userId missing') {
-        // updateUserPhone's own guard — localStorage.medsetu_user has no
-        // .id (e.g. SuperAdmin's "Customer View" session shape).
-        setPhoneInputError('Kuch gadbad hui, dobara login karke try karein.');
-      } else {
-        setPhoneInputError('Save nahi hua, dobara try karo');
-      }
-      return;
-    }
-    localStorage.setItem('medsetu_user', JSON.stringify({ ...storedUser, phone: phoneInput }));
+  // ── After AttachPhoneModal OTP-verifies and saves the phone, retry the
+  //    order — same "close, then place" sequence handleSavePhone used to
+  //    do after its own (now-removed) no-OTP text-field save. ──────────
+  const handlePhoneAttached = () => {
     setShowPhonePrompt(false);
-    setPhoneInput('');
     placeOrder();
   };
 
@@ -1075,39 +1048,14 @@ export default function Checkout() {
         {/* Mandatory-mobile prompt — only ever shown when placeOrder's
             phone check above fails (customers who already have a valid
             phone, phone+OTP or filled in via UserProfile, never see this
-            at all). Reuses the same offers-modal sheet shell + the promo
-            card's input/button/error styles instead of new ones. */}
+            at all). OTP-verified via the shared AttachPhoneModal instead
+            of a plain text-field save. */}
         {showPhonePrompt && (
-          <div style={s.offersOverlay} onClick={() => { setShowPhonePrompt(false); setPhoneInputError(''); }}>
-            <div style={s.offersSheet} onClick={(e) => e.stopPropagation()}>
-              <div style={s.offersHeader}>
-                <span style={s.offersTitle}>Mobile Number Chahiye</span>
-                <button style={s.offersCloseBtn} onClick={() => { setShowPhonePrompt(false); setPhoneInputError(''); }}>
-                  <X size={18} color="#666666" />
-                </button>
-              </div>
-              <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <p style={s.promoHint}>Delivery ke liye mobile number zaroori hai — store aur delivery partner isi number par sampark karenge.</p>
-                <div style={s.promoInputRow}>
-                  <input
-                    style={s.promoInput}
-                    placeholder="10-digit mobile number"
-                    value={phoneInput}
-                    onChange={(e) => { setPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 10)); setPhoneInputError(''); }}
-                    type="tel"
-                    inputMode="numeric"
-                    autoFocus
-                  />
-                  <button
-                    style={{ ...s.applyBtn, opacity: (phoneSaving || phoneInput.length !== 10) ? 0.5 : 1 }}
-                    onClick={handleSavePhone}
-                    disabled={phoneSaving || phoneInput.length !== 10}
-                  >{phoneSaving ? '...' : 'Save'}</button>
-                </div>
-                {phoneInputError && <p style={s.promoError}>{phoneInputError}</p>}
-              </div>
-            </div>
-          </div>
+          <AttachPhoneModal
+            user={JSON.parse(localStorage.getItem('medsetu_user') || '{}')}
+            onSaved={handlePhoneAttached}
+            onClose={() => setShowPhonePrompt(false)}
+          />
         )}
       </div>
     </div>

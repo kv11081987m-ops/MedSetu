@@ -59,6 +59,9 @@ export default function SuperAdminPanel() {
   });
   const [savedSnapshot, setSavedSnapshot] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  // Guards the hardcoded settings defaults from flashing on screen before
+  // loadSettings() resolves — display-only, doesn't affect the save path.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // ── Offer form state ──────────────────────────────────────
   const [offers, setOffers] = useState([]);
@@ -225,7 +228,11 @@ export default function SuperAdminPanel() {
       .select('*')
       .eq('id', 1)
       .maybeSingle();
-    if (error) { console.error('loadSettings error:', error); return; }
+    if (error) {
+      console.error('loadSettings error:', error);
+      setSettingsLoaded(true); // fetch failed — fall back to the hardcoded defaults rather than loading forever
+      return;
+    }
     if (data) {
       const loaded = {
         newRegistrations: data.new_registrations,
@@ -244,6 +251,7 @@ export default function SuperAdminPanel() {
       setSettings(loaded);
       setSavedSnapshot(loaded);
     }
+    setSettingsLoaded(true);
   };
 
   // ── Seller actions ────────────────────────────────────────
@@ -483,6 +491,7 @@ export default function SuperAdminPanel() {
             settings={settings} setSettings={setSettings}
             saving={savingSettings} setSaving={setSavingSettings}
             dirty={settingsDirty} setSavedSnapshot={setSavedSnapshot}
+            settingsLoaded={settingsLoaded}
             onLogout={handleLogout}
           />
         )}
@@ -1409,10 +1418,19 @@ function TabRouting() {
 // ══════════════════════════════════════════════════════════════
 // TAB: Settings
 // ══════════════════════════════════════════════════════════════
-function TabSettings({ settings, setSettings, saving, setSaving, dirty, setSavedSnapshot, onLogout }) {
+function TabSettings({ settings, setSettings, saving, setSaving, dirty, setSavedSnapshot, settingsLoaded, onLogout }) {
   const navigate = useNavigate()
   const toggle = (key) => setSettings((p) => ({ ...p, [key]: !p[key] }));
   const isDisabled = saving || !dirty;
+
+  if (!settingsLoaded) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <p style={s.sectionTitle}>Platform Settings</p>
+        <p style={s.emptyText}>Settings load ho rahi hain...</p>
+      </div>
+    );
+  }
 
   const saveSettings = async () => {
     setSaving(true);

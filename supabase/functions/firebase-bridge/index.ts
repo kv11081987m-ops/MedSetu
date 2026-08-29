@@ -141,6 +141,9 @@ Deno.serve(async (req: Request) => {
   // written the other way — no silent assumption about which convention
   // holds live.
   const digitsOnlyPhone = phoneNumber.replace(/^\+/, "");
+  // Last 10 digits — matches public.users.phone's bare-10-digit convention
+  // (digitsOnlyPhone itself is 12 digits: country code + the real number).
+  const phone10 = digitsOnlyPhone.slice(-10);
 
   let userId: string;
   try {
@@ -149,41 +152,90 @@ Deno.serve(async (req: Request) => {
     // the accurate way to check "does this phone already have an account".
     const sql = postgres(dbUrl, { max: 1 });
     try {
-      const rows = await sql`
-        SELECT id FROM auth.users
-        WHERE phone = ${digitsOnlyPhone} OR phone = ${"+" + digitsOnlyPhone}
+      // ── STEP 1: resolve via the app's own public.users table FIRST ──
+      // A person who already has a public.users row for this phone — e.g.
+      // a Google-login customer who added this number via the profile/
+      // checkout phone field — must resolve to THEIR existing identity,
+      // never a fresh auth.users row, or the account silently forks in two
+      // (see the L3 duplicate-account investigation: the old auth.users-
+      // only lookup below never sees numbers saved through the app's own
+      // profile UI, since that writes public.users.phone, not
+      // auth.users.phone). regexp_replace's pattern is written as '\\D' in
+      // this JS source (doubled backslash) — a single '\D' is not a
+      // recognized JS string escape and silently collapses to a bare 'D'
+      // before Postgres ever sees it, which would strip literal "D"
+      // characters instead of non-digits.
+      const publicUserRows = await sql`
+        SELECT id, auth_id FROM public.users
+        WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = ${phone10}
         LIMIT 1
       `;
-      userId = (rows[0]?.id as string | undefined) ?? "";
+      const publicUserRow = publicUserRows[0] ?? null;
 
-      if (!userId) {
-        const { data, error } = await admin.auth.admin.createUser({
-          phone: digitsOnlyPhone, // match Supabase's own no-'+' convention
-          phone_confirm: true,
-        });
-        if (error) {
-          const alreadyExists = /already registered|already exists/i.test(error.message ?? "");
-          if (!alreadyExists) {
-            console.error("[firebase-bridge] createUser failed:", error.message);
-            return jsonResponse({ error: "Could not create user" }, 500);
-          }
-          // Race: another concurrent bridge call (or a row our OR-match
-          // still somehow missed) claimed this phone between our lookup
-          // and this createUser call — re-look-up and use that user
-          // instead of failing the whole request.
-          const retryRows = await sql`
-            SELECT id FROM auth.users
-            WHERE phone = ${digitsOnlyPhone} OR phone = ${"+" + digitsOnlyPhone}
-            LIMIT 1
-          `;
-          userId = (retryRows[0]?.id as string | undefined) ?? "";
-          if (!userId) {
-            console.error("[firebase-bridge] createUser reported duplicate but re-lookup found nothing");
-            return jsonResponse({ error: "Could not resolve user" }, 500);
-          }
-        } else if (data?.user) {
-          userId = data.user.id;
+      userId = "";
+      if (publicUserRow?.auth_id) {
+        // Guard against a stale link (the auth.users row it points to was
+        // since deleted) — verify it still exists before trusting it.
+        // If not, treat this row as unlinked: fall through to STEP 2 to
+        // resolve/create a real identity, and STEP 3 below will re-point
+        // this row at that freshly resolved id.
+        const linkedRows = await sql`
+          SELECT 1 FROM auth.users WHERE id = ${publicUserRow.auth_id} LIMIT 1
+        `;
+        if (linkedRows.length > 0) {
+          userId = publicUserRow.auth_id as string;
+        } else {
+          publicUserRow.auth_id = null;
         }
+      }
+
+      // ── STEP 2: existing auth.users lookup/create — unchanged, now only
+      //    runs when STEP 1 didn't already resolve a real identity. ──────
+      if (!userId) {
+        const rows = await sql`
+          SELECT id FROM auth.users
+          WHERE phone = ${digitsOnlyPhone} OR phone = ${"+" + digitsOnlyPhone}
+          LIMIT 1
+        `;
+        userId = (rows[0]?.id as string | undefined) ?? "";
+
+        if (!userId) {
+          const { data, error } = await admin.auth.admin.createUser({
+            phone: digitsOnlyPhone, // match Supabase's own no-'+' convention
+            phone_confirm: true,
+          });
+          if (error) {
+            const alreadyExists = /already registered|already exists/i.test(error.message ?? "");
+            if (!alreadyExists) {
+              console.error("[firebase-bridge] createUser failed:", error.message);
+              return jsonResponse({ error: "Could not create user" }, 500);
+            }
+            // Race: another concurrent bridge call (or a row our OR-match
+            // still somehow missed) claimed this phone between our lookup
+            // and this createUser call — re-look-up and use that user
+            // instead of failing the whole request.
+            const retryRows = await sql`
+              SELECT id FROM auth.users
+              WHERE phone = ${digitsOnlyPhone} OR phone = ${"+" + digitsOnlyPhone}
+              LIMIT 1
+            `;
+            userId = (retryRows[0]?.id as string | undefined) ?? "";
+            if (!userId) {
+              console.error("[firebase-bridge] createUser reported duplicate but re-lookup found nothing");
+              return jsonResponse({ error: "Could not resolve user" }, 500);
+            }
+          } else if (data?.user) {
+            userId = data.user.id;
+          }
+        }
+      }
+
+      // ── STEP 3: heal/attach the public.users row to whichever identity
+      //    was just resolved — covers a legacy unlinked row, a stale link
+      //    just invalidated above, and a brand-new phone user's row
+      //    created downstream by AuthContext's own upsert. ──────────────
+      if (publicUserRow && !publicUserRow.auth_id) {
+        await sql`UPDATE public.users SET auth_id = ${userId} WHERE id = ${publicUserRow.id}`;
       }
     } finally {
       await sql.end({ timeout: 5 });

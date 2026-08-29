@@ -21,7 +21,7 @@
     "alias": "my-key-alias"
   },
   "appVersionName": "1.0.3",
-  "appVersionCode": 10,
+  "appVersionCode": 12,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://med-setu.vercel.app/manifest.json",

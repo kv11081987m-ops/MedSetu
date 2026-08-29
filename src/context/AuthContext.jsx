@@ -1,11 +1,18 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getCurrentUser } from '../lib/auth';
+import { auth } from '../lib/firebase';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import { bridgeFirebaseToSupabase } from '../lib/session';
 
 const AuthContext = createContext({});
 
 // ── Dev session helpers (sessionStorage) ──────────────────────
 const DEV_KEY = 'medsetu_dev';
+
+// Re-bridge the Firebase session into a fresh Supabase one this many seconds
+// before the current 1-hour firebase-bridge token expires.
+const REBRIDGE_MARGIN_SEC = 300;
 
 // Single source of truth for SuperAdmin identity — checked against the
 // authenticated Supabase session email, independent of any localStorage flag
@@ -57,6 +64,16 @@ export function AuthProvider({ children }) {
   );
   const authResolvedRef = useRef(false);
 
+  // Background re-bridge state — see the init useEffect below.
+  const refreshTimerRef = useRef(null);
+  // undefined = not checked yet, null = checked and no user, object = user present.
+  // Used to gate the "clear stale localStorage" cleanup on BOTH Supabase and
+  // Firebase confirming logged-out, so a phone-OTP user whose 1hr Supabase
+  // token already expired doesn't get flashed to /login while the Firebase
+  // re-bridge (still valid, persisted) is about to restore their session.
+  const supabaseUserRef = useRef(undefined);
+  const firebaseUserRef = useRef(undefined);
+
   const markResolved = () => {
     if (!authResolvedRef.current) {
       authResolvedRef.current = true;
@@ -65,31 +82,118 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Initial user load — clear stale role if no real session exists
+    // Initial user load. The stale-role/user cleanup only runs once BOTH
+    // Supabase AND Firebase have reported "no user" (see refs above) — a
+    // phone-OTP user's Supabase access token can already be expired at this
+    // point while their Firebase session (persisted, long-lived) is still
+    // alive and about to be re-bridged, so clearing on Supabase alone would
+    // flash them to a logged-out state for no reason.
+    const maybeCleanupStaleSession = () => {
+      if (supabaseUserRef.current === undefined) return;
+      if (firebaseUserRef.current === undefined) return;
+      if (supabaseUserRef.current || firebaseUserRef.current) return;
+      const dev = (() => { try { return JSON.parse(sessionStorage.getItem(DEV_KEY) || 'null'); } catch { return null; } })();
+      if (!dev) {
+        localStorage.removeItem('medsetu_role');
+        localStorage.removeItem('medsetu_user');
+      }
+    };
+
     getCurrentUser()
       .then((u) => {
-        if (!u) {
-          const dev = (() => { try { return JSON.parse(sessionStorage.getItem(DEV_KEY) || 'null'); } catch { return null; } })();
-          if (!dev) {
-            localStorage.removeItem('medsetu_role');
-            localStorage.removeItem('medsetu_user');
-          }
-        }
+        supabaseUserRef.current = u || null;
         setUser(u);
         setLoading(false);
         // Only resolve here when not waiting for an OAuth code exchange
         if (!pendingOAuthRef.current) markResolved();
+        maybeCleanupStaleSession();
       })
       .catch(() => {
+        supabaseUserRef.current = null;
         setLoading(false);
         if (!pendingOAuthRef.current) markResolved();
+        maybeCleanupStaleSession();
       });
+
+    // A Supabase session that carries an email is a Google/email login,
+    // which supabase-js auto-refreshes on its own. The Firebase re-bridge
+    // is only for phone-origin sessions (no email claim).
+    const isEmailSession = (session) => !!session?.user?.email;
+
+    // Schedules the next silent re-bridge ~5 min before the current
+    // firebase-bridge access token (1hr TTL, unchanged) expires.
+    const scheduleRebridge = (expiresAtSec) => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      if (!expiresAtSec) return;
+      const fireInMs = Math.max(1000, (expiresAtSec - REBRIDGE_MARGIN_SEC) * 1000 - Date.now());
+      refreshTimerRef.current = setTimeout(doRebridge, fireInMs);
+    };
+
+    const doRebridge = async () => {
+      const fbUser = auth.currentUser;
+      if (!fbUser) return; // Firebase itself is logged out — nothing to refresh
+      const { data: { session } } = await supabase.auth.getSession();
+      if (isEmailSession(session)) return; // Google/email session — supabase-js refreshes this itself
+      try {
+        await bridgeFirebaseToSupabase(fbUser); // setSession → fires onAuthStateChange → reschedules
+      } catch (e) {
+        console.warn('[Auth] Re-bridge failed; will retry on next app focus', e);
+      }
+    };
+
+    // Firebase's persisted session is the long-lived side of a phone-OTP
+    // login. This listener drives the startup re-bridge (Supabase's own
+    // 1hr token may already be gone by the time this fires) without
+    // touching any of the role-resolution logic below — a successful
+    // bridgeFirebaseToSupabase() call just calls setSession(), which fires
+    // the existing supabase.auth.onAuthStateChange handler as SIGNED_IN,
+    // same as a fresh OTP login.
+    const fbUnsub = onAuthStateChanged(auth, async (fbUser) => {
+      firebaseUserRef.current = fbUser || null;
+      maybeCleanupStaleSession();
+
+      if (!fbUser) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (isEmailSession(session)) return; // Google/email session — supabase-js refreshes this itself
+      const nowSec = Math.floor(Date.now() / 1000);
+      const needsBridge = !session || (session.expires_at && session.expires_at - nowSec < REBRIDGE_MARGIN_SEC);
+      if (needsBridge) {
+        try {
+          await bridgeFirebaseToSupabase(fbUser);
+        } catch (e) {
+          console.warn('[Auth] Startup re-bridge failed', e);
+        }
+      } else {
+        scheduleRebridge(session.expires_at);
+      }
+    });
+
+    // Re-bridge on foreground return if the token is near/past expiry — a
+    // backgrounded tab's setTimeout above can be throttled or suspended, so
+    // this is the fallback for whenever the user actually comes back.
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const fbUser = auth.currentUser;
+      if (!fbUser) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (isEmailSession(session)) return; // Google/email session — supabase-js refreshes this itself
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (!session || (session.expires_at && session.expires_at - nowSec < REBRIDGE_MARGIN_SEC)) {
+        doRebridge();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     // Listen for auth state changes (login / logout / magic link callback)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // Keep the background re-bridge timer in sync with whatever session
+        // Supabase just reported (fresh login, tab-focus re-check, or its
+        // own TOKEN_REFRESHED) — a no-op whenever there's no session.
+        if (session?.expires_at) scheduleRebridge(session.expires_at);
 
         if (event === 'SIGNED_OUT') {
           if (intentionalSignOut.current) {
@@ -98,6 +202,12 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('medsetu_user');
             localStorage.removeItem('medsetu_role');
             localStorage.removeItem('staff_pending_role');
+            if (refreshTimerRef.current) {
+              clearTimeout(refreshTimerRef.current);
+              refreshTimerRef.current = null;
+            }
+            // end the persistent Firebase session so re-bridge can't silently log back in
+            firebaseSignOut(auth).catch((e) => console.warn('[Auth] Firebase signOut failed', e));
           } else {
             // Spurious SIGNED_OUT nobody asked for — most likely Supabase's
             // client recovering from a token-refresh hiccup, about to fire a
@@ -401,7 +511,12 @@ export function AuthProvider({ children }) {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      fbUnsub();
+      document.removeEventListener('visibilitychange', onVisible);
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
   }, []);
 
   // Combined: real Supabase user OR dev bypass session

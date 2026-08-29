@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { createOrLoginUser, verifyStoredOTP, generateOTP, storeOTP } from '../lib/auth';
 import { verifyFirebaseOTP, sendFirebaseOTP } from '../lib/firebaseOTP';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
+import { bridgeFirebaseToSupabase } from '../lib/session';
 const OTP_LENGTH  = 6;
 const TIMER_START = 30;
 
@@ -96,24 +96,9 @@ export default function OTPScreen() {
           // notifications, and everything else actually work, not just a
           // localStorage flag.
           try {
-            const idToken = await result.firebaseUser.getIdToken();
-            const { data, error: bridgeErr } = await supabase.functions.invoke('firebase-bridge', {
-              body: { idToken },
-            });
-            if (bridgeErr || !data?.access_token) {
-              throw new Error(bridgeErr?.message || 'Session nahi mila');
-            }
-            // refresh_token is a placeholder, not a real GoTrue-issued one —
-            // there's no admin API to mint one for a phone-verified user
-            // without triggering a real SMS. Works for the ~1hr access token
-            // lifetime; auto-refresh at expiry will fail silently and the
-            // customer just logs in again via OTP for a fresh session —
-            // accepted, documented limitation, not a bug.
-            const { error: sessionErr } = await supabase.auth.setSession({
-              access_token: data.access_token,
-              refresh_token: 'firebase-bridge-session',
-            });
-            if (sessionErr) throw sessionErr;
+            // Shared with the background re-bridge (src/lib/session.js) so
+            // login and silent refresh mint the session identically.
+            await bridgeFirebaseToSupabase(result.firebaseUser);
             // AuthContext's SIGNED_IN handler (phone branch) takes over from
             // here — it does its own redirect to /home, nothing more needed.
           } catch (bridgeErr) {

@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import MedicineCard from '../components/MedicineCard';
 import BottomNav from '../components/BottomNav';
-import PhoneCollectModal from '../components/PhoneCollectModal';
+import AttachPhoneModal from '../components/AttachPhoneModal';
 import logo from '../assets/logo.png';
 import slogan from '../assets/slogan.png';
 import {
@@ -479,12 +479,13 @@ export default function CustomerHome() {
         )}
 
         {showPhoneModal && (
-          <PhoneCollectModal
+          <AttachPhoneModal
             user={phoneGateUser}
             onSaved={(phone) => {
               setPhoneGateUser((p) => ({ ...p, phone }));
               setShowPhoneModal(false);
             }}
+            onClose={() => setShowPhoneModal(false)}
           />
         )}
       </div>

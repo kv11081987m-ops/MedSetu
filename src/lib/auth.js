@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { intentionalSignOut } from '../context/AuthContext';
 
 export const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -82,6 +83,7 @@ export const isDuplicatePhoneError = (error) => {
 };
 
 export const logout = async () => {
+  intentionalSignOut.current = true;
   const { error } = await supabase.auth.signOut();
   return { error };
 };

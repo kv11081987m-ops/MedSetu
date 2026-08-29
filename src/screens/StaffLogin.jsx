@@ -50,6 +50,12 @@ export default function StaffLogin() {
           <img src="/logo.png" alt="MedSetu" style={{ width: '130px', height: 'auto', display: 'block' }} />
         </div>
 
+        {/* ── Pilot notice ── */}
+        <div style={s.pilotNotice}>
+          <p style={s.pilotTitle}>यह एक पायलट प्रोजेक्ट है</p>
+          <p style={s.pilotSub}>आपका फीडबैक हमें बेहतर बनाता है</p>
+        </div>
+
         {/* ── Header ── */}
         <div style={s.header}>
           <button style={s.backBtn} onClick={() => navigate('/login')}>
@@ -116,6 +122,10 @@ export default function StaffLogin() {
 const s = {
   wrapper:    { minHeight: '100vh', backgroundColor: '#F5F5F5', display: 'flex', justifyContent: 'center', padding: '0 16px' },
   container:  { width: '100%', maxWidth: '480px', paddingTop: '24px', paddingBottom: '40px', display: 'flex', flexDirection: 'column', gap: '16px' },
+
+  pilotNotice:{ background: '#FFF4E5', border: '1px solid #F26C0A33', borderRadius: '10px', padding: '6px 14px', textAlign: 'center' },
+  pilotTitle: { fontSize: '13px', fontWeight: '700', color: '#F26C0A', margin: 0 },
+  pilotSub:   { fontSize: '11px', fontWeight: '400', color: '#666', margin: '2px 0 0' },
 
   header:   { display: 'flex', alignItems: 'flex-start', gap: '12px' },
   backBtn:  { background: 'none', border: 'none', padding: '4px', cursor: 'pointer', borderRadius: '8px', marginTop: '2px', flexShrink: 0 },
