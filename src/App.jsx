@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { testSupabaseConnection } from './lib/testConnection';
+import ErrorBoundary from './components/ErrorBoundary';
 // import { insertSeedData } from './lib/seedData';
 
 import SplashScreen        from './screens/SplashScreen';
@@ -220,7 +221,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <CartProvider>
-          <AppRoutes />
+          <ErrorBoundary>
+            <AppRoutes />
+          </ErrorBoundary>
         </CartProvider>
       </AuthProvider>
     </BrowserRouter>

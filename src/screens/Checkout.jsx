@@ -649,7 +649,10 @@ export default function Checkout() {
       const { error: itemsErr } = await createOrderItems(newOrder.id, orderItems, routedSellerId);
       if (itemsErr) {
         console.error('createOrderItems failed:', itemsErr);
-        alert('Order toh ban gaya par items save nahi hue. Support se sampark karein. Order ID: ' + newOrder.order_number);
+        await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
+        alert('Order place nahi ho saka — items save nahi hue, order cancel kar diya gaya. Dobara try karo.');
+        setOrdering(false);
+        return;
       }
 
       // Best-effort back-link: give the prescriptions row a real order_id

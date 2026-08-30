@@ -535,6 +535,9 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('medsetu_role');
     localStorage.removeItem('medsetu_user');
     localStorage.removeItem('staff_pending_role');
+    if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
+    await firebaseSignOut(auth).catch((e) => console.warn('[Auth] fb signOut', e));
+    localStorage.removeItem('pharmacist_available');
     await supabase.auth.signOut().catch(() => {});
     setUser(null);
     setUserRole('customer');

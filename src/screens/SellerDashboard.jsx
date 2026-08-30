@@ -439,6 +439,7 @@ export default function SellerDashboard() {
   const unreadCount = notifs.filter((n) => !n.is_read).length;
 
   const [sellerData,    setSellerData]    = useState(null);
+  const [sellerNotFound, setSellerNotFound] = useState(false);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [allOrders,     setAllOrders]     = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
@@ -539,7 +540,7 @@ export default function SellerDashboard() {
   const fetchSellerData = async () => {
     try {
       const seller = await getCurrentSeller();
-      if (!seller) { navigate('/login'); return; }
+      if (!seller) { setSellerNotFound(true); return; }
       setSellerData(seller);
       setStoreOpen(seller.is_open ?? true);
       const { data: ps } = await supabase
@@ -927,6 +928,18 @@ export default function SellerDashboard() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' }}>
         <p style={{ color: '#888888', fontSize: '14px' }}>Dashboard load ho raha hai...</p>
+      </div>
+    );
+  }
+
+  if (sellerNotFound) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', backgroundColor: '#F5F5F5', padding: '24px' }}>
+        <p style={{ color: '#888888', fontSize: '14px' }}>Seller record nahi mila</p>
+        <button style={s.logoutBtn} onClick={doLogout}>
+          <LogOut size={16} color="#FFFFFF" />
+          Logout
+        </button>
       </div>
     );
   }

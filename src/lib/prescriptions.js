@@ -27,26 +27,19 @@ export async function uploadPrescription(file, userId) {
 // Old rows (pre-Tukda-1) still hold a full public URL — passed through
 // unchanged so they keep working until Tukda 3 backfills them.
 export async function getSignedRxUrl(path) {
-  console.log('[RX-SIGN] input path=', path);
   if (!path) {
-    console.log('[RX-SIGN] returning=', null);
     return null;
   }
   if (path.startsWith('https://') || path.startsWith('http://')) {
-    console.log('[RX-SIGN] old full-URL branch, returning as-is');
-    console.log('[RX-SIGN] returning=', path);
     return path;
   }
 
   const { data, error } = await supabase.storage
     .from('prescriptions')
     .createSignedUrl(path, RX_URL_TTL_SECONDS);
-  console.log('[RX-SIGN] createSignedUrl → data=', data, 'error=', error);
   if (error) {
     console.error('[getSignedRxUrl]', error);
-    console.log('[RX-SIGN] returning=', null);
     return null;
   }
-  console.log('[RX-SIGN] returning=', data?.signedUrl || null);
   return data?.signedUrl || null;
 }
