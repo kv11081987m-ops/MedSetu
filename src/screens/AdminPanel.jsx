@@ -780,7 +780,7 @@ export default function AdminPanel() {
       <div style={s.whiteCard}>
         <p style={s.sectionTitle}>Platform Info</p>
         {[
-          ['App Version',        '1.0.0'],
+          ['App Version',        '1.0.4'],
           ['Total Users',        stats.totalUsers.toLocaleString('en-IN')],
           ['Active Sellers',     stats.activeSellers],
           ['Aaj Ka GMV',         `₹${stats.todayGMV.toLocaleString('en-IN')}`],

@@ -578,7 +578,7 @@ export default function UserProfile() {
             Logout
           </button>
 
-          <p style={s.version}>MedSetu v1.0.0 · Made with ❤️ in India</p>
+          <p style={s.version}>MedSetu v1.0.4 · Made with ❤️ in India</p>
 
           <div style={{ height: '90px' }} />
         </div>

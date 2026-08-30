@@ -20,8 +20,8 @@
     "path": "D:\\apps\\apk Files\\MedSetu apk\\MedSetu - main folder\\signing.keystore",
     "alias": "my-key-alias"
   },
-  "appVersionName": "1.0.3",
-  "appVersionCode": 12,
+  "appVersionName": "1.0.4",
+  "appVersionCode": 14,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://med-setu.vercel.app/manifest.json",
@@ -47,5 +47,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "1.0.3"
+  "appVersion": "1.0.4"
 }
