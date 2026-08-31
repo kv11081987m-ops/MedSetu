@@ -656,7 +656,7 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
     });
 
     const acc = { added: 0, unmatched: [], failed: [] };
-    const CHUNK = 300;
+    const CHUNK = 100;   // Free-plan statement_timeout ke andar rahe — chhote chunk
     let doneRows = 0;
     try {
       for (let i = 0; i < payloadRows.length; i += CHUNK) {
