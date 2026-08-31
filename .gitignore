@@ -54,3 +54,4 @@ local.properties
 *.aab
 *.idsig
 desktop.ini
+bundletool.jar

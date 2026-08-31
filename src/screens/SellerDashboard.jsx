@@ -647,9 +647,20 @@ export default function SellerDashboard() {
     if (!sellerData) return;
     const newStatus = !storeOpen;
     setStoreOpen(newStatus);
-    const { error } = await supabase
-      .from('sellers').update({ is_open: newStatus }).eq('id', sellerData.id);
-    if (error) { setStoreOpen(!newStatus); alert('Update nahi hua — dobara try karo'); }
+    // .select() zaroori — RLS row ko filter kare to update 0 rows karta hai
+    // aur supabase-js error NULL deta hai (204). Bina iske "online" dikhta
+    // rehta jabki DB mein kuch save nahi hua.
+    const { data, error } = await supabase
+      .from('sellers')
+      .update({ is_open: newStatus })
+      .eq('id', sellerData.id)
+      .select('id');
+    if (error || !data || data.length === 0) {
+      setStoreOpen(!newStatus);                       // optimistic revert
+      alert('Status update nahi hua, dobara try karein');
+      return;
+    }
+    setSellerData((prev) => (prev ? { ...prev, is_open: newStatus } : prev));
   };
 
   const handleSaveStoreDetails = async (updates) => {

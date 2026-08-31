@@ -303,6 +303,16 @@ export default function SuperAdminPanel() {
         .eq('id', registrationId);
       if (regError) throw regError;
 
+      // 3b. Seller ke users row ko banao + link karo, taaki wo apni sellers
+      //     row (is_open toggle) RLS sellers_update_owner_or_staff ke tahat
+      //     update kar sake. Approval ke waqt seller ne login nahi kiya hota
+      //     — users row exist nahi karti, aur client RLS use insert nahi
+      //     karne deta — isliye SECURITY DEFINER RPC (039_linkSellerUser.sql).
+      const { data: linkRes, error: linkError } = await supabase
+        .rpc('link_seller_user', { p_seller_id: seller.id });
+      if (linkError) throw linkError;
+      if (linkRes && linkRes.success === false) throw new Error(linkRes.message);
+
       // 4. UI update
       setAllSellers((p) => p.map((s) => s.id === registrationId ? { ...s, status: 'approved' } : s));
       setPendingSellers((p) => p.filter((s) => s.id !== registrationId));
