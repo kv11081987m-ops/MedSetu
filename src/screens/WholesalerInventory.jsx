@@ -149,11 +149,16 @@ export default function WholesalerInventory() {
     // mrpMode must be known BEFORE fetching inventory — the fetch's
     // stock-vs-seller_hidden filter depends on it.
     (async () => {
-      const mrpModeOn = await fetchMrpMode();
-      const data = await fetchWholesalerInventory(sellerId, mrpModeOn);
-      setInventory(data);
-      setMrpMode(mrpModeOn);
-      setLoading(false);
+      try {
+        const mrpModeOn = await fetchMrpMode();
+        const data = await fetchWholesalerInventory(sellerId, mrpModeOn);
+        setInventory(data);
+        setMrpMode(mrpModeOn);
+      } catch (e) {
+        console.error('[WholesalerInventory] load failed', e);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [sellerId]);
 

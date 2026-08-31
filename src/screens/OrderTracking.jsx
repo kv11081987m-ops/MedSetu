@@ -155,10 +155,12 @@ export default function OrderTracking() {
 
   useEffect(() => {
     if (!orderId) { setLoading(false); return; }
-    fetchOrderById(orderId).then(({ data, error }) => {
-      if (!error && data) setOrder(data);
-      setLoading(false);
-    });
+    fetchOrderById(orderId)
+      .then(({ data, error }) => {
+        if (!error && data) setOrder(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, [orderId]);
 
   const activeStep = order ? getActiveStep(order.status) : ACTIVE_STEP;

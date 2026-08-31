@@ -103,14 +103,19 @@ export default function MedicineSearch() {
 
     setSearchLoading(true);
     debounceRef.current = setTimeout(async () => {
-      const results = await searchMedicines(val.trim(), mrpMode);
-      setSearchError(!!results.error);
-      setSearchResults({
-        janaushadhi: results.janaushadhi,
-        generic:     results.generic,
-        branded:     results.branded,
-      });
-      setSearchLoading(false);
+      try {
+        const results = await searchMedicines(val.trim(), mrpMode);
+        setSearchError(!!results.error);
+        setSearchResults({
+          janaushadhi: results.janaushadhi,
+          generic:     results.generic,
+          branded:     results.branded,
+        });
+      } catch {
+        setSearchError(true);
+      } finally {
+        setSearchLoading(false);
+      }
     }, 400);
   }, [mrpMode]);
 

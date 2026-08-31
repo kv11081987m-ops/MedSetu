@@ -55,7 +55,11 @@ export default function CategoriesScreen() {
   const [retryTick,      setRetryTick]      = useState(0);
 
   useEffect(() => {
-    fetchMrpMode().then((on) => { setMrpMode(on); setMrpModeReady(true); });
+    fetchMrpMode()
+      .then((on) => { setMrpMode(on); setMrpModeReady(true); })
+      // reject → proceed with the default mrpMode (false) so the fetch
+      // effect below isn't blocked forever on !mrpModeReady.
+      .catch(() => setMrpModeReady(true));
   }, []);
 
   // mrpMode must be known before fetching — the fetch's stock-vs-
@@ -65,13 +69,19 @@ export default function CategoriesScreen() {
     if (!mrpModeReady) return;
     let cancelled = false;
     setLoading(true);
-    fetchMedicinesByCategory(activeCategory, mrpMode).then(({ data, error }) => {
-      if (cancelled) return;
-      if (error) { setCategoryError(true); setLoading(false); return; }
-      setCategoryError(false);
-      setMedicines(data || []);
-      setLoading(false);
-    });
+    fetchMedicinesByCategory(activeCategory, mrpMode)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { setCategoryError(true); setLoading(false); return; }
+        setCategoryError(false);
+        setMedicines(data || []);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCategoryError(true);
+        setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [activeCategory, mrpMode, mrpModeReady, retryTick]);
 
