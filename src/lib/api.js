@@ -143,45 +143,31 @@ function attachSellerPrice(rows, priceByMedicine, mrpMode) {
 }
 
 // ── Search medicines — 3 sections: branded / generic / janaushadhi ──
-// Only medicines stocked by at least one seller are shown.
-// mrp_mode: stock no longer gates display — a medicine is listed as long
-// as some seller hasn't manually hidden it (seller_hidden=false), stock
-// quantity is irrelevant. mrp_mode OFF: unchanged (is_available + stock>0).
-// TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
+// DB-side RPC (040_customerMedicineFeed.sql): join + ilike filter +
+// per-section cap/order + cheapest price, all in Postgres. Old flow
+// fetched every stocked medicine_id then did master_medicines.in(id, [..])
+// — ~1000-3202 ids in the URL -> HTTP 414 -> silently empty.
+// Return: { janaushadhi, generic, branded, error }. `error` lets the
+// caller tell a real failure apart from a genuinely empty result.
 export async function searchMedicines(query, mrpMode = false) {
   const empty = { branded: [], generic: [], janaushadhi: [] };
-  if (!query || query.length < 2) return empty;
+  if (!query || query.length < 2) return { ...empty, error: null };
 
-  let invQuery = supabase.from('seller_inventory').select('medicine_id, selling_price, mrp');
-  invQuery = mrpMode
-    ? invQuery.eq('seller_hidden', false)
-    : invQuery.eq('is_available', true).gt('stock_quantity', 0);
-  const { data: invData } = await invQuery;
-  const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
-  if (availableIds.length === 0) return empty;
-  const priceByMedicine = buildPriceByMedicine(invData, mrpMode);
-
-  const filter =
-    `name.ilike.%${query}%,` +
-    `generic_name.ilike.%${query}%,` +
-    `salt_composition.ilike.%${query}%`;
-
-  const [janRes, genericRes, brandedRes] = await Promise.all([
-    supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('source', 'janaushadhi').gt('mrp_max', 0)
-      .in('id', availableIds).order('mrp_max', { ascending: true }).limit(5),
-    supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('is_generic', true).neq('source', 'janaushadhi').gt('mrp_max', 0)
-      .in('id', availableIds).order('mrp_max', { ascending: true }).limit(5),
-    supabase.from('master_medicines').select('*').or(filter)
-      .eq('is_active', true).eq('is_generic', false).gt('mrp_max', 0)
-      .in('id', availableIds).order('mrp_max', { ascending: false }).limit(5),
-  ]);
-
+  const { data, error } = await supabase.rpc('get_customer_medicines', {
+    p_query: query,
+    p_mrp_mode: mrpMode,
+    p_limit: 5,
+    p_offset: 0,
+  });
+  if (error) {
+    console.error('searchMedicines RPC error:', error);
+    return { ...empty, error };
+  }
   return {
-    janaushadhi: attachSellerPrice(janRes.data,     priceByMedicine, mrpMode),
-    generic:     attachSellerPrice(genericRes.data, priceByMedicine, mrpMode),
-    branded:     attachSellerPrice(brandedRes.data, priceByMedicine, mrpMode),
+    janaushadhi: Array.isArray(data?.janaushadhi) ? data.janaushadhi : [],
+    generic:     Array.isArray(data?.generic)     ? data.generic     : [],
+    branded:     Array.isArray(data?.branded)     ? data.branded     : [],
+    error: null,
   };
 }
 
@@ -257,30 +243,24 @@ export async function fetchSellersForMedicine(medicineId, mrpMode = false, maste
 }
 
 // ── Fetch popular medicines (for home/search landing) ─────────
-// Only medicines stocked by at least one seller are shown.
-// mrp_mode: same stock-ignoring rule as searchMedicines above.
-// TODO: if availableIds grows to thousands, replace .in() with a Postgres RPC for performance.
+// DB-side RPC (040_customerMedicineFeed.sql) — join + filter + cheapest
+// price + LIMIT sab Postgres mein. No id-list in the URL (old 2-step
+// .in() flow blew past the gateway URI limit -> HTTP 414 at ~1000+ ids).
+// Rows come back as raw master_medicines fields + `sellerPrice` — same
+// shape the old attachSellerPrice() produced, so mapMedicine/MedicineCard
+// are untouched.
 export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
-  let invQuery = supabase.from('seller_inventory').select('medicine_id, selling_price, mrp');
-  invQuery = mrpMode
-    ? invQuery.eq('seller_hidden', false)
-    : invQuery.eq('is_available', true).gt('stock_quantity', 0);
-  const { data: invData } = await invQuery;
-  const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
-  if (availableIds.length === 0) return { data: [], error: null };
-  const priceByMedicine = buildPriceByMedicine(invData, mrpMode);
-
-  const { data, error } = await supabase
-    .from('master_medicines')
-    .select('*')
-    .eq('is_active', true)
-    .gt('mrp_max', 0)
-    .in('id', availableIds)
-    .order('mrp_max', { ascending: true })
-    .limit(limit);
-
-  if (error) return { data: [], error };
-  return { data: attachSellerPrice(data, priceByMedicine, mrpMode), error: null };
+  const { data, error } = await supabase.rpc('get_customer_medicines', {
+    p_query: null,
+    p_mrp_mode: mrpMode,
+    p_limit: limit,
+    p_offset: 0,
+  });
+  if (error) {
+    console.error('fetchPopularMedicines RPC error:', error);
+    return { data: [], error };
+  }
+  return { data: Array.isArray(data?.items) ? data.items : [], error: null };
 }
 
 // ── Fetch medicines by dosage_form category (Categories screen, R3-C2) ──

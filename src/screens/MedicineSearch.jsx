@@ -50,9 +50,25 @@ export default function MedicineSearch() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
   const [mrpMode, setMrpMode] = useState(false);
+  const [popularError, setPopularError] = useState(false);
+  const [searchError, setSearchError] = useState(false);
 
   useEffect(() => {
     fetchSupportWhatsapp().then(setSupportWhatsapp);
+  }, []);
+
+  // Popular feed loader — extracted so the error-retry line can re-run it.
+  // A real RPC failure sets popularError (retry prompt); a genuinely empty
+  // result just leaves popularMeds = [] (the seedling line).
+  const loadPopular = useCallback(async (mrpModeOn) => {
+    const { data, error } = await fetchPopularMedicines(12, mrpModeOn);
+    if (error) { setPopularError(true); return; }
+    setPopularError(false);
+    // Raw rows (same shape searchMedicines' sections and Home already
+    // pass straight into MedicineCard) plus a derived `.type` — kept
+    // only so the existing Tablets/Syrup/Injection filter chips above
+    // keep matching the same way they always have (applyFilter below).
+    setPopularMeds((data || []).map(m => ({ ...m, type: mapMedicine(m).type })));
   }, []);
 
   // mrpMode must be known BEFORE fetching popular meds — the fetch's
@@ -62,16 +78,9 @@ export default function MedicineSearch() {
     (async () => {
       const mrpModeOn = await fetchMrpMode();
       setMrpMode(mrpModeOn);
-      const { data } = await fetchPopularMedicines(12, mrpModeOn);
-      // Raw rows (same shape searchMedicines' sections and Home already
-      // pass straight into MedicineCard) plus a derived `.type` — kept
-      // only so the existing Tablets/Syrup/Injection filter chips above
-      // keep matching the same way they always have (applyFilter below).
-      if (data?.length > 0) {
-        setPopularMeds(data.map(m => ({ ...m, type: mapMedicine(m).type })));
-      }
+      await loadPopular(mrpModeOn);
     })();
-  }, []);
+  }, [loadPopular]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -87,6 +96,7 @@ export default function MedicineSearch() {
 
     if (!val.trim() || val.trim().length < 2) {
       setSearchResults({ branded: [], generic: [], janaushadhi: [] });
+      setSearchError(false);
       setSearchLoading(false);
       return;
     }
@@ -94,7 +104,12 @@ export default function MedicineSearch() {
     setSearchLoading(true);
     debounceRef.current = setTimeout(async () => {
       const results = await searchMedicines(val.trim(), mrpMode);
-      setSearchResults(results);
+      setSearchError(!!results.error);
+      setSearchResults({
+        janaushadhi: results.janaushadhi,
+        generic:     results.generic,
+        branded:     results.branded,
+      });
       setSearchLoading(false);
     }, 400);
   }, [mrpMode]);
@@ -183,7 +198,17 @@ export default function MedicineSearch() {
                   <TrendingUp size={14} color="#1A6B3C" />
                   <span style={s.sectionTitle}>Popular Medicines</span>
                 </div>
-                {applyFilter(popularMeds).length === 0 ? (
+                {popularError ? (
+                  <p style={{ fontSize: '13px', color: '#B4232C', textAlign: 'center', padding: '16px 0', margin: 0 }}>
+                    ⚠️ Load nahi ho paayi.{' '}
+                    <button
+                      onClick={() => { setPopularError(false); loadPopular(mrpMode); }}
+                      style={{ background: 'none', border: 'none', color: '#0C447C', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                    >
+                      Dobara try karein
+                    </button>
+                  </p>
+                ) : applyFilter(popularMeds).length === 0 ? (
                   <p style={{ fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '16px 0', margin: 0 }}>
                     🌱 Jald hi naye medicines available honge
                   </p>
@@ -206,6 +231,18 @@ export default function MedicineSearch() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#1A6B3C', fontWeight: '500', backgroundColor: '#E8F5EE', padding: '12px 16px', margin: '12px', borderRadius: '10px' }}>
               <RefreshCw size={14} color="#1A6B3C" style={{ animation: 'spin 1s linear infinite' }} />
               Medicines dhundh raha hai...
+            </div>
+          ) : searchError ? (
+            /* ── Search failed (RPC error) — distinct from a real "no match" ── */
+            <div style={s.emptyState}>
+              <p style={{ fontSize: '48px', margin: 0 }}>⚠️</p>
+              <p style={s.emptyTitle}>Kuch galat hua</p>
+              <p style={s.emptySubtitle}>
+                Search abhi load nahi ho paayi — thodi der baad dobara try karein.
+              </p>
+              <button style={s.prescBtn} onClick={() => handleSearch(query)}>
+                Dobara try karein
+              </button>
             </div>
           ) : hasResults ? (
             /* ── 3-Section Results ── */

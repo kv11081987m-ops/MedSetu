@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchMrpMode, fetchPopularMedicines } from '../lib/api';
 import { useCart } from '../context/CartContext';
@@ -73,6 +73,7 @@ export default function CustomerHome() {
   const [offers, setOffers]           = useState([]);
   const [mrpMode, setMrpMode]         = useState(false);
   const [popularMeds, setPopularMeds] = useState([]);
+  const [popularError, setPopularError] = useState(false);
   const [pincode, setPincode]         = useState(null);
   const [addressLabel, setAddressLabel] = useState('');
   const [showChangeModal, setShowChangeModal] = useState(false);
@@ -85,6 +86,17 @@ export default function CustomerHome() {
   const [phoneGateUser, setPhoneGateUser] = useState(null);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
   const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
+
+  // Best-selling feed loader — extracted so the error-retry line below can
+  // re-run it without reloading the page. A real RPC failure sets
+  // popularError (shown as a retry prompt); a genuinely empty result just
+  // leaves popularMeds = [] (the "coming soon" seedling line).
+  const loadPopular = useCallback(async (mrpOn) => {
+    const { data: popData, error: popErr } = await fetchPopularMedicines(12, mrpOn);
+    if (popErr) { setPopularError(true); return; }
+    setPopularError(false);
+    setPopularMeds(popData || []);
+  }, []);
   // null = no default address/pincode on file yet (neutral display).
   // true/false = pincode known, in/out of the serviceable list. `pincode`
   // doubles as the "Change" popup's live-preview value (R3-CORE, not
@@ -122,10 +134,10 @@ export default function CustomerHome() {
         const mrpOn = await fetchMrpMode();
         if (!cancelled) setMrpMode(mrpOn);
 
-        try {
-          const { data: popData } = await fetchPopularMedicines(12, mrpOn);
-          if (!cancelled && popData) setPopularMeds(popData);
-        } catch {}
+        if (!cancelled) {
+          try { await loadPopular(mrpOn); }
+          catch { if (!cancelled) setPopularError(true); }
+        }
 
         // Fetch real notifications (only if user has a DB id)
         const userId = storedUser?.id;
@@ -180,7 +192,7 @@ export default function CustomerHome() {
 
     initPage();
     return () => { cancelled = true; };
-  }, [navigate]);
+  }, [navigate, loadPopular]);
 
   // Realtime — new notification INSERT updates the bell instantly.
   // Purely additive on top of the fetch-on-mount above.
@@ -316,7 +328,17 @@ export default function CustomerHome() {
               </span>
             </div>
             {activeServiceTab === 'allopath' ? (
-              popularMeds.length === 0 ? (
+              popularError ? (
+                <p style={{ fontSize: '13px', color: '#B4232C', textAlign: 'center', padding: '16px 0', margin: 0 }}>
+                  ⚠️ Medicines load nahi ho paayi.{' '}
+                  <button
+                    onClick={() => { setPopularError(false); loadPopular(mrpMode); }}
+                    style={{ background: 'none', border: 'none', color: '#0C447C', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Dobara try karein
+                  </button>
+                </p>
+              ) : popularMeds.length === 0 ? (
                 <p style={{ fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '16px 0', margin: 0 }}>
                   🌱 Jald hi naye medicines available honge
                 </p>
