@@ -51,6 +51,8 @@ export default function CategoriesScreen() {
   const [loading,        setLoading]        = useState(true);
   const [mrpMode,        setMrpMode]        = useState(false);
   const [mrpModeReady,   setMrpModeReady]   = useState(false);
+  const [categoryError,  setCategoryError]  = useState(false);
+  const [retryTick,      setRetryTick]      = useState(0);
 
   useEffect(() => {
     fetchMrpMode().then((on) => { setMrpMode(on); setMrpModeReady(true); });
@@ -63,11 +65,15 @@ export default function CategoriesScreen() {
     if (!mrpModeReady) return;
     let cancelled = false;
     setLoading(true);
-    fetchMedicinesByCategory(activeCategory, mrpMode).then(({ data }) => {
-      if (!cancelled) { setMedicines(data || []); setLoading(false); }
+    fetchMedicinesByCategory(activeCategory, mrpMode).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setCategoryError(true); setLoading(false); return; }
+      setCategoryError(false);
+      setMedicines(data || []);
+      setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [activeCategory, mrpMode, mrpModeReady]);
+  }, [activeCategory, mrpMode, mrpModeReady, retryTick]);
 
   return (
     <div style={s.wrapper}>
@@ -124,6 +130,16 @@ export default function CategoriesScreen() {
             <div style={s.rightPanel}>
               {loading ? (
                 <p style={s.stateText}>Load ho raha hai...</p>
+              ) : categoryError ? (
+                <p style={s.stateText}>
+                  ⚠️ Load nahi ho paayi.{' '}
+                  <button
+                    onClick={() => { setCategoryError(false); setRetryTick((t) => t + 1); }}
+                    style={{ background: 'none', border: 'none', color: '#0C447C', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Dobara try karein
+                  </button>
+                </p>
               ) : medicines.length === 0 ? (
                 <p style={s.stateText}>Is category mein abhi medicine nahi</p>
               ) : (

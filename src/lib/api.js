@@ -158,6 +158,7 @@ export async function searchMedicines(query, mrpMode = false) {
     p_mrp_mode: mrpMode,
     p_limit: 5,
     p_offset: 0,
+    p_dosage_form: null,
   });
   if (error) {
     console.error('searchMedicines RPC error:', error);
@@ -255,6 +256,7 @@ export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
     p_mrp_mode: mrpMode,
     p_limit: limit,
     p_offset: 0,
+    p_dosage_form: null,
   });
   if (error) {
     console.error('fetchPopularMedicines RPC error:', error);
@@ -264,31 +266,24 @@ export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
 }
 
 // ── Fetch medicines by dosage_form category (Categories screen, R3-C2) ──
-// Exact same availableIds/priceByMedicine/attachSellerPrice pattern as
-// fetchPopularMedicines above — only the master_medicines filter differs
-// (dosage_form instead of "top N by mrp_max"). No new price logic.
+// DB-side via get_customer_medicines RPC (041_categoryFeed.sql) —
+// "popular mode" + p_dosage_form filter. Same jsonb `items[]` shape as
+// fetchPopularMedicines (master row + sellerPrice), so CategoriesScreen's
+// MedicineCard render is untouched. Old 2-step .in() flow (HTTP 414 at
+// ~1000+ stocked ids -> silently empty) is gone.
 export async function fetchMedicinesByCategory(dosageForm, mrpMode = false, limit = 50) {
   if (!dosageForm) return { data: [], error: null };
 
-  let invQuery = supabase.from('seller_inventory').select('medicine_id, selling_price, mrp');
-  invQuery = mrpMode
-    ? invQuery.eq('seller_hidden', false)
-    : invQuery.eq('is_available', true).gt('stock_quantity', 0);
-  const { data: invData } = await invQuery;
-  const availableIds = [...new Set((invData || []).map(r => r.medicine_id).filter(Boolean))];
-  if (availableIds.length === 0) return { data: [], error: null };
-  const priceByMedicine = buildPriceByMedicine(invData, mrpMode);
-
-  const { data, error } = await supabase
-    .from('master_medicines')
-    .select('*')
-    .eq('is_active', true)
-    .eq('dosage_form', dosageForm)
-    .gt('mrp_max', 0)
-    .in('id', availableIds)
-    .order('mrp_max', { ascending: true })
-    .limit(limit);
-
-  if (error) return { data: [], error };
-  return { data: attachSellerPrice(data, priceByMedicine, mrpMode), error: null };
+  const { data, error } = await supabase.rpc('get_customer_medicines', {
+    p_query: null,
+    p_mrp_mode: mrpMode,
+    p_limit: limit,
+    p_offset: 0,
+    p_dosage_form: dosageForm,
+  });
+  if (error) {
+    console.error('fetchMedicinesByCategory RPC error:', error);
+    return { data: [], error };
+  }
+  return { data: Array.isArray(data?.items) ? data.items : [], error: null };
 }

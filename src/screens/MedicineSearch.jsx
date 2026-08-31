@@ -61,7 +61,7 @@ export default function MedicineSearch() {
   // A real RPC failure sets popularError (retry prompt); a genuinely empty
   // result just leaves popularMeds = [] (the seedling line).
   const loadPopular = useCallback(async (mrpModeOn) => {
-    const { data, error } = await fetchPopularMedicines(12, mrpModeOn);
+    const { data, error } = await fetchPopularMedicines(30, mrpModeOn);
     if (error) { setPopularError(true); return; }
     setPopularError(false);
     // Raw rows (same shape searchMedicines' sections and Home already

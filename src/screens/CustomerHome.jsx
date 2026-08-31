@@ -92,7 +92,7 @@ export default function CustomerHome() {
   // popularError (shown as a retry prompt); a genuinely empty result just
   // leaves popularMeds = [] (the "coming soon" seedling line).
   const loadPopular = useCallback(async (mrpOn) => {
-    const { data: popData, error: popErr } = await fetchPopularMedicines(12, mrpOn);
+    const { data: popData, error: popErr } = await fetchPopularMedicines(30, mrpOn);
     if (popErr) { setPopularError(true); return; }
     setPopularError(false);
     setPopularMeds(popData || []);
