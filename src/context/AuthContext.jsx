@@ -74,6 +74,14 @@ export function AuthProvider({ children }) {
   const supabaseUserRef = useRef(undefined);
   const firebaseUserRef = useRef(undefined);
 
+  // H4: time this provider mounted — our "last known-good session" marker.
+  // A medsetu_logout_at newer than this means a logout fired elsewhere
+  // (another tab) after we established our session, so ours is stale too.
+  // Stamped at the top of the mount effect below (Date.now() can't run in
+  // render); re-baselined on every fresh SIGNED_IN/INITIAL_SESSION so a
+  // logout-then-login in the same tab doesn't kill the new session.
+  const mountedAtRef = useRef(0);
+
   const markResolved = () => {
     if (!authResolvedRef.current) {
       authResolvedRef.current = true;
@@ -81,7 +89,34 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // ── H4 cross-tab logout safety-net ─────────────────────────────
+  // One teardown for every logout path: the button (handleLogout), the
+  // staff-rejection kick-out (SIGNED_OUT-intentional branch), and a
+  // logout that happened in ANOTHER tab and reached us via the storage
+  // event below. Replaces three copy-pasted removeItem triplets.
+  const clearLocalSession = () => {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    // end the persistent Firebase session so re-bridge can't silently log back in
+    firebaseSignOut(auth).catch((e) => console.warn('[Auth] Firebase signOut failed', e));
+    localStorage.removeItem('medsetu_user');
+    localStorage.removeItem('medsetu_role');
+    localStorage.removeItem('staff_pending_role');
+    localStorage.removeItem('pharmacist_available');
+    setUser(null);
+    setUserRole('customer');
+  };
+
+  const isLoggedOutElsewhere = () =>
+    Number(localStorage.getItem('medsetu_logout_at')) > mountedAtRef.current;
+
   useEffect(() => {
+    // H4: stamp mount time here — this is the baseline every cross-tab
+    // logout check compares against (see isLoggedOutElsewhere / onStorage).
+    mountedAtRef.current = Date.now();
+
     // Initial user load. The stale-role/user cleanup only runs once BOTH
     // Supabase AND Firebase have reported "no user" (see refs above) — a
     // phone-OTP user's Supabase access token can already be expired at this
@@ -130,6 +165,8 @@ export function AuthProvider({ children }) {
     };
 
     const doRebridge = async () => {
+      // H4: don't silently re-establish a session that was logged out elsewhere.
+      if (isLoggedOutElsewhere()) { clearLocalSession(); return; }
       const fbUser = auth.currentUser;
       if (!fbUser) return; // Firebase itself is logged out — nothing to refresh
       const { data: { session } } = await supabase.auth.getSession();
@@ -153,6 +190,8 @@ export function AuthProvider({ children }) {
       maybeCleanupStaleSession();
 
       if (!fbUser) return;
+      // H4: don't re-bridge into a session that was logged out elsewhere.
+      if (isLoggedOutElsewhere()) { clearLocalSession(); return; }
       const { data: { session } } = await supabase.auth.getSession();
       if (isEmailSession(session)) return; // Google/email session — supabase-js refreshes this itself
       const nowSec = Math.floor(Date.now() / 1000);
@@ -184,6 +223,18 @@ export function AuthProvider({ children }) {
     };
     document.addEventListener('visibilitychange', onVisible);
 
+    // ── H4: cross-tab logout ──────────────────────────────────────
+    // Another tab writing medsetu_logout_at (logout button or staff
+    // kick-out) fires this in every OTHER tab. A timestamp newer than
+    // our mount means our session is stale too — tear it down locally.
+    // The > mountedAtRef check stops an older logout stamp still sitting
+    // in localStorage from killing a fresh login in this tab.
+    const onStorage = (e) => {
+      if (e.key !== 'medsetu_logout_at' || !e.newValue) return;
+      if (Number(e.newValue) > mountedAtRef.current) clearLocalSession();
+    };
+    window.addEventListener('storage', onStorage);
+
     // Listen for auth state changes (login / logout / magic link callback)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
@@ -199,15 +250,9 @@ export function AuthProvider({ children }) {
           if (intentionalSignOut.current) {
             // Real logout (button click, staff-rejection kick-out) — full cleanup.
             intentionalSignOut.current = false;
-            localStorage.removeItem('medsetu_user');
-            localStorage.removeItem('medsetu_role');
-            localStorage.removeItem('staff_pending_role');
-            if (refreshTimerRef.current) {
-              clearTimeout(refreshTimerRef.current);
-              refreshTimerRef.current = null;
-            }
-            // end the persistent Firebase session so re-bridge can't silently log back in
-            firebaseSignOut(auth).catch((e) => console.warn('[Auth] Firebase signOut failed', e));
+            // H4: broadcast to other tabs (picked up by the storage listener).
+            localStorage.setItem('medsetu_logout_at', String(Date.now()));
+            clearLocalSession();
           } else {
             // Spurious SIGNED_OUT nobody asked for — most likely Supabase's
             // client recovering from a token-refresh hiccup, about to fire a
@@ -244,6 +289,13 @@ export function AuthProvider({ children }) {
         // state still redirects nowhere and does nothing extra — only a
         // session/localStorage mismatch (today's bug) now actually resolves.
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+          // H4: a real, current session — drop any stale cross-tab logout
+          // marker and re-baseline our known-good time so the storage
+          // listener and re-bridge guards don't kill THIS session (e.g.
+          // logout-then-login in the same tab).
+          localStorage.removeItem('medsetu_logout_at');
+          mountedAtRef.current = Date.now();
+
           const emailUser   = session.user;
           const pendingRole = localStorage.getItem('staff_pending_role');
 
@@ -515,6 +567,7 @@ export function AuthProvider({ children }) {
       subscription.unsubscribe();
       fbUnsub();
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('storage', onStorage);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
@@ -530,17 +583,12 @@ export function AuthProvider({ children }) {
 
   const handleLogout = async () => {
     intentionalSignOut.current = true;
+    // H4: broadcast to other tabs (picked up by the storage listener).
+    localStorage.setItem('medsetu_logout_at', String(Date.now()));
     clearDevSession();
     setDevSessionState(null);
-    localStorage.removeItem('medsetu_role');
-    localStorage.removeItem('medsetu_user');
-    localStorage.removeItem('staff_pending_role');
-    if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
-    await firebaseSignOut(auth).catch((e) => console.warn('[Auth] fb signOut', e));
-    localStorage.removeItem('pharmacist_available');
+    clearLocalSession();
     await supabase.auth.signOut().catch(() => {});
-    setUser(null);
-    setUserRole('customer');
   };
 
   return (
