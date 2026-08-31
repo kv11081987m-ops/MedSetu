@@ -170,12 +170,14 @@ export default function OrderHistory() {
 
   useEffect(() => {
     const userId = getCurrentUserId();
-    fetchOrders(userId).then(({ data, error }) => {
-      if (!error && data.length > 0) {
-        setDbOrders(data.map(mapOrder));
-      }
-      setDbLoading(false);
-    });
+    fetchOrders(userId)
+      .then(({ data, error }) => {
+        if (!error && data.length > 0) {
+          setDbOrders(data.map(mapOrder));
+        }
+        setDbLoading(false);
+      })
+      .catch(() => setDbLoading(false));
   }, []);
 
   const handleCancel = async (order) => {
