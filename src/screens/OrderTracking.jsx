@@ -203,7 +203,7 @@ export default function OrderTracking() {
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${order.id}` },
         () => { fetchOrderById(order.id).then(({ data }) => { if (data) setOrder(data); }); }
       )
-      .subscribe((status, err) => console.log('[OrderTracking Realtime]', status, err ?? ''));
+      .subscribe((status, err) => { if (import.meta.env.DEV) console.log('[OrderTracking Realtime]', status, err ?? ''); });
     return () => { supabase.removeChannel(channel); };
   }, [order?.id]);
 

@@ -101,7 +101,7 @@ export default function SuperAdminPanel() {
         { event: '*', schema: 'public', table: 'sellers' },
         () => { loadSellerCommissions(); }
       )
-      .subscribe((status, err) => console.log('[SuperAdmin Realtime]', status, err ?? ''));
+      .subscribe((status, err) => { if (import.meta.env.DEV) console.log('[SuperAdmin Realtime]', status, err ?? ''); });
     return () => { supabase.removeChannel(channel); };
   }, []);
 

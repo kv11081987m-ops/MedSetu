@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchOrders, mapOrder, updateOrderStatus } from '../lib/orders';
+import { fetchOrders, mapOrder } from '../lib/orders';
+import { supabase } from '../lib/supabase';
 import { generateInvoicePDF } from '../lib/invoicePdf';
 import BottomNav from '../components/BottomNav';
 import {
@@ -183,12 +184,24 @@ export default function OrderHistory() {
   const handleCancel = async (order) => {
     if (!order.dbId) return;
     if (!window.confirm('Kya aap ye order cancel karna chahte hain?')) return;
-    const { error } = await updateOrderStatus(order.dbId, 'cancelled');
-    if (!error) {
-      setDbOrders((prev) =>
-        prev.map((o) => o.dbId === order.dbId ? { ...o, status: 'cancelled', refund: o.amount } : o)
-      );
+    // RPC, not a raw UPDATE — a confirmed order has reserved stock that must
+    // be released (a customer session can't call release_stock directly),
+    // and the raw UPDATE silently no-ops for preparing/out_for_delivery
+    // orders (protect_order_sensitive_columns trigger) while returning no
+    // error, which used to flash a false "cancelled + refund ₹X processed".
+    // Same call shape as OrderTracking.jsx's handleCancelConfirm.
+    const { data, error } = await supabase.rpc('cancel_order', { p_order_id: order.dbId });
+    const result = data?.[0];
+    if (error || !result?.success) {
+      alert('Order cancel nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
+      return;
     }
+    if (result.message && result.message !== 'Order cancel ho gaya') {
+      alert(result.message);
+    }
+    setDbOrders((prev) =>
+      prev.map((o) => o.dbId === order.dbId ? { ...o, status: 'cancelled', refund: o.amount } : o)
+    );
   };
 
   const handleDownloadBill = async (order) => {

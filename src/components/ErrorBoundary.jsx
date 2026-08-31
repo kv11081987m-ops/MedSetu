@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import * as Sentry from '@sentry/react';
 
 // Top-level render-crash guard — without this, any uncaught error in a
 // screen's render (bad API shape, null-deref) white-screens the whole app
@@ -14,6 +15,7 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary]', error, errorInfo);
+    Sentry.captureException(error);
   }
 
   render() {

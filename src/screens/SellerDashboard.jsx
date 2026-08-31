@@ -130,7 +130,6 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
           <span
             style={{ ...s.badge, color: '#7C3AED', backgroundColor: '#F3EEFF', cursor: 'pointer', textDecoration: 'underline' }}
             onClick={async () => {
-              console.log('[RX-SIGN] order.prescriptionUrl=', order.prescriptionUrl);
               const url = await getSignedRxUrl(order.prescriptionUrl);
               if (url) window.open(url, '_blank', 'noopener,noreferrer');
               else alert('Prescription abhi khul nahi paa rahi');
@@ -638,7 +637,7 @@ export default function SellerDashboard() {
           fetchB2BOrders(sid).then(({ data }) => { if (data) setB2bPurchases(data); });
         }
       )
-      .subscribe((status, err) => console.log('[SellerDashboard Realtime]', status, err ?? ''));
+      .subscribe((status, err) => { if (import.meta.env.DEV) console.log('[SellerDashboard Realtime]', status, err ?? ''); });
     return () => { supabase.removeChannel(channel); };
   }, [sellerData?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

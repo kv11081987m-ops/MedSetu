@@ -125,7 +125,7 @@ export default function OTPScreen() {
         navigate('/home', { replace: true });
       }
     } catch (err) {
-      console.error('[DEBUG LOGIN] error:', err);
+      if (import.meta.env.DEV) console.error('[DEBUG LOGIN] error:', err);
       setError('Login mein dikkat: ' + err.message);
     } finally {
       setLoading(false);
