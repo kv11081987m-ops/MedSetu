@@ -581,7 +581,8 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
   const [csvData,       setCsvData]       = useState([]);
   const [uploadStatus,  setUploadStatus]  = useState('idle');
   const [errorMsg,      setErrorMsg]      = useState('');
-  const [results,       setResults]       = useState({ added: [], unmatched: [], failed: [] });
+  const [results,       setResults]       = useState({ added: 0, unmatched: [], failed: [] });
+  const [progress,      setProgress]      = useState({ done: 0, total: 0 });
 
   const validateRow = (row) => {
     const errors = [];
@@ -625,54 +626,63 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
   const bulkUpload = async () => {
     const validRows = csvData.filter((r) => r._valid);
     if (!validRows.length) return;
-    setUploadStatus('uploading');
-    const res = { added: [], unmatched: [], failed: [] };
-    for (const r of validRows) {
-      const { data: match, error: matchErr } = await supabase
-        .from('master_medicines')
-        .select('id, name, mrp_max')
-        .ilike('name', r.name.trim())
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle();
-      if (matchErr) { res.failed.push(r.name); continue; }
-      if (!match)   { res.unmatched.push(r.name); continue; }
-      try {
-        const rawExpiry = r.expiry_date?.trim() || '';
-        const expiryDate = rawExpiry
-          ? (rawExpiry.length === 7 ? rawExpiry + '-01' : rawExpiry)
-          : null;
-        const csvMrp = Number(r.mrp) || 0;
-
-        // mrp_mode ON: seller's own CSV mrp column is authoritative and
-        // becomes both seller_inventory.mrp and selling_price — the old
-        // master_medicines.mrp_max reference is not consulted at all
-        // (same "seller MRP wins" reasoning as the guard trigger).
-        // mrp_mode OFF: unchanged — selling_price column wins, mrp column
-        // is only a fallback, and still checked against master's mrp_max.
-        const sellingPrice = mrpMode ? csvMrp : (Number(r.selling_price) || csvMrp || 0);
-        if (!mrpMode) {
-          const effectiveMrp = match.mrp_max > 0 ? match.mrp_max : csvMrp;
-          if (effectiveMrp > 0 && sellingPrice > effectiveMrp) {
-            res.failed.push(`${r.name} (selling price MRP ₹${effectiveMrp} se zyada hai)`);
-            continue;
-          }
-        }
-        await addToSellerInventory(match.id, {
-          sellingPrice,
-          mrp:              mrpMode ? csvMrp : undefined,
-          stock:            Number(r.stock)          || 0,
-          unit:             r.unit                   || 'strips',
-          expiryDate,
-          batchNumber:      r.batch_number           || null,
-          minOrderQuantity: r.min_order_quantity     || 1,
-        });
-        res.added.push(r.name);
-      } catch {
-        res.failed.push(r.name);
-      }
+    if (!sellerId) {
+      setErrorMsg('Seller load nahi hua — page refresh karke dobara try karo');
+      setUploadStatus('error');
+      return;
     }
-    setResults(res);
+    setUploadStatus('uploading');
+    setProgress({ done: 0, total: validRows.length });
+
+    // Saara mrp_mode / parse / date-normalize logic yahin rehta hai (rule
+    // bilkul same jaisा per-row loop mein tha) — RPC ko final values milti
+    // hain, wo sirf name-match + MRP-guard + upsert karta hai DB-side.
+    const payloadRows = validRows.map((r) => {
+      const csvMrp = Number(r.mrp) || 0;
+      const rawExpiry = r.expiry_date?.trim() || '';
+      const expiry_date = rawExpiry
+        ? (rawExpiry.length === 7 ? rawExpiry + '-01' : rawExpiry)
+        : null;
+      return {
+        name:               r.name.trim(),
+        stock:              Number(r.stock) || 0,
+        selling_price:      mrpMode ? csvMrp : (Number(r.selling_price) || csvMrp || 0),
+        mrp:               mrpMode ? csvMrp : null,   // OFF: null -> RPC purana mrp chhodta hai
+        unit:               r.unit || 'strips',
+        expiry_date,
+        batch_number:       r.batch_number || null,
+        min_order_quantity: Number(r.min_order_quantity) || 1,
+      };
+    });
+
+    const acc = { added: 0, unmatched: [], failed: [] };
+    const CHUNK = 300;
+    let doneRows = 0;
+    try {
+      for (let i = 0; i < payloadRows.length; i += CHUNK) {
+        const slice = payloadRows.slice(i, i + CHUNK);
+        const { data, error } = await supabase.rpc('bulk_add_seller_inventory', {
+          p_seller_id: sellerId,
+          p_rows: slice,
+        });
+        if (error) throw error;
+        acc.added    += data?.added || 0;
+        acc.unmatched = acc.unmatched.concat(data?.unmatched || []);
+        acc.failed    = acc.failed.concat(data?.failed || []);
+        doneRows = Math.min(i + CHUNK, payloadRows.length);
+        setProgress({ done: doneRows, total: payloadRows.length });
+      }
+    } catch (err) {
+      console.error('bulk_add_seller_inventory error:', err);
+      setErrorMsg(
+        `Upload beech mein ruk gaya — ${doneRows}/${payloadRows.length} rows tak ho chuki ` +
+        `(${acc.added} add hui). Baaki rows ke liye dobara upload karo. [${err.message || 'RPC error'}]`
+      );
+      setUploadStatus('error');
+      return;
+    }
+
+    setResults(acc);
     setUploadStatus('done');
     onDone();
   };
@@ -690,18 +700,22 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
   const validCount   = csvData.filter((r) => r._valid).length;
   const invalidCount = csvData.filter((r) => !r._valid).length;
 
+  // Upload chalte waqt backdrop-click / X se popup band na ho — abhi ho
+  // jaata hai aur chal raha RPC loop chup-chaap results kho deta hai.
+  const requestClose = () => { if (uploadStatus === 'uploading') return; onClose(); };
+
   return (
-    <div style={bs.overlay} onClick={onClose}>
+    <div style={bs.overlay} onClick={requestClose}>
       <div style={bs.card} onClick={(e) => e.stopPropagation()}>
         <div style={bs.header}>
           <p style={bs.title}>Bulk Upload (CSV)</p>
-          <button style={s.modalClose} onClick={onClose}><X size={20} color="#888" /></button>
+          <button style={s.modalClose} onClick={requestClose}><X size={20} color="#888" /></button>
         </div>
 
         {uploadStatus === 'done' && (
           <div style={{ ...bs.centerBox, alignItems: 'flex-start' }}>
             <p style={{ ...bs.doneTitle, alignSelf: 'center' }}>
-              ✅ {results.added.length} medicines add ho gayi!
+              ✅ {results.added} medicines add ho gayi!
             </p>
             {results.unmatched.length > 0 && (
               <div style={{ width: '100%', marginTop: '10px' }}>
@@ -739,7 +753,9 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
 
         {uploadStatus === 'uploading' && (
           <div style={bs.centerBox}>
-            <p style={{ fontSize: '14px', color: '#555555' }}>Upload ho raha hai... please wait</p>
+            <p style={{ fontSize: '14px', color: '#555555' }}>
+              Upload ho raha hai… {progress.done}/{progress.total}
+            </p>
           </div>
         )}
 
