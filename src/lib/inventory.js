@@ -20,20 +20,35 @@ export const fetchSellerInventory = async () => {
   const seller = await getCurrentSeller()
   if (!seller) return []
 
-  const { data } = await supabase
-    .from('seller_inventory')
-    .select(`
-      *,
-      master_medicines (
-        id, name, generic_name, salt_composition,
-        category, dosage_form, manufacturer, mrp_max,
-        requires_prescription, source
-      )
-    `)
-    .eq('seller_id', seller.id)
-    .order('created_at', { ascending: false })
-
-  return data || []
+  // Supabase "Max Rows" (default 1000) har request ko cap karta hai — ek
+  // bada .limit() ise bypass nahi karta. Isliye .range() se pages kheencho
+  // jab tak poori inventory na aa jaye (3589, ya kitni bhi).
+  const PAGE = 1000
+  const all = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('seller_inventory')
+      .select(`
+        *,
+        master_medicines (
+          id, name, generic_name, salt_composition,
+          category, dosage_form, manufacturer, mrp_max,
+          requires_prescription, source
+        )
+      `)
+      .eq('seller_id', seller.id)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false }) // stable tiebreaker — bulk upload
+                                         // rows ka created_at same hota hai;
+                                         // bina iske page-boundary par row
+                                         // skip/duplicate ho sakti
+      .range(from, from + PAGE - 1)
+    if (error) { console.error('fetchSellerInventory error:', error); break }
+    if (!data?.length) break
+    all.push(...data)
+    if (data.length < PAGE) break
+  }
+  return all
 }
 
 export const addToSellerInventory = async (medicineId, details) => {
