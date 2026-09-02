@@ -60,8 +60,12 @@ export default function SellerRegister() {
     if (step === 3) {
       if (!formData.drugLicenseNumber.trim()) e.drugLicenseNumber = 'License number zaroori hai';
       if (!formData.drugLicenseExpiry)        e.drugLicenseExpiry = 'Expiry date daalo';
-      if (!formData.pharmacistName.trim())    e.pharmacistName    = 'Pharmacist naam zaroori hai';
-      if (!formData.pharmacistRegNumber.trim()) e.pharmacistRegNumber = 'Reg. number zaroori hai';
+      // Pharmacist details sirf retailer ke liye — wholesaler (Form 20B/21B)
+      // ke registration mein pharmacist fields dikhte hi nahi (Step3 dekho).
+      if (formData.sellerType !== 'wholesaler') {
+        if (!formData.pharmacistName.trim())    e.pharmacistName    = 'Pharmacist naam zaroori hai';
+        if (!formData.pharmacistRegNumber.trim()) e.pharmacistRegNumber = 'Reg. number zaroori hai';
+      }
     }
     if (step === 4) {
       if (!formData.bankName.trim())     e.bankName     = 'Bank naam zaroori hai';
@@ -365,35 +369,43 @@ function Step3({ formData, set, errors, drugLicenseFile, setDrugLicenseFile, pha
         )}
       </Field>
 
-      <Field label="Pharmacist Ka Naam *" error={errors.pharmacistName}>
-        <input style={inp} value={formData.pharmacistName} onChange={set('pharmacistName')} placeholder="Registered pharmacist ka naam" />
-      </Field>
-      <Field label="Pharmacist Reg. Number *" error={errors.pharmacistRegNumber}>
-        <input style={inp} value={formData.pharmacistRegNumber} onChange={set('pharmacistRegNumber')} placeholder="UP-PH-XXXX-XXXXX" />
-      </Field>
-      <Field label="Pharmacist Certificate" error={errors.pharmacistCert}>
-        <input
-          ref={pharmacistCertRef}
-          type="file"
-          accept=".jpg,.jpeg,.png,.pdf"
-          style={{ display: 'none' }}
-          onChange={onFileChange(setPharmacistCertFile)}
-        />
-        <button
-          type="button"
-          onClick={() => pharmacistCertRef.current?.click()}
-          style={fileUploadBtn(!!pharmacistCertFile)}>
-          {pharmacistCertFile
-            ? `✅ ${pharmacistCertFile.name}`
-            : '📎 Pharmacist Certificate Upload Karo (JPG / PNG / PDF)'}
-        </button>
-        {pharmacistCertFile && (
-          <button type="button" onClick={() => { setPharmacistCertFile(null); pharmacistCertRef.current.value = ''; }}
-            style={fileRemoveBtn}>
-            × Hatao
-          </button>
-        )}
-      </Field>
+      {/* Pharmacist details — retailer-only. Wholesaler license (Form 20B/
+          21B) registration mein pharmacist naam/reg#/cert nahi maange
+          jaate, isliye wholesaler ke liye ye poora block hide hai
+          (validateStep step-3 bhi isi condition par skip karta hai). */}
+      {sellerType !== 'wholesaler' && (
+        <>
+          <Field label="Pharmacist Ka Naam *" error={errors.pharmacistName}>
+            <input style={inp} value={formData.pharmacistName} onChange={set('pharmacistName')} placeholder="Registered pharmacist ka naam" />
+          </Field>
+          <Field label="Pharmacist Reg. Number *" error={errors.pharmacistRegNumber}>
+            <input style={inp} value={formData.pharmacistRegNumber} onChange={set('pharmacistRegNumber')} placeholder="UP-PH-XXXX-XXXXX" />
+          </Field>
+          <Field label="Pharmacist Certificate" error={errors.pharmacistCert}>
+            <input
+              ref={pharmacistCertRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.pdf"
+              style={{ display: 'none' }}
+              onChange={onFileChange(setPharmacistCertFile)}
+            />
+            <button
+              type="button"
+              onClick={() => pharmacistCertRef.current?.click()}
+              style={fileUploadBtn(!!pharmacistCertFile)}>
+              {pharmacistCertFile
+                ? `✅ ${pharmacistCertFile.name}`
+                : '📎 Pharmacist Certificate Upload Karo (JPG / PNG / PDF)'}
+            </button>
+            {pharmacistCertFile && (
+              <button type="button" onClick={() => { setPharmacistCertFile(null); pharmacistCertRef.current.value = ''; }}
+                style={fileRemoveBtn}>
+                × Hatao
+              </button>
+            )}
+          </Field>
+        </>
+      )}
     </>
   );
 }

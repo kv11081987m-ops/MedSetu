@@ -803,8 +803,12 @@ function TabSellers({ sellers, filter, setFilter, loading, onApprove, onReject }
           {expanded === reg.id && (
             <div style={s.docsBox}>
               <DocRow label="Drug License"      value={reg.drug_license_number} />
-              <DocRow label="Pharmacist"         value={reg.pharmacist_name} />
-              <DocRow label="Pharmacist Reg#"   value={reg.pharmacist_reg_number} />
+              {reg.seller_type !== 'wholesaler' && (
+                <>
+                  <DocRow label="Pharmacist"         value={reg.pharmacist_name} />
+                  <DocRow label="Pharmacist Reg#"   value={reg.pharmacist_reg_number} />
+                </>
+              )}
               <DocRow label="Bank"              value={reg.bank_name} />
               <DocRow label="IFSC"              value={reg.ifsc_code} />
               <DocRow label="License Expiry"    value={reg.drug_license_expiry} />
