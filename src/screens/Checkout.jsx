@@ -441,9 +441,13 @@ export default function Checkout() {
   // ── Calculations (must be before the Rx useEffect) ──
   const hasRxItems     = items.some((it) => it.rx);
   const cartTotal      = items.reduce((sum, it) => sum + it.price * it.qty, 0);
-  const isFreeDelivery = delivery === 'home' && platformDelivery.threshold > 0 && cartTotal >= platformDelivery.threshold;
-  const delivFee       = delivery === 'home' && !isFreeDelivery ? platformDelivery.charge : 0;
-  const amountForFree  = delivery === 'home' && platformDelivery.threshold > 0 && !isFreeDelivery
+  // Delivery charge (and the free-delivery nudge maths) only make sense once
+  // the cart actually has something in it — an empty cart must show ₹0, not a
+  // phantom ₹35 / "add ₹X for FREE delivery".
+  const hasItems       = items.length > 0;
+  const isFreeDelivery = hasItems && delivery === 'home' && platformDelivery.threshold > 0 && cartTotal >= platformDelivery.threshold;
+  const delivFee       = hasItems && delivery === 'home' && !isFreeDelivery ? platformDelivery.charge : 0;
+  const amountForFree  = hasItems && delivery === 'home' && platformDelivery.threshold > 0 && !isFreeDelivery
     ? platformDelivery.threshold - cartTotal
     : 0;
   const discount     = appliedOffer
@@ -777,6 +781,7 @@ export default function Checkout() {
           </div>
 
           {/* Delivery Type */}
+          {items.length > 0 && (
           <div style={s.card}>
             <p style={s.cardTitle}>Delivery Type</p>
             <div style={s.deliveryGrid}>
@@ -817,6 +822,7 @@ export default function Checkout() {
               ))}
             </div>
           </div>
+          )}
 
           {/* Free delivery nudge */}
           {amountForFree > 0 && (
@@ -902,6 +908,7 @@ export default function Checkout() {
           </div>
 
           {/* Order Summary */}
+          {items.length > 0 && (
           <div style={s.card}>
             <p style={s.cardTitle}>Order Summary</p>
             <div style={s.summaryRows}>
@@ -926,8 +933,10 @@ export default function Checkout() {
               <span style={s.totalVal}>₹{grandTotal.toFixed(2)}</span>
             </div>
           </div>
+          )}
 
           {/* Payment Method */}
+          {items.length > 0 && (
           <div style={s.card}>
             <p style={s.cardTitle}>Payment Kaise Karein?</p>
             <div style={s.paymentList}>
@@ -968,6 +977,7 @@ export default function Checkout() {
               })}
             </div>
           </div>
+          )}
 
           <div style={{ height: '90px' }} />
         </div>
@@ -980,6 +990,7 @@ export default function Checkout() {
         ) : null}
 
         {/* ── Fixed Bottom Bar ── */}
+        {items.length > 0 && (
         <div style={s.bottomBar}>
           <div>
             <p style={s.bottomLabel}>Kul Amount</p>
@@ -994,6 +1005,7 @@ export default function Checkout() {
             {ordering ? 'Order Ho Raha Hai...' : 'Order Place Karo'}
           </button>
         </div>
+        )}
 
         {/* Offers Modal */}
         {showOffers && (
