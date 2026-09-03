@@ -343,19 +343,13 @@ export default function PharmacistPanel() {
   const [notifications, setNotifications]   = useState([]);
   const [notifOpen, setNotifOpen]           = useState(false);
 
-  // ── Load availability (localStorage first, then DB) ──────────
+  // ── Load availability (localStorage only) ───────────────────
+  // Cosmetic Online/Busy label — no feature depends on it. users table has
+  // no is_available column (that's seller_inventory's), so the old DB
+  // read/write 400'd; persistence is localStorage-only now.
   useEffect(() => {
     const localSaved = localStorage.getItem('pharmacist_available');
     if (localSaved !== null) setAvailable(localSaved === 'true');
-    try {
-      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-      if (user?.id) {
-        supabase.from('users').select('is_available').eq('id', user.id).maybeSingle()
-          .then(({ data }) => {
-            if (data && typeof data.is_available === 'boolean') setAvailable(data.is_available);
-          });
-      }
-    } catch {}
   }, []);
 
   // ── Fetch data ───────────────────────────────────────────────
@@ -556,16 +550,12 @@ export default function PharmacistPanel() {
     alert(`Customer Info\nNaam: ${name}\nPhone: +91 ${phone}`);
   };
 
-  const toggleAvailability = async () => {
+  const toggleAvailability = () => {
     const newStatus = !available;
     setAvailable(newStatus);
     localStorage.setItem('pharmacist_available', newStatus.toString());
-    try {
-      const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-      if (user?.id) {
-        await supabase.from('users').update({ is_available: newStatus }).eq('id', user.id);
-      }
-    } catch {}
+    // No DB write — users has no is_available column (that lives on
+    // seller_inventory); this toggle is a local cosmetic Online/Busy label.
   };
 
   const saveNotes = () => { setNotesSaved(true); setTimeout(() => setNotesSaved(false), 2000); };
