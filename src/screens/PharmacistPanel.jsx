@@ -27,9 +27,10 @@ const mapCallCard = (order) => ({
   phone:   order.users?.phone   || order.customer_phone || '—',
   wait:    order.created_at ? getTimeAgo(order.created_at) : '—',
   // Rx-gated order me abhi koi seller nahi (seller_id NULL) — customer ki
-  // delivery location dikhao, seller ki nahi.
+  // delivery location dikhao. sellers(...) embed fetchCallQueue se hata hai
+  // (orders↔sellers do FK -> PostgREST 300), isliye order.sellers hai hi nahi.
   location:order.delivery_pincode ? `PIN ${order.delivery_pincode}`
-           : (order.delivery_address || order.sellers?.district || '—'),
+           : (order.delivery_address || '—'),
   orderId: order.order_number   || String(order.id).slice(0, 8).toUpperCase(),
   items:   order.order_items?.map((i) => `${i.name || i.medicine_name || 'Item'} x${i.quantity || 1}`) || ['Order items'],
   // orders.prescription_url = storage PATH (bare), signed URL onClick pe banti hai.
@@ -363,9 +364,15 @@ export default function PharmacistPanel() {
     // approve_rx_order route karta hai, reject_rx_order cancel. (Purana
     // "pharmacist_verified=false AND status=pending" filter hata — wo saare
     // pending orders utha leta tha, ab wo raasta seller-accept ka hai.)
+    // sellers(...) embed jaan-boojhkar NAHI — orders↔sellers ke beech do FK
+    // (seller_id + buyer_id) hain, PostgREST embed ambiguous -> HTTP 300
+    // "Multiple Choices" -> query fail -> queue khaali. Gated order me
+    // seller_id NULL hota hai, seller info chahiye bhi nahi; customer ki
+    // delivery info (delivery_pincode/address, customer_phone) order row par
+    // hi hai.
     const { data } = await supabase
       .from('orders')
-      .select('*, users(phone, name), order_items(*), sellers(store_name, district, address)')
+      .select('*, users(phone, name), order_items(*)')
       .eq('status', 'awaiting_pharmacist')
       .order('created_at', { ascending: true });
     if (data) setCallQueue(data);
