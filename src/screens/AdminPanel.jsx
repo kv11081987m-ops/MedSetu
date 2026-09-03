@@ -49,6 +49,7 @@ const NAV_TABS_DEF = [
 const STATUS_MAP = {
   approved:      { bg: '#E8F5EE', color: '#1A6B3C', label: 'APPROVED'    },
   pending:       { bg: '#FFF3E0', color: '#E65100', label: 'PENDING'     },
+  awaiting_pharmacist: { bg: '#EAF2FF', color: '#2563EB', label: 'RX REVIEW' },
   rejected:      { bg: '#FFEBEE', color: '#DC3545', label: 'REJECTED'    },
   processing:    { bg: '#EAF2FF', color: '#2563EB', label: 'PROCESSING'  },
   delivered:     { bg: '#E8F5EE', color: '#1A6B3C', label: 'DELIVERED'   },

@@ -1067,6 +1067,11 @@ function TabRouting() {
       .from('orders')
       .select('*, order_items(*), users(name)')
       .eq('routing_status', 'needs_admin')
+      // Sirf assign-yogya orders — cancel/deliver hone par routing_status
+      // 'needs_admin' hi reh jaata hai, par status badal jaata hai; wo
+      // terminal orders queue me nahi aane chahiye (assign par
+      // "ab pending nahi hai" error deta tha).
+      .eq('status', 'pending')
       .order('created_at', { ascending: false });
     if (error) { console.error('TabRouting loadNeedsAdminOrders error:', error); setLoadingNeedsAdmin(false); return; }
     setNeedsAdminOrders(data || []);
