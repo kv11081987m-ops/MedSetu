@@ -14,6 +14,12 @@ const DEV_KEY = 'medsetu_dev';
 // before the current 1-hour firebase-bridge token expires.
 const REBRIDGE_MARGIN_SEC = 300;
 
+// A spurious SIGNED_OUT (bridged-token refresh hiccup) is normally followed
+// by a fresh SIGNED_IN once the re-bridge lands. If none arrives within this
+// window, treat the session as genuinely gone and clear `user` so routing
+// can settle instead of holding a stale logged-in state forever.
+const REBRIDGE_FAILSAFE_MS = 10000;
+
 // Single source of truth for SuperAdmin identity — checked against the
 // authenticated Supabase session email, independent of any localStorage flag
 // (which Google OAuth logins bypass since the email isn't known pre-redirect).
@@ -66,6 +72,10 @@ export function AuthProvider({ children }) {
 
   // Background re-bridge state — see the init useEffect below.
   const refreshTimerRef = useRef(null);
+  // Armed on a spurious SIGNED_OUT; cancelled the moment a real session
+  // (SIGNED_IN / INITIAL_SESSION / TOKEN_REFRESHED) comes back. If it ever
+  // fires, the re-bridge failed and `user` gets nulled for real.
+  const rebridgeFailSafeRef = useRef(null);
   // undefined = not checked yet, null = checked and no user, object = user present.
   // Used to gate the "clear stale localStorage" cleanup on BOTH Supabase and
   // Firebase confirming logged-out, so a phone-OTP user whose 1hr Supabase
@@ -238,7 +248,22 @@ export function AuthProvider({ children }) {
     // Listen for auth state changes (login / logout / magic link callback)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        setUser(session?.user ?? null);
+        // A spurious SIGNED_OUT (bridged-token refresh hiccup, NOT a real
+        // logout) is about to be followed by a fresh SIGNED_IN from the
+        // re-bridge below. Keep the current `user` state through that async
+        // gap so the UI doesn't flash logged-out; the failsafe timer armed
+        // in the SIGNED_OUT block still clears `user` if the re-bridge never
+        // lands. Every other event (incl. INTENTIONAL SIGNED_OUT, where
+        // intentionalSignOut.current is true) resolves `user` exactly as before.
+        const spuriousSignOut = event === 'SIGNED_OUT' && !intentionalSignOut.current;
+        if (!spuriousSignOut) {
+          setUser(session?.user ?? null);
+          // A real event landed — cancel any pending "re-bridge failed" nuller.
+          if (rebridgeFailSafeRef.current) {
+            clearTimeout(rebridgeFailSafeRef.current);
+            rebridgeFailSafeRef.current = null;
+          }
+        }
         setLoading(false);
 
         // Keep the background re-bridge timer in sync with whatever session
@@ -262,7 +287,17 @@ export function AuthProvider({ children }) {
             // during this window, and the SIGNED_IN guards below need
             // medsetu_role intact to recognize "same role, no redirect
             // needed" instead of hard-reloading like a fresh login.
+            // `user` state is likewise held (see spuriousSignOut above) so
+            // the UI doesn't flash logged-out during the re-bridge gap.
             console.warn('[Auth] Unexpected SIGNED_OUT — preserving session state, likely to self-recover.');
+            // Failsafe: if no fresh SIGNED_IN arrives within the window, the
+            // session really is gone — null `user` so routing can settle.
+            if (!rebridgeFailSafeRef.current) {
+              rebridgeFailSafeRef.current = setTimeout(() => {
+                rebridgeFailSafeRef.current = null;
+                setUser(null);
+              }, REBRIDGE_FAILSAFE_MS);
+            }
           }
           markResolved();
           return;
@@ -569,6 +604,7 @@ export function AuthProvider({ children }) {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('storage', onStorage);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      if (rebridgeFailSafeRef.current) clearTimeout(rebridgeFailSafeRef.current);
     };
   }, []);
 
