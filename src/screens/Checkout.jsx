@@ -75,7 +75,7 @@ function CartItem({ item, onQtyChange, onRemove }) {
 }
 
 // ─── Success Overlay ──────────────────────────────────────────
-function SuccessOverlay({ onTrack, onHome, orderId }) {
+function SuccessOverlay({ onTrack, onHome, orderId, awaitingPharmacist }) {
 
   return (
     <div style={s.overlay}>
@@ -103,10 +103,19 @@ function SuccessOverlay({ onTrack, onHome, orderId }) {
           <span style={s.orderId}>#{orderId}</span>
         </div>
 
-        <div style={s.etaBox}>
-          <Truck size={16} color="#1A6B3C" />
-          <span style={s.etaText}>Estimated Delivery: <strong>45 min</strong></span>
-        </div>
+        {awaitingPharmacist ? (
+          <div style={s.etaBox}>
+            <Clock size={16} color="#EA6C00" />
+            <span style={s.etaText}>
+              Pharmacist aapki prescription verify kar raha hai — verify hote hi order confirm hoga
+            </span>
+          </div>
+        ) : (
+          <div style={s.etaBox}>
+            <Truck size={16} color="#1A6B3C" />
+            <span style={s.etaText}>Estimated Delivery: <strong>45 min</strong></span>
+          </div>
+        )}
 
         <button style={s.trackBtn} onClick={onTrack}>
           <ShoppingCart size={16} color="#FFFFFF" />
@@ -567,39 +576,52 @@ export default function Checkout() {
       // doesn't cover yet (deferred, keeps old cart-bound behaviour).
       let routedSellerId = cartSellerId || null;
       let routingFields  = {};
+
+      // ── Rx-gate: a prescription-required order (cart has a
+      // requires_prescription medicine, OR the customer attached an Rx just
+      // now) must NOT auto-route to a seller. It's created as
+      // 'awaiting_pharmacist' with seller_id null; the pharmacist routes it
+      // later via approve_rx_order() (migration 045). A non-gated order
+      // takes the exact same path as before — routing untouched.
+      const isGated = hasRxItems || prescriptionUploaded;
+
       if (delivery === 'home') {
         if (!selectedPincode) {
           setOrderError('Address mein pincode nahi hai, kripya address update karein');
           setOrdering(false);
           return;
         }
-        const { data: routing, error: routingErr } = await supabase.rpc(
-          'get_routing_candidates', { p_pincode: selectedPincode }
-        );
-        if (routingErr) {
-          setOrderError('Routing check nahi ho saka. Dobara try karo.');
-          setOrdering(false);
-          return;
+        // Non-gated only: resolve + reserve the routed seller now. Gated
+        // orders skip this entirely (get_routing_candidates NOT called).
+        if (!isGated) {
+          const { data: routing, error: routingErr } = await supabase.rpc(
+            'get_routing_candidates', { p_pincode: selectedPincode }
+          );
+          if (routingErr) {
+            setOrderError('Routing check nahi ho saka. Dobara try karo.');
+            setOrdering(false);
+            return;
+          }
+          if (!routing?.serviceable) {
+            setOrderError(`Maaf kijiye, abhi is pincode (${selectedPincode}) par home delivery available nahi hai.`);
+            setOrdering(false);
+            return;
+          }
+          if (!routing.candidates?.length) {
+            setOrderError('Abhi koi seller uplabdh nahi, thodi der baad koshish karein.');
+            setOrdering(false);
+            return;
+          }
+          routedSellerId = routing.candidates[0].seller_id;
+          const nowIso = new Date().toISOString();
+          routingFields = {
+            assignedAt:       nowIso,
+            routingAttempt:   1,
+            assignedBy:       'auto',
+            routingExpiresAt: new Date(Date.now() + routingTimeoutMinutes * 60000).toISOString(),
+            routingHistory:   [{ seller_id: routedSellerId, assigned_at: nowIso, result: 'assigned' }],
+          };
         }
-        if (!routing?.serviceable) {
-          setOrderError(`Maaf kijiye, abhi is pincode (${selectedPincode}) par home delivery available nahi hai.`);
-          setOrdering(false);
-          return;
-        }
-        if (!routing.candidates?.length) {
-          setOrderError('Abhi koi seller uplabdh nahi, thodi der baad koshish karein.');
-          setOrdering(false);
-          return;
-        }
-        routedSellerId = routing.candidates[0].seller_id;
-        const nowIso = new Date().toISOString();
-        routingFields = {
-          assignedAt:       nowIso,
-          routingAttempt:   1,
-          assignedBy:       'auto',
-          routingExpiresAt: new Date(Date.now() + routingTimeoutMinutes * 60000).toISOString(),
-          routingHistory:   [{ seller_id: routedSellerId, assigned_at: nowIso, result: 'assigned' }],
-        };
       }
 
       const orderData = {
@@ -613,6 +635,9 @@ export default function Checkout() {
         // address to speak of, so it's untouched — still users.phone.
         customerPhone:  delivery === 'home' ? (selectedPhone || storedUser?.phone || null) : (storedUser?.phone || null),
         sellerId:       routedSellerId,
+        // Rx-gated → pharmacist review first (seller_id stays null until
+        // approve_rx_order routes it); everything else → 'pending' as before.
+        status:         isGated ? 'awaiting_pharmacist' : 'pending',
         totalAmount:    cartTotal,
         deliveryCharge: delivFee,
         discount:       safeDiscount,
@@ -674,11 +699,15 @@ export default function Checkout() {
       // bypasses RLS) — the client can't read the seller's own users row
       // itself anymore (014_rlsPhase5a.sql's users SELECT policy), so it
       // no longer tries to.
-      supabase.rpc('create_notification', {
-        p_title: 'Naya Order! 🛒',
-        p_body: `Aapko naya order mila — ${newOrder.order_number}`,
-        p_type: 'order_placed', p_ref_id: newOrder.id,
-      }).then(({ error }) => { if (error) console.warn('[notify seller]', error); });
+      // Skipped for Rx-gated orders — there's no seller yet; approve_rx_order
+      // notifies the routed seller itself once the pharmacist approves.
+      if (!isGated) {
+        supabase.rpc('create_notification', {
+          p_title: 'Naya Order! 🛒',
+          p_body: `Aapko naya order mila — ${newOrder.order_number}`,
+          p_type: 'order_placed', p_ref_id: newOrder.id,
+        }).then(({ error }) => { if (error) console.warn('[notify seller]', error); });
+      }
 
       setOrderId(newOrder.order_number || 'MED-' + Date.now());
       clearCart();
@@ -702,6 +731,7 @@ export default function Checkout() {
     return (
       <SuccessOverlay
         orderId={orderId}
+        awaitingPharmacist={hasRxItems || prescriptionUploaded}
         onTrack={() => navigate('/order-tracking', { state: { orderId: orderId || orderDbId } })}
         onHome={() => navigate('/home')}
       />

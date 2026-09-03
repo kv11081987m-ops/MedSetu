@@ -20,7 +20,10 @@ export const createOrder = async (orderData) => {
       discount:         orderData.discount       ?? 0,
       promo_code:       orderData.promoCode      || null,
       final_amount:     orderData.finalAmount,
-      status:           'pending',
+      // Rx-gated orders pass status: 'awaiting_pharmacist' (routing skipped
+      // at checkout, seller assigned later by approve_rx_order / migration
+      // 045). Every other caller omits status → default 'pending', unchanged.
+      status:           orderData.status || 'pending',
       payment_method:   orderData.paymentMethod,
       payment_status:   orderData.paymentMethod === 'cod' ? 'pending' : 'paid',
       delivery_type:    orderData.deliveryType,
@@ -170,7 +173,7 @@ export const updateOrderStatus = async (orderId, status) => {
 // label/colour per real status instead). 'pending' is the fallback for
 // any value outside the known set — it's the DB column's own default,
 // the least-presumptuous guess for something unexpected.
-const KNOWN_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
+const KNOWN_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled', 'awaiting_pharmacist'];
 
 export function mapOrder(row) {
   const itemNames = (row.order_items || []).map((i) => i.name);

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import { getSignedRxUrl } from '../lib/prescriptions';
 import { formatIST } from '../lib/formatTime';
 import {
   Bell, Phone, CheckCircle, FileText, Clock,
@@ -25,13 +26,29 @@ const mapCallCard = (order) => ({
   name:    order.users?.name    || order.customer_name  || 'Customer',
   phone:   order.users?.phone   || order.customer_phone || '—',
   wait:    order.created_at ? getTimeAgo(order.created_at) : '—',
-  location:order.sellers?.district || order.sellers?.address || 'Deoria',
+  // Rx-gated order me abhi koi seller nahi (seller_id NULL) — customer ki
+  // delivery location dikhao, seller ki nahi.
+  location:order.delivery_pincode ? `PIN ${order.delivery_pincode}`
+           : (order.delivery_address || order.sellers?.district || '—'),
   orderId: order.order_number   || String(order.id).slice(0, 8).toUpperCase(),
-  items:   order.order_items?.map((i) => `${i.medicine_name || 'Item'} x${i.quantity || 1}`) || ['Order items'],
-  rxStatus:order.prescription_id ? 'uploaded' : 'none',
+  items:   order.order_items?.map((i) => `${i.name || i.medicine_name || 'Item'} x${i.quantity || 1}`) || ['Order items'],
+  // orders.prescription_url = storage PATH (bare), signed URL onClick pe banti hai.
+  rxUrl:   order.prescription_url || null,
+  rxStatus:order.prescription_url ? 'uploaded' : 'none',
   urgent:  false,
   status:  'pending',
 });
+
+// reject_rx_order() ke fixed kaaran (dropdown). "Anya" chune to optional
+// text box — final reason "Anya: <text>" ya sirf "Anya" jaata hai.
+const REJECT_REASONS = [
+  'Prescription dhundhli/blur hai',
+  'Galat file upload hui',
+  'Prescription expire/purani hai',
+  'Dawai prescription se match nahi karti',
+  'Valid prescription ke bina controlled dawai',
+  'Anya',
+];
 
 const mapRxCard = (rx) => ({
   _id:      rx.id,
@@ -93,8 +110,11 @@ function FilterChips({ options, active, onChange }) {
 }
 
 // ─── Call Card ────────────────────────────────────────────────
+// onCall = approve_rx_order (naam "onCall" chhoda taaki dono call sites
+// minimal rahen); onReject = reject-reason modal kholta hai.
 function CallCard({ call, onCall, onReject, busy }) {
   const isCompleted = call.status === 'completed';
+  const hasPhone = call.phone && call.phone !== '—';
   return (
     <div style={{ ...s.callCard, borderLeftColor: call.urgent ? '#DC3545' : '#E65100' }}>
       <div style={s.callTop}>
@@ -102,7 +122,9 @@ function CallCard({ call, onCall, onReject, busy }) {
           <p style={s.callName}>{call.name}</p>
           <div style={s.callInfoRow}>
             <Phone size={12} color="#888" />
-            <span style={s.callPhone}>{call.phone}</span>
+            {hasPhone
+              ? <a href={`tel:${call.phone}`} style={{ ...s.callPhone, color: '#0C447C', textDecoration: 'underline' }}>{call.phone}</a>
+              : <span style={s.callPhone}>{call.phone}</span>}
           </div>
           <div style={s.callInfoRow}>
             <MapPin size={12} color="#888" />
@@ -139,11 +161,18 @@ function CallCard({ call, onCall, onReject, busy }) {
           <span style={s.rxOkText}>Prescription uploaded ✓</span>
         </div>
       )}
-      {call.rxStatus === 'not_needed' && (
-        <div style={s.rxOkRow}>
-          <CheckCircle size={13} color="#1A6B3C" />
-          <span style={s.rxOkText}>No Rx needed</span>
-        </div>
+
+      {call.rxUrl && (
+        <button
+          style={s.rxViewBtn}
+          onClick={async () => {
+            const url = await getSignedRxUrl(call.rxUrl);
+            if (url) window.open(url, '_blank', 'noopener,noreferrer');
+            else alert('Prescription abhi khul nahi paa rahi');
+          }}
+        >
+          <ZoomIn size={13} color="#1A6B3C" /> 🩺 Rx Dekho
+        </button>
       )}
 
       {isCompleted ? (
@@ -155,13 +184,50 @@ function CallCard({ call, onCall, onReject, busy }) {
       ) : (
         <div style={s.callBtns}>
           <button style={{ ...s.callBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCall(call)}>
-            <Phone size={14} color="#FFFFFF" /> {busy ? '...' : 'Call Karo'}
+            <CheckCircle size={14} color="#FFFFFF" /> {busy ? '...' : 'Approve'}
           </button>
           <button style={{ ...s.rejectBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onReject(call.id)}>
             <X size={14} color="#DC3545" /> {busy ? '...' : 'Reject'}
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Reject Reason Modal ──────────────────────────────────────
+function RejectReasonModal({ onSubmit, onClose, busy }) {
+  const [reason, setReason]       = useState(REJECT_REASONS[0]);
+  const [otherText, setOtherText] = useState('');
+  const finalReason = reason === 'Anya'
+    ? (otherText.trim() ? `Anya: ${otherText.trim()}` : 'Anya')
+    : reason;
+  return (
+    <div style={s.modalOverlay} onClick={busy ? undefined : onClose}>
+      <div style={s.modalCard} onClick={(e) => e.stopPropagation()}>
+        <p style={s.modalTitle}>Reject ka kaaran chuniye</p>
+        <select style={s.modalSelect} value={reason} onChange={(e) => setReason(e.target.value)}>
+          {REJECT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        {reason === 'Anya' && (
+          <input
+            style={s.modalInput}
+            placeholder="Kaaran likhein (optional)"
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+          />
+        )}
+        <div style={s.modalBtns}>
+          <button style={s.modalCancelBtn} disabled={busy} onClick={onClose}>Cancel</button>
+          <button
+            style={{ ...s.modalConfirmBtn, opacity: busy ? 0.6 : 1 }}
+            disabled={busy}
+            onClick={() => onSubmit(finalReason)}
+          >
+            {busy ? '...' : 'Reject Karo'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -244,6 +310,8 @@ export default function PharmacistPanel() {
   const [completedCallIds,setCompletedCallIds]= useState(new Set());
   // Double-submit guard — same shape as SellerDashboard's busyOrderIds.
   const [busyCallIds, setBusyCallIds] = useState(new Set());
+  // Order id jiska reject-reason modal khula hai (null = modal band).
+  const [rejectTarget, setRejectTarget] = useState(null);
   const [loading,         setLoading]         = useState(true);
 
   // ── Real profile + platform-wide verify stats (replaces hardcoded
@@ -290,11 +358,15 @@ export default function PharmacistPanel() {
   };
 
   const fetchCallQueue = async () => {
+    // Rx-gate (migration 045): gated orders checkout se 'awaiting_pharmacist'
+    // me aate hain, seller_id NULL. Pharmacist yahi review karta hai —
+    // approve_rx_order route karta hai, reject_rx_order cancel. (Purana
+    // "pharmacist_verified=false AND status=pending" filter hata — wo saare
+    // pending orders utha leta tha, ab wo raasta seller-accept ka hai.)
     const { data } = await supabase
       .from('orders')
       .select('*, users(phone, name), order_items(*), sellers(store_name, district, address)')
-      .eq('pharmacist_verified', false)
-      .eq('status', 'pending')
+      .eq('status', 'awaiting_pharmacist')
       .order('created_at', { ascending: true });
     if (data) setCallQueue(data);
   };
@@ -398,30 +470,47 @@ export default function PharmacistPanel() {
     }
   };
 
+  // ── APPROVE — Rx-gate (migration 045) ────────────────────────
+  // approve_rx_order() RETURNS JSONB directly (not a TABLE), so `data` IS
+  // the result object — no data[0]. Routing (get_routing_candidates +
+  // seller assign + band snapshot) sab RPC ke andar hota hai.
   const handleCallActionImpl = async (orderId) => {
-    // RPC, not a plain UPDATE — confirming here must reserve stock the same
-    // way a seller's own accept does; a pharmacist session can't call
-    // reserve_stock directly (owning-seller-only RLS on seller_inventory).
-    const { data, error } = await supabase.rpc('confirm_order_with_reserve', { p_order_id: orderId });
-    const result = data?.[0];
-    if (error || !result?.success) {
-      alert('Order confirm nahi hua: ' + (result?.message || error?.message || 'Unknown error'));
+    const { data, error } = await supabase.rpc('approve_rx_order', { p_order_id: orderId });
+    if (error || !data?.success) {
+      alert('Approve nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
       return;
+    }
+    if (data.needs_admin) {
+      alert('Order approve ho gaya — par abhi koi seller available nahi, admin manually assign karega.');
+    } else {
+      alert('Order approve ho gaya — seller ko bhej diya.');
     }
     setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
     setCompletedCallIds((prev) => new Set([...prev, orderId]));
   };
   const handleCallAction = (orderId) => withCallBusy(orderId, () => handleCallActionImpl(orderId));
 
-  const handleRejectCallImpl = async (orderId) => {
-    const { error } = await supabase
-      .from('orders')
-      .update({ pharmacist_verified: false, status: 'cancelled' })
-      .eq('id', orderId);
-    if (error) { console.error('handleRejectCall error:', error); return; }
+  // ── REJECT — reject_rx_order(p_order_id, p_reason) ───────────
+  // Reason RejectReasonModal (fixed dropdown) se aata hai. Direct
+  // status='cancelled' UPDATE hata — ab RPC karta hai (trusted-flag ke
+  // saath, kyunki OLD.status='awaiting_pharmacist' par trigger seedha
+  // cancel block karta).
+  const handleRejectCallImpl = async (orderId, reason) => {
+    const { data, error } = await supabase.rpc('reject_rx_order', { p_order_id: orderId, p_reason: reason });
+    if (error || !data?.success) {
+      alert('Reject nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
     setCallQueue((prev) => prev.filter((o) => o.id !== orderId));
   };
-  const handleRejectCall = (orderId) => withCallBusy(orderId, () => handleRejectCallImpl(orderId));
+  // orderId RejectReasonModal ke submit tak `rejectTarget` state me rehta hai —
+  // modal RPC ke dauran khula (busy spinner) rehta hai, phir band ho jaata hai.
+  const submitReject = async (reason) => {
+    const orderId = rejectTarget;
+    if (!orderId) return;
+    await withCallBusy(orderId, () => handleRejectCallImpl(orderId, reason));
+    setRejectTarget(null);
+  };
 
   const handleRxApprove = async (dbId) => {
     const { error } = await supabase
@@ -487,7 +576,7 @@ export default function PharmacistPanel() {
     <>
       <div style={s.grid2x2}>
         {[
-          { Icon: Phone,       val: callQueue.length,    label: 'Call Pending',   color: '#E65100', bg: '#FFF3E0', pulse: true  },
+          { Icon: Phone,       val: callQueue.length,    label: 'Rx Approvals',   color: '#E65100', bg: '#FFF3E0', pulse: true  },
           { Icon: CheckCircle, val: completedCallIds.size,label: 'Aaj Verified',  color: '#1A6B3C', bg: '#E8F5EE', pulse: false },
           { Icon: FileText,    val: prescriptions.length, label: 'Rx Pending',    color: '#2563EB', bg: '#EAF2FF', pulse: false },
           { Icon: Clock,       val: '3.5 min',            label: 'Avg Call Time', color: '#7C3AED', bg: '#F3EEFF', pulse: false },
@@ -516,7 +605,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {pendingCalls.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} busy={busyCallIds.has(call.id)} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => setRejectTarget(id)} busy={busyCallIds.has(call.id)} />
             ))}
           </div>
         )}
@@ -613,7 +702,7 @@ export default function PharmacistPanel() {
         ) : (
           <div style={s.cardList}>
             {displayed.map((call) => (
-              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => handleRejectCall(id)} busy={busyCallIds.has(call.id)} />
+              <CallCard key={call.id} call={call} onCall={(c) => handleCallAction(c.id)} onReject={(id) => setRejectTarget(id)} busy={busyCallIds.has(call.id)} />
             ))}
           </div>
         )}
@@ -800,6 +889,15 @@ export default function PharmacistPanel() {
           </>
         )}
 
+        {/* ── Reject reason modal ── */}
+        {rejectTarget && (
+          <RejectReasonModal
+            busy={busyCallIds.has(rejectTarget)}
+            onClose={() => setRejectTarget(null)}
+            onSubmit={submitReject}
+          />
+        )}
+
         {/* ── Body ── */}
         <div style={s.body}>
           {loading ? (
@@ -897,6 +995,17 @@ const s = {
   callBtns:     { display: 'flex', gap: '8px' },
   callBtn:      { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
   rejectBtn:    { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#FFFFFF', color: '#DC3545', border: '1.5px solid #DC3545', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  rxViewBtn:    { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '9px', backgroundColor: '#E8F5EE', color: '#1A6B3C', border: '1px solid #C8E6C9', borderRadius: '10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+
+  // Reject-reason modal
+  modalOverlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
+  modalCard:      { width: '100%', maxWidth: '360px', backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' },
+  modalTitle:     { fontSize: '15px', fontWeight: '800', color: '#1A1A1A', margin: 0 },
+  modalSelect:    { width: '100%', padding: '11px 12px', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontSize: '14px', color: '#1A1A1A', fontFamily: 'inherit', backgroundColor: '#FFFFFF', boxSizing: 'border-box' },
+  modalInput:     { width: '100%', padding: '11px 12px', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontSize: '14px', color: '#1A1A1A', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
+  modalBtns:      { display: 'flex', gap: '8px', marginTop: '2px' },
+  modalCancelBtn: { flex: 1, padding: '11px', backgroundColor: '#FFFFFF', color: '#888888', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  modalConfirmBtn:{ flex: 1, padding: '11px', backgroundColor: '#DC3545', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 
   rxCard:      { backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
   rxTop:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },

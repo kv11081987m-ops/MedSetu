@@ -21,6 +21,7 @@ import {
 // buildSteps) instead of contradicting it.
 const STATUS_MAP = {
   pending:           { label: 'Order Placed',   sub: 'Store confirm karega',                   color: '#0C447C', bg: '#EAF2FB', Icon: Package      },
+  awaiting_pharmacist:{ label: 'Rx Review',      sub: 'Pharmacist prescription verify kar raha hai', color: '#EA6C00', bg: '#FFF1E8', Icon: Clock    },
   confirmed:         { label: 'Confirmed',       sub: 'Taiyari ho rahi hai',                    color: '#F26C0A', bg: '#FFF1E8', Icon: Clock        },
   preparing:         { label: 'Pack ho raha hai', sub: 'Store aapki medicine pack kar raha hai', color: '#F26C0A', bg: '#FFF1E8', Icon: PackageCheck },
   out_for_delivery:  { label: 'Raaste mein',      sub: 'Delivery boy aapke paas aa raha hai',    color: '#7C3AED', bg: '#F3EEFF', Icon: Truck        },
