@@ -123,9 +123,8 @@ function CallCard({ call, onCall, onReject, busy }) {
           <p style={s.callName}>{call.name}</p>
           <div style={s.callInfoRow}>
             <Phone size={12} color="#888" />
-            {hasPhone
-              ? <a href={`tel:${call.phone}`} style={{ ...s.callPhone, color: '#0C447C', textDecoration: 'underline' }}>{call.phone}</a>
-              : <span style={s.callPhone}>{call.phone}</span>}
+            {/* Number sirf reference ke liye — dialer "Call Karo" button se khulta hai */}
+            <span style={s.callPhone}>{call.phone}</span>
           </div>
           <div style={s.callInfoRow}>
             <MapPin size={12} color="#888" />
@@ -161,6 +160,14 @@ function CallCard({ call, onCall, onReject, busy }) {
           <CheckCircle size={13} color="#1A6B3C" />
           <span style={s.rxOkText}>Prescription uploaded ✓</span>
         </div>
+      )}
+
+      {/* Call — dabate hi phone ka dialer khulta hai (tel:). Sirf tab jab
+          number maujood ho; reuses s.rxViewBtn ka look. */}
+      {hasPhone && (
+        <a href={`tel:${call.phone}`} style={{ ...s.rxViewBtn, textDecoration: 'none' }}>
+          <Phone size={13} color="#1A6B3C" /> 📞 Call Karo
+        </a>
       )}
 
       {call.rxUrl && (
