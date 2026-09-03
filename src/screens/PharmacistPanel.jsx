@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import { getSignedRxUrl } from '../lib/prescriptions';
-import { formatIST } from '../lib/formatTime';
+import { formatIST, asUtcDate } from '../lib/formatTime';
 import {
   Bell, Phone, CheckCircle, FileText, Clock,
   MapPin, AlertTriangle, X, Search, ZoomIn,
@@ -14,7 +14,10 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────
 const getTimeAgo = (dateStr) => {
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+  // asUtcDate: no-zone Supabase timestamp ko sahi UTC instant maano (warna
+  // IST-clock device par local time samajh liya jaata hai aur "wait" ~5:30h
+  // zyada dikhta hai). Diff khud timezone-neutral hai — bas parse sahi ho.
+  const diff = Math.floor((Date.now() - asUtcDate(dateStr)) / 1000);
   if (diff < 60)   return `${diff} sec pehle`;
   if (diff < 3600) return `${Math.floor(diff / 60)} min pehle`;
   return `${Math.floor(diff / 3600)} ghante pehle`;
@@ -166,7 +169,7 @@ function CallCard({ call, onCall, onReject, busy }) {
           number maujood ho; reuses s.rxViewBtn ka look. */}
       {hasPhone && (
         <a href={`tel:${call.phone}`} style={{ ...s.rxViewBtn, textDecoration: 'none' }}>
-          <Phone size={13} color="#1A6B3C" /> 📞 Call Karo
+          <Phone size={13} color="#1A6B3C" /> Call Karo
         </a>
       )}
 

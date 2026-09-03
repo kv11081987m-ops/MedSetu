@@ -15,7 +15,11 @@
 // through untouched.
 const HAS_TIME    = /[T ]\d{2}:\d{2}/;
 const HAS_ZONE    = /[zZ]|[+-]\d{2}:?\d{2}$/;
-const asUtcDate = (dateStr) =>
+// Exported so relative-time helpers (e.g. PharmacistPanel's getTimeAgo)
+// can parse the SAME correct instant before doing a Date.now() diff —
+// otherwise a no-zone timestamp is misparsed as local time and the
+// elapsed-time comes out 5:30h wrong on an IST-clock device.
+export const asUtcDate = (dateStr) =>
   new Date(HAS_TIME.test(dateStr) && !HAS_ZONE.test(dateStr) ? `${dateStr}Z` : dateStr);
 
 export const formatIST = (dateStr, opts = {}) =>
