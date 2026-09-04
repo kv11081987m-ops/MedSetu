@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { intentionalSignOut } from '../context/AuthContext';
 import { formatIST } from '../lib/formatTime';
@@ -38,6 +39,9 @@ export default function SuperAdminPanel() {
     setActiveTabState(tab);
     setSearchParams({ tab }, { replace: true });
   };
+  // Tabs used to live in a bottom-fixed bar; now they're in a right-side
+  // slide-in drawer opened via the top bar's hamburger icon.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [pendingSellers,    setPendingSellers]     = useState([]);
   const [allSellers,        setAllSellers]         = useState([]);
   const [sellerFilter,      setSellerFilter]       = useState('pending');
@@ -459,6 +463,9 @@ export default function SuperAdminPanel() {
           <span style={s.topTitle}>Super Admin Panel</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button style={s.hamburgerBtn} aria-label="Menu" onClick={() => setDrawerOpen(true)}>
+            <Menu size={22} color="#1A1A1A" />
+          </button>
           <span style={s.adminName}>Kumar</span>
           <button style={s.customerViewBtn} onClick={handleViewAsCustomer}>👁 Customer View</button>
           <button style={s.logoutBtn} onClick={handleLogout}>Logout</button>
@@ -507,21 +514,37 @@ export default function SuperAdminPanel() {
         )}
       </div>
 
-      {/* ── Bottom Nav ── */}
-      <div style={s.bottomNav}>
-        {TABS.map(({ id, label, icon }) => {
-          const badge = id === 'sellers' ? stats.pendingSellers : id === 'pharmacists' ? stats.pendingPharmacists : 0;
-          return (
-            <button key={id} style={{ ...s.navBtn, ...(activeTab === id ? s.navBtnActive : {}) }} onClick={() => setActiveTab(id)}>
-              <span style={{ position: 'relative', fontSize: '20px', lineHeight: 1 }}>
-                {icon}
-                {badge > 0 && <span style={s.badge}>{badge}</span>}
-              </span>
-              <span style={s.navLabel}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* ── Nav Drawer (right slide-in, replaces the old bottom-fixed bar) ── */}
+      {drawerOpen && (
+        <div style={s.drawerBackdrop} onClick={() => setDrawerOpen(false)}>
+          <div style={s.drawer} onClick={(e) => e.stopPropagation()}>
+            <div style={s.drawerHeader}>
+              <span style={s.drawerTitle}>Menu</span>
+              <button style={s.drawerCloseBtn} aria-label="Band karein" onClick={() => setDrawerOpen(false)}>
+                <X size={20} color="#888888" />
+              </button>
+            </div>
+            <div style={s.drawerList}>
+              {TABS.map(({ id, label, icon }) => {
+                const badge = id === 'sellers' ? stats.pendingSellers : id === 'pharmacists' ? stats.pendingPharmacists : 0;
+                return (
+                  <button
+                    key={id}
+                    style={{ ...s.drawerNavBtn, ...(activeTab === id ? s.navBtnActive : {}) }}
+                    onClick={() => { setActiveTab(id); setDrawerOpen(false); }}
+                  >
+                    <span style={{ position: 'relative', fontSize: '20px', lineHeight: 1 }}>
+                      {icon}
+                      {badge > 0 && <span style={s.badge}>{badge}</span>}
+                    </span>
+                    <span style={s.navLabel}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1593,17 +1616,25 @@ function TabSettings({ settings, setSettings, saving, setSaving, dirty, setSaved
 
 // ── Styles ────────────────────────────────────────────────────
 const s = {
-  wrapper:  { minHeight: '100vh', backgroundColor: '#F5F5F5', display: 'flex', flexDirection: 'column', paddingBottom: '70px' },
+  wrapper:  { minHeight: '100vh', backgroundColor: '#F5F5F5', display: 'flex', flexDirection: 'column' },
   topBar:   { display: 'flex', alignItems: 'center', padding: '12px 16px', backgroundColor: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', position: 'sticky', top: 0, zIndex: 50 },
   topTitle: { fontSize: '15px', fontWeight: '700', color: '#1A1A1A' },
   adminName:{ fontSize: '13px', color: '#555', fontWeight: '600' },
   logoutBtn:{ padding: '6px 12px', backgroundColor: '#FEE2E2', border: 'none', borderRadius: '6px', color: '#991B1B', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   customerViewBtn:{ padding: '6px 12px', backgroundColor: '#E0E7FF', border: 'none', borderRadius: '6px', color: '#3730A3', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
+  hamburgerBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', padding: '4px', cursor: 'pointer', borderRadius: '6px' },
   content:  { flex: 1, padding: '16px', maxWidth: '600px', width: '100%', margin: '0 auto', boxSizing: 'border-box' },
-  bottomNav:{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', display: 'flex', borderTop: '1px solid #E0E0E0', zIndex: 50 },
-  navBtn:   { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', padding: '10px 4px 12px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: '#888' },
+
+  // Nav drawer (right slide-in) — replaces the old bottom-fixed tab bar.
+  drawerBackdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'flex', justifyContent: 'flex-end' },
+  drawer: { width: '78%', maxWidth: '300px', height: '100%', backgroundColor: '#FFFFFF', boxShadow: '-4px 0 16px rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column' },
+  drawerHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid #F0F0F0' },
+  drawerTitle: { fontSize: '16px', fontWeight: '700', color: '#1A1A1A' },
+  drawerCloseBtn: { background: 'none', border: 'none', padding: '2px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  drawerList: { flex: 1, overflowY: 'auto', padding: '8px' },
+  drawerNavBtn: { width: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 14px', border: 'none', borderRadius: '10px', backgroundColor: 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: '#555555', textAlign: 'left' },
   navBtnActive: { color: '#1A6B3C' },
-  navLabel: { fontSize: '10px', fontWeight: '600' },
+  navLabel: { fontSize: '14px', fontWeight: '600' },
   badge:    { position: 'absolute', top: '-4px', right: '-6px', backgroundColor: '#EF4444', color: '#fff', fontSize: '9px', fontWeight: '700', borderRadius: '9px', minWidth: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', lineHeight: 1 },
 
   welcomeCard: { backgroundColor: '#FFFFFF', borderRadius: '16px', padding: '20px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
