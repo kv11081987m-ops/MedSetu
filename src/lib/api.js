@@ -250,12 +250,12 @@ export async function fetchSellersForMedicine(medicineId, mrpMode = false, maste
 // Rows come back as raw master_medicines fields + `sellerPrice` — same
 // shape the old attachSellerPrice() produced, so mapMedicine/MedicineCard
 // are untouched.
-export async function fetchPopularMedicines(limit = 12, mrpMode = false) {
+export async function fetchPopularMedicines(limit = 12, mrpMode = false, offset = 0) {
   const { data, error } = await supabase.rpc('get_customer_medicines', {
     p_query: null,
     p_mrp_mode: mrpMode,
     p_limit: limit,
-    p_offset: 0,
+    p_offset: offset,
     p_dosage_form: null,
   });
   if (error) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchMrpMode, fetchPopularMedicines } from '../lib/api';
 import { useCart } from '../context/CartContext';
@@ -31,6 +31,10 @@ const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 // yet. Move this to a platform_settings/table read later instead of
 // duplicating the list.
 const SERVICEABLE_PINCODES = ['274001', '274201'];
+
+// Infinite-scroll page size for the Best-Selling Medicines feed —
+// get_customer_medicines RPC (040_customerMedicineFeed.sql) caps at 50/call.
+const POPULAR_PAGE_SIZE = 50;
 
 // R3-C1: colourful horizontal service tabs — each its own MedSetu-palette
 // colour. Allopath is the only one with real content (best-selling
@@ -74,6 +78,17 @@ export default function CustomerHome() {
   const [mrpMode, setMrpMode]         = useState(false);
   const [popularMeds, setPopularMeds] = useState([]);
   const [popularError, setPopularError] = useState(false);
+  const [popularHasMore, setPopularHasMore] = useState(true);
+  const [popularLoadingMore, setPopularLoadingMore] = useState(false);
+  // popularHasMore/popularLoadingMore are mirrored into refs below so
+  // loadPopular's guard and the IntersectionObserver callback always read
+  // the latest value instead of a stale closure. offset only ever drives
+  // logic (never rendered), so it lives in a ref alone.
+  const popularOffsetRef = useRef(0);
+  const popularHasMoreRef = useRef(true);
+  const popularLoadingMoreRef = useRef(false);
+  const scrollBodyRef = useRef(null);
+  const popularSentinelRef = useRef(null);
   const [pincode, setPincode]         = useState(null);
   const [addressLabel, setAddressLabel] = useState('');
   const [showChangeModal, setShowChangeModal] = useState(false);
@@ -87,15 +102,45 @@ export default function CustomerHome() {
   const unreadCount = notifs.filter((n) => !n.is_read).length;
   const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
 
-  // Best-selling feed loader — extracted so the error-retry line below can
-  // re-run it without reloading the page. A real RPC failure sets
-  // popularError (shown as a retry prompt); a genuinely empty result just
-  // leaves popularMeds = [] (the "coming soon" seedling line).
-  const loadPopular = useCallback(async (mrpOn) => {
-    const { data: popData, error: popErr } = await fetchPopularMedicines(30, mrpOn);
-    if (popErr) { setPopularError(true); return; }
-    setPopularError(false);
-    setPopularMeds(popData || []);
+  // Best-selling feed loader — extracted so the error-retry line below and
+  // the infinite-scroll sentinel can both drive it. `reset` true = first
+  // load / retry / mrpMode change (replaces the array, offset back to 0);
+  // `reset` false = scrolled-to-bottom page fetch (appends). Refs (not just
+  // state) track offset/hasMore/loadingMore so the guard below and the
+  // fetch itself always see the latest values, not a stale closure from
+  // when the IntersectionObserver callback was created.
+  const loadPopular = useCallback(async (reset, mrpOn) => {
+    if (!reset && (popularLoadingMoreRef.current || !popularHasMoreRef.current)) return;
+
+    const fetchOffset = reset ? 0 : popularOffsetRef.current;
+    popularLoadingMoreRef.current = true;
+    setPopularLoadingMore(true);
+
+    const { data: popData, error: popErr } = await fetchPopularMedicines(POPULAR_PAGE_SIZE, mrpOn, fetchOffset);
+
+    if (popErr) {
+      if (reset) setPopularError(true);
+      popularHasMoreRef.current = false;
+      setPopularHasMore(false);
+      popularLoadingMoreRef.current = false;
+      setPopularLoadingMore(false);
+      return;
+    }
+
+    const rows = popData || [];
+    const newOffset = fetchOffset + rows.length;
+    const more = rows.length === POPULAR_PAGE_SIZE;
+    popularOffsetRef.current = newOffset;
+    popularHasMoreRef.current = more;
+    setPopularHasMore(more);
+    if (reset) {
+      setPopularError(false);
+      setPopularMeds(rows);
+    } else {
+      setPopularMeds((prev) => [...prev, ...rows]);
+    }
+    popularLoadingMoreRef.current = false;
+    setPopularLoadingMore(false);
   }, []);
   // null = no default address/pincode on file yet (neutral display).
   // true/false = pincode known, in/out of the serviceable list. `pincode`
@@ -135,7 +180,7 @@ export default function CustomerHome() {
         if (!cancelled) setMrpMode(mrpOn);
 
         if (!cancelled) {
-          try { await loadPopular(mrpOn); }
+          try { await loadPopular(true, mrpOn); }
           catch { if (!cancelled) setPopularError(true); }
         }
 
@@ -214,6 +259,24 @@ export default function CustomerHome() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Infinite scroll — sentinel only exists in the DOM while the allopath
+  // tab shows a loaded, error-free popular list, so this effect re-attaches
+  // the observer whenever that list (re)mounts. root = scrollBody, since
+  // that div (not the window) is what actually scrolls here.
+  useEffect(() => {
+    const sentinel = popularSentinelRef.current;
+    const root = scrollBodyRef.current;
+    if (!sentinel || !root) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadPopular(false, mrpMode);
+      },
+      { root, rootMargin: '200px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeServiceTab, popularError, popularMeds.length, mrpMode, loadPopular]);
 
   return (
     <div style={s.wrapper}>
@@ -253,7 +316,7 @@ export default function CustomerHome() {
         </div>
 
         {/* ── Scrollable body ── */}
-        <div style={s.scrollBody}>
+        <div style={s.scrollBody} ref={scrollBodyRef}>
 
           {/* Service Tabs — colourful, horizontal, scrollable */}
           <div style={s.serviceTabsRow}>
@@ -332,7 +395,7 @@ export default function CustomerHome() {
                 <p style={{ fontSize: '13px', color: '#B4232C', textAlign: 'center', padding: '16px 0', margin: 0 }}>
                   ⚠️ Medicines load nahi ho paayi.{' '}
                   <button
-                    onClick={() => { setPopularError(false); loadPopular(mrpMode); }}
+                    onClick={() => { setPopularError(false); loadPopular(true, mrpMode); }}
                     style={{ background: 'none', border: 'none', color: '#0C447C', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}
                   >
                     Dobara try karein
@@ -352,6 +415,19 @@ export default function CustomerHome() {
                       mrpMode={mrpMode}
                     />
                   ))}
+                  {/* Infinite-scroll trigger — observed against scrollBody
+                      (the actual scroll container, not the viewport). */}
+                  <div ref={popularSentinelRef} style={{ height: '1px' }} />
+                  {popularLoadingMore && (
+                    <p style={{ fontSize: '12px', color: '#AAAAAA', textAlign: 'center', padding: '10px 0', margin: 0 }}>
+                      Aur medicines load ho rahi hain...
+                    </p>
+                  )}
+                  {!popularHasMore && !popularLoadingMore && popularMeds.length > 0 && (
+                    <p style={{ fontSize: '12px', color: '#CCCCCC', textAlign: 'center', padding: '10px 0', margin: 0 }}>
+                      Bas, itni hi
+                    </p>
+                  )}
                 </div>
               )
             ) : (
