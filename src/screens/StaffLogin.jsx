@@ -4,16 +4,18 @@ import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 const ROLES = [
-  { id: 'admin',      label: 'Admin' },
-  { id: 'pharmacist', label: 'Pharmacist' },
-  { id: 'seller',     label: 'Seller' },
+  { id: 'admin',        label: 'Admin' },
+  { id: 'pharmacist',   label: 'Pharmacist' },
+  { id: 'seller',       label: 'Seller' },
+  { id: 'seller_staff', label: 'Staff' },
 ];
 
 const REDIRECT_ROUTE = {
-  admin:       '/admin',
-  pharmacist:  '/pharmacist',
-  seller:      '/seller-dashboard',
-  super_admin: '/super-admin',
+  admin:        '/admin',
+  pharmacist:   '/pharmacist',
+  seller:       '/seller-dashboard',
+  seller_staff: '/staff',
+  super_admin:  '/super-admin',
 };
 
 export default function StaffLogin() {

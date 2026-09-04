@@ -466,6 +466,18 @@ export function AuthProvider({ children }) {
                   window.location.href = '/login';
                   return;
                 }
+              } else {
+                // staff_whitelist mein bhi nahi mila — Aggregator ka
+                // deployed staff (seller_staff table, staff_whitelist se
+                // bilkul alag — super-admin seedha seller_staff mein add
+                // karta hai, koi approval-workflow nahi) ho sakta hai.
+                const { data: ss } = await supabase
+                  .from('seller_staff')
+                  .select('id')
+                  .eq('email', emailUser.email)
+                  .eq('is_active', true)
+                  .maybeSingle();
+                if (ss) staffRole = 'seller_staff';
               }
             } catch {}
           } else if (staffRole === 'seller' || staffRole === 'pharmacist' || staffRole === 'admin') {
@@ -486,14 +498,38 @@ export function AuthProvider({ children }) {
               window.location.href = '/staff-login';
               return;
             }
+          } else if (staffRole === 'seller_staff') {
+            // pendingRole 'seller_staff' set hai (StaffLogin.jsx ka
+            // hint) — seller_staff table se hi verify karo (staff_whitelist
+            // wala approval-flow yahan lagu nahi hota, seller_staff ka
+            // apna hi is_active gate hai, 047_aggregatorStaff.sql).
+            // Bina is check ke koi bhi Google-login user localStorage mein
+            // staff_pending_role='seller_staff' daal ke /staff tak pahunch
+            // sakta tha — is verification ke bina yeh ek real gap hota.
+            const { data: ss } = await supabase
+              .from('seller_staff')
+              .select('id')
+              .eq('email', emailUser.email)
+              .eq('is_active', true)
+              .maybeSingle();
+            if (!ss) {
+              intentionalSignOut.current = true;
+              await supabase.auth.signOut();
+              localStorage.removeItem('staff_pending_role');
+              markResolved();
+              alert('❌ Aapka staff account active nahi hai.\n\nApne aggregator/admin se sampark karein.');
+              window.location.href = '/staff-login';
+              return;
+            }
           }
 
           if (staffRole && staffRole !== 'customer') {
             const alreadyThisRole = localStorage.getItem('medsetu_role') === staffRole;
             const ROLE_OWN_ROUTES = {
-              seller:     ['/seller-dashboard', '/inventory', '/wholesalers', '/wholesaler-inventory', '/b2b-checkout'],
-              pharmacist: ['/pharmacist'],
-              admin:      ['/admin'],
+              seller:       ['/seller-dashboard', '/inventory', '/wholesalers', '/wholesaler-inventory', '/b2b-checkout'],
+              pharmacist:   ['/pharmacist'],
+              admin:        ['/admin'],
+              seller_staff: ['/staff'],
             };
             const alreadyOnOwnRoute = (ROLE_OWN_ROUTES[staffRole] || []).includes(window.location.pathname);
             localStorage.setItem('medsetu_role', staffRole);
@@ -559,7 +595,7 @@ export function AuthProvider({ children }) {
             // (actual browser path) as a second, race-immune guard — see the
             // SuperAdmin branch above for why the path check was necessary.
             if (!alreadyThisRole && !alreadyOnOwnRoute) {
-              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', super_admin: '/super-admin' };
+              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', seller_staff: '/staff', super_admin: '/super-admin' };
               window.location.href = routes[staffRole] || '/home';
             }
             return;

@@ -30,6 +30,7 @@ import MedicineImport      from './screens/MedicineImport';
 import WholesalerLocator   from './screens/WholesalerLocator';
 import WholesalerInventory from './screens/WholesalerInventory';
 import B2BCheckout        from './screens/B2BCheckout';
+import StaffPanel          from './screens/StaffPanel';
 
 // Fire connection test once on module load (dev only)
 if (import.meta.env.DEV) testSupabaseConnection();
@@ -59,10 +60,11 @@ const ls = {
 
 // ── Role → home page mapping ──────────────────────────────────
 function roleHome(role) {
-  if (role === 'seller')      return '/seller-dashboard';
-  if (role === 'admin')       return '/admin';
-  if (role === 'pharmacist')  return '/pharmacist';
-  if (role === 'super_admin') return '/super-admin';
+  if (role === 'seller')       return '/seller-dashboard';
+  if (role === 'admin')        return '/admin';
+  if (role === 'pharmacist')   return '/pharmacist';
+  if (role === 'seller_staff') return '/staff';
+  if (role === 'super_admin')  return '/super-admin';
   return '/home';
 }
 
@@ -200,6 +202,7 @@ function AppRoutes() {
         <Route path="/b2b-checkout"         element={<ProtectedRoute allowedRoles={['seller']}><B2BCheckout /></ProtectedRoute>} />
         <Route path="/pharmacist"       element={<ProtectedRoute allowedRoles={['pharmacist']}><PharmacistPanel /></ProtectedRoute>} />
         <Route path="/admin"            element={<ProtectedRoute allowedRoles={['admin']}><AdminPanel /></ProtectedRoute>} />
+        <Route path="/staff"            element={<ProtectedRoute allowedRoles={['seller_staff']}><StaffPanel /></ProtectedRoute>} />
 
         {/* ── Registration (public) ── */}
         <Route path="/seller-register"     element={<SellerRegister />} />
