@@ -88,7 +88,12 @@ BEGIN
     RETURN jsonb_build_object('claimed', false, 'message', 'Order nahi mila');
   END IF;
 
-  IF v_order_whid IS DISTINCT FROM v_staff_whid THEN
+  -- v_staff_whid IS NULL bhi reject karna zaroori — warna un-deployed
+  -- staff (deployed_wholesaler_id NULL) aur non-aggregator order (jiska
+  -- sourced_from_wholesaler_id bhi NULL hota hai) ke beech
+  -- "NULL IS DISTINCT FROM NULL = false" galti se pass ho jaata
+  -- (053_staffFulfillment.sql likhte waqt pakda gaya gap).
+  IF v_staff_whid IS NULL OR v_order_whid IS DISTINCT FROM v_staff_whid THEN
     RETURN jsonb_build_object('claimed', false, 'message', 'Ye order aapke wholesaler ka nahi');
   END IF;
 
