@@ -88,8 +88,9 @@ DECLARE
   v_deactivated    INTEGER := 0;
   v_skipped_no_mrp INTEGER := 0;
 BEGIN
-  IF NOT is_active_superadmin() THEN
-    RAISE EXCEPTION 'Sirf super-admin sync_aggregator_inventory chala sakta hai'
+  IF NOT (is_active_superadmin() OR current_setting('role', true) = 'service_role'
+          OR session_user = 'postgres') THEN
+    RAISE EXCEPTION 'Sirf super-admin ya service-role sync_aggregator_inventory chala sakta hai'
       USING errcode = '42501';
   END IF;
 
