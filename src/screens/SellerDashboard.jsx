@@ -4,7 +4,7 @@ import {
   Bell, Store, ShoppingBag, Clock, IndianRupee,
   AlertTriangle, User, Phone, CheckCircle, X, Check,
   BarChart2, Package, Settings, Plus, TrendingUp,
-  Home, ClipboardList, Wallet, UserCircle, Edit3, LogOut,
+  Home, ClipboardList, Wallet, UserCircle, Edit3, LogOut, Users,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -27,7 +27,7 @@ const QUICK_ACTIONS = [
 
 // In-panel tabs only — 'inventory'/'buy' in NAV_TABS below are route
 // navigations (to /inventory, /wholesalers), never an activeTab value.
-const VALID_TABS = ['home', 'orders', 'earnings', 'profile'];
+const VALID_TABS = ['home', 'orders', 'earnings', 'staff', 'profile'];
 
 const STATUS_LABEL = { pending: 'Pending', confirmed: 'Confirmed', out_for_delivery: 'Delivery Pe Hai', delivered: 'Delivered', cancelled: 'Cancelled' };
 const STATUS_COLOR = { pending: '#E65100', confirmed: '#2563EB', out_for_delivery: '#7C3AED', delivered: '#1A6B3C', cancelled: '#888888' };
@@ -472,6 +472,22 @@ export default function SellerDashboard() {
   const [reqRate,          setReqRate]          = useState('');
   const [reqSubmitting,    setReqSubmitting]    = useState(false);
 
+  // ── Staff tab state ────────────────────────────────────────
+  const [staffList,          setStaffList]          = useState([]);
+  const [staffListLoading,   setStaffListLoading]   = useState(false);
+  const [wholesalers,        setWholesalers]        = useState([]);           // { id, store_name } — full list, for name lookups
+  const [mappedWholesalers,  setMappedWholesalers]  = useState([]);           // { id, store_name } — only this aggregator's active-mapped ones, for the dropdown
+  const [staffEmail,         setStaffEmail]         = useState('');
+  const [staffName,          setStaffName]          = useState('');
+  const [staffDeployWhId,    setStaffDeployWhId]    = useState('');
+  const [addingStaff,        setAddingStaff]        = useState(false);
+  const [endingAssignmentId, setEndingAssignmentId] = useState(null);
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null); // assignment_id whose inline edit form is open, or null
+  const [editNameInput,       setEditNameInput]       = useState('');
+  const [editWhIdInput,       setEditWhIdInput]       = useState('');
+  const [savingEdit,          setSavingEdit]          = useState(false);
+  const [togglingHoldId,      setTogglingHoldId]      = useState(null);
+
   // ── Fetch helpers ──────────────────────────────────────────
   const fetchPendingOrders = async (sellerId) => {
     const { data } = await supabase
@@ -536,6 +552,122 @@ export default function SellerDashboard() {
     if (data) setAllOrders(data);
   };
 
+  // ── Staff tab fetch helpers ──────────────────────────────────
+  // RLS blocks an owner from reading staff/staff_assignment directly (they
+  // only let the STAFF PERSON see their own row) — list_seller_staff is a
+  // SECURITY DEFINER RPC that verifies ownership first, same pattern as
+  // add_staff_to_seller/end_staff_assignment (058/060). Never query
+  // staff/staff_assignment directly here.
+  const fetchStaffList = async (sellerId) => {
+    setStaffListLoading(true);
+    const { data, error } = await supabase.rpc('list_seller_staff', { p_seller_id: sellerId });
+    if (error) { console.error('fetchStaffList error:', error); setStaffListLoading(false); return; }
+    setStaffList(Array.isArray(data) ? data : []);
+    setStaffListLoading(false);
+  };
+
+  // Aggregator-only: this seller's active wholesaler mappings, resolved to
+  // names. aggregator_wholesalers' RLS is superadmin-only (same wall as
+  // seller_staff was) — list_seller_wholesaler_mappings is the
+  // ownership-verified RPC (061_listSellerWholesalerMappings.sql), same
+  // pattern as list_seller_staff. Its rows already carry store_name, so no
+  // separate sellers query is needed. Populates both the add-staff deploy
+  // dropdown and the wholesaler name shown against each staff row below.
+  const fetchWholesalerOptions = async (sellerId) => {
+    const { data, error } = await supabase.rpc('list_seller_wholesaler_mappings', { p_seller_id: sellerId });
+    if (error) { console.error('fetchWholesalerOptions error:', error); return; }
+    const rows = Array.isArray(data) ? data : [];
+    const resolved = rows.map((m) => ({ id: m.wholesaler_seller_id, store_name: m.store_name || '—' }));
+    setMappedWholesalers(resolved);
+    // Staff LIST's deployed-wholesaler name lookup (wholesalerName below) —
+    // a staff can only ever be deployed on a wholesaler this aggregator is
+    // mapped to, so the mapped list is a sufficient name source.
+    setWholesalers(resolved);
+  };
+
+  const wholesalerName = (id) => wholesalers.find((w) => w.id === id)?.store_name || '—';
+
+  const addStaffImpl = async () => {
+    const email = staffEmail.trim();
+    if (!email) { alert('Email zaroori hai'); return; }
+    setAddingStaff(true);
+    const { data, error } = await supabase.rpc('add_staff_to_seller', {
+      p_seller_id: sellerData.id,
+      p_email: email,
+      p_name: staffName.trim() || null,
+      p_deployed_wholesaler_id: sellerData?.is_aggregator ? (staffDeployWhId || null) : null,
+    });
+    setAddingStaff(false);
+    const res = Array.isArray(data) ? data[0] : data;
+    if (error || res?.ok === false) {
+      alert(res?.message || error?.message || 'Staff add nahi hua');
+      return;
+    }
+    setStaffEmail('');
+    setStaffName('');
+    setStaffDeployWhId('');
+    await fetchStaffList(sellerData.id);
+  };
+
+  const endStaffAssignmentImpl = async (assignmentId) => {
+    if (!window.confirm('Is staff ko hataana hai? Uska record safe rahega.')) return;
+    setEndingAssignmentId(assignmentId);
+    const { data, error } = await supabase.rpc('end_staff_assignment', { p_assignment_id: assignmentId });
+    setEndingAssignmentId(null);
+    const res = Array.isArray(data) ? data[0] : data;
+    if (error || res?.ok === false) {
+      alert(res?.message || error?.message || 'Staff end nahi hua');
+      return;
+    }
+    await fetchStaffList(sellerData.id);
+  };
+
+  const startEditStaff = (row) => {
+    setEditingAssignmentId(row.assignment_id);
+    setEditNameInput(row.name || '');
+    setEditWhIdInput(row.deployed_wholesaler_id || '');
+  };
+
+  const cancelEditStaff = () => {
+    setEditingAssignmentId(null);
+    setEditNameInput('');
+    setEditWhIdInput('');
+  };
+
+  const saveEditStaffImpl = async (assignmentId) => {
+    setSavingEdit(true);
+    const { data, error } = await supabase.rpc('edit_staff_assignment', {
+      p_assignment_id: assignmentId,
+      p_name: editNameInput.trim() || null,
+      p_deployed_wholesaler_id: sellerData?.is_aggregator ? (editWhIdInput || null) : null,
+    });
+    setSavingEdit(false);
+    const res = Array.isArray(data) ? data[0] : data;
+    if (error || res?.ok === false) {
+      alert(res?.message || error?.message || 'Staff update nahi hua');
+      return;
+    }
+    cancelEditStaff();
+    await fetchStaffList(sellerData.id);
+  };
+
+  const toggleHoldImpl = async (row) => {
+    setTogglingHoldId(row.assignment_id);
+    const { data, error } = await supabase.rpc('set_assignment_hold', {
+      p_assignment_id: row.assignment_id,
+      p_hold: !row.is_on_hold,
+    });
+    setTogglingHoldId(null);
+    const res = Array.isArray(data) ? data[0] : data;
+    if (error || res?.ok === false) {
+      alert(res?.message || error?.message || 'Hold update nahi hua');
+      return;
+    }
+    // list_seller_staff now returns is_on_hold directly — reload so the row
+    // reflects DB truth, no local override needed.
+    await fetchStaffList(sellerData.id);
+  };
+
   const fetchSellerData = async () => {
     try {
       const seller = await getCurrentSeller();
@@ -597,6 +729,13 @@ export default function SellerDashboard() {
       fetchAllOrders(sellerData.id, orderFilter);
     }
   }, [activeTab, orderFilter, sellerData?.id]);
+
+  useEffect(() => {
+    if (sellerData?.id && activeTab === 'staff') {
+      fetchStaffList(sellerData.id);
+      if (sellerData?.is_aggregator) fetchWholesalerOptions(sellerData.id);
+    }
+  }, [activeTab, sellerData?.id, sellerData?.is_aggregator]);
 
   useEffect(() => {
     if (sellerData?.id && activeTab === 'orders' && ordersSubTab === 'buying' && sellerData?.seller_type !== 'wholesaler') {
@@ -930,6 +1069,7 @@ export default function SellerDashboard() {
     { id: 'inventory', Icon: Package,       label: 'Inventory', badge: null },
     { id: 'buy',       Icon: Store,         label: 'Khareedo',  badge: null },
     { id: 'earnings',  Icon: Wallet,        label: 'Earnings',  badge: null },
+    { id: 'staff',     Icon: Users,         label: 'Staff',     badge: null },
     { id: 'profile',   Icon: UserCircle,    label: 'Profile',   badge: null },
   ];
   const visibleTabs = NAV_TABS.filter((tab) => !(tab.id === 'buy' && isWholesaler));
@@ -1230,6 +1370,163 @@ export default function SellerDashboard() {
           </>}
 
           {/* ══ PROFILE TAB ═══════════════════════════════════ */}
+          {activeTab === 'staff' && <>
+            <p style={s.tabTitle}>Staff</p>
+
+            {/* ── Add Staff ── */}
+            <div style={{ backgroundColor: '#FFFFFF', borderRadius: '14px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+              <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: 0 }}>+ Naya Staff Add Karo</p>
+
+              <div style={s.fieldWrap}>
+                <p style={s.label}>Email</p>
+                <input
+                  style={s.commRateInput} type="email" placeholder="staff@example.com"
+                  value={staffEmail} onChange={(e) => setStaffEmail(e.target.value)}
+                />
+              </div>
+
+              <div style={s.fieldWrap}>
+                <p style={s.label}>Naam (optional)</p>
+                <input
+                  style={s.commRateInput} type="text" placeholder="Staff ka naam"
+                  value={staffName} onChange={(e) => setStaffName(e.target.value)}
+                />
+              </div>
+
+              {sellerData?.is_aggregator && (
+                <div style={s.fieldWrap}>
+                  <p style={s.label}>Deploy on wholesaler</p>
+                  <select
+                    style={s.commRateInput}
+                    value={staffDeployWhId}
+                    onChange={(e) => setStaffDeployWhId(e.target.value)}
+                  >
+                    <option value="">-- koi nahi (bina deploy) --</option>
+                    {mappedWholesalers.map((w) => (
+                      <option key={w.id} value={w.id}>{w.store_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                style={{ ...s.acceptBtn, opacity: addingStaff ? 0.7 : 1 }}
+                onClick={addStaffImpl}
+                disabled={addingStaff}
+              >
+                {addingStaff ? 'Add Ho Raha Hai...' : 'Add Staff'}
+              </button>
+            </div>
+
+            {/* ── Staff List ── */}
+            {staffListLoading ? (
+              <p style={{ fontSize: '13px', color: '#888888', textAlign: 'center', padding: '16px 0' }}>Load ho raha hai...</p>
+            ) : staffList.length === 0 ? (
+              <div style={s.noPending}>
+                <p style={s.noPendingText}>Abhi koi staff nahi — upar se add karein.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {staffList.map((row) => {
+                  const isOnHold = row.is_on_hold;
+                  const isEditing = editingAssignmentId === row.assignment_id;
+                  return (
+                    <div key={row.assignment_id} style={{ backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #1A6B3C', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 2px' }}>
+                            {row.name || 'Staff'} <span style={{ fontSize: '11px', fontWeight: '700', color: '#1A6B3C' }}>({row.staff_code})</span>
+                          </p>
+                          <p style={{ fontSize: '12px', color: '#888888', margin: 0 }}>{row.email}</p>
+                          {sellerData?.is_aggregator && row.deployed_wholesaler_id && (
+                            <p style={{ fontSize: '12px', color: '#0C447C', margin: '4px 0 0' }}>
+                              📦 Deployed: {wholesalerName(row.deployed_wholesaler_id)}
+                            </p>
+                          )}
+                          {isOnHold && (
+                            <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: '700', color: '#E65100', backgroundColor: '#FFF3E0', padding: '2px 8px', borderRadius: '10px', marginTop: '6px' }}>
+                              ⏸ Duty Hold
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          style={{ ...s.editBtn, flex: 1, padding: '9px', fontSize: '12px' }}
+                          onClick={() => (isEditing ? cancelEditStaff() : startEditStaff(row))}
+                        >
+                          {isEditing ? 'Band Karo' : 'Edit'}
+                        </button>
+                        <button
+                          style={
+                            isOnHold
+                              ? { ...s.acceptBtn, flex: 1, padding: '9px', fontSize: '12px', opacity: togglingHoldId === row.assignment_id ? 0.7 : 1 }
+                              : { flex: 1, padding: '9px', backgroundColor: '#FFFFFF', color: '#E65100', border: '1.5px solid #E65100', borderRadius: '10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', opacity: togglingHoldId === row.assignment_id ? 0.7 : 1 }
+                          }
+                          onClick={() => toggleHoldImpl(row)}
+                          disabled={togglingHoldId === row.assignment_id}
+                        >
+                          {togglingHoldId === row.assignment_id ? '...' : (isOnHold ? 'Resume' : 'Hold')}
+                        </button>
+                        <button
+                          style={{ ...s.declineBtn, flex: 1, padding: '9px', fontSize: '12px', opacity: endingAssignmentId === row.assignment_id ? 0.7 : 1 }}
+                          onClick={() => endStaffAssignmentImpl(row.assignment_id)}
+                          disabled={endingAssignmentId === row.assignment_id}
+                        >
+                          {endingAssignmentId === row.assignment_id ? '...' : 'End'}
+                        </button>
+                      </div>
+
+                      {isEditing && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid #F0F0F0' }}>
+                          <div style={s.fieldWrap}>
+                            <p style={s.label}>Naam</p>
+                            <input
+                              style={s.commRateInput} type="text" placeholder="Staff ka naam"
+                              value={editNameInput} onChange={(e) => setEditNameInput(e.target.value)}
+                            />
+                          </div>
+                          {sellerData?.is_aggregator && (
+                            <div style={s.fieldWrap}>
+                              <p style={s.label}>Deploy on wholesaler</p>
+                              <select
+                                style={s.commRateInput}
+                                value={editWhIdInput}
+                                onChange={(e) => setEditWhIdInput(e.target.value)}
+                              >
+                                <option value="">-- koi nahi (bina deploy) --</option>
+                                {mappedWholesalers.map((w) => (
+                                  <option key={w.id} value={w.id}>{w.store_name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              style={{ ...s.acceptBtn, flex: 1, opacity: savingEdit ? 0.7 : 1 }}
+                              onClick={() => saveEditStaffImpl(row.assignment_id)}
+                              disabled={savingEdit}
+                            >
+                              {savingEdit ? 'Save Ho Raha Hai...' : 'Save'}
+                            </button>
+                            <button
+                              style={{ flex: 1, padding: '11px', backgroundColor: '#F5F5F5', color: '#555555', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
+                              onClick={cancelEditStaff}
+                              disabled={savingEdit}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>}
+
           {activeTab === 'profile' && <>
             <p style={s.tabTitle}>Store Profile</p>
 

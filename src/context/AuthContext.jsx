@@ -467,16 +467,14 @@ export function AuthProvider({ children }) {
                   return;
                 }
               } else {
-                // staff_whitelist mein bhi nahi mila — Aggregator ka
-                // deployed staff (seller_staff table, staff_whitelist se
-                // bilkul alag — super-admin seedha seller_staff mein add
-                // karta hai, koi approval-workflow nahi) ho sakta hai.
-                const { data: ss } = await supabase
-                  .from('seller_staff')
-                  .select('id')
-                  .eq('email', emailUser.email)
-                  .eq('is_active', true)
-                  .maybeSingle();
+                // staff_whitelist mein bhi nahi mila — deployed staff
+                // (staff + staff_assignment tables, staff_whitelist se
+                // bilkul alag — super-admin/seller seedha add karta hai,
+                // koi approval-workflow nahi) ho sakta hai. my_staff_context()
+                // RPC login-email ki active posting lautata hai, 0 rows agar
+                // koi active assignment nahi (057/058/059_myStaffContext.sql).
+                const { data: ctxRows } = await supabase.rpc('my_staff_context');
+                const ss = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
                 if (ss) staffRole = 'seller_staff';
               }
             } catch {}
@@ -500,18 +498,14 @@ export function AuthProvider({ children }) {
             }
           } else if (staffRole === 'seller_staff') {
             // pendingRole 'seller_staff' set hai (StaffLogin.jsx ka
-            // hint) — seller_staff table se hi verify karo (staff_whitelist
-            // wala approval-flow yahan lagu nahi hota, seller_staff ka
-            // apna hi is_active gate hai, 047_aggregatorStaff.sql).
+            // hint) — my_staff_context() RPC se hi verify karo (staff_whitelist
+            // wala approval-flow yahan lagu nahi hota, staff/staff_assignment
+            // ka apna hi active-posting gate hai, 057/058/059_myStaffContext.sql).
             // Bina is check ke koi bhi Google-login user localStorage mein
             // staff_pending_role='seller_staff' daal ke /staff tak pahunch
             // sakta tha — is verification ke bina yeh ek real gap hota.
-            const { data: ss } = await supabase
-              .from('seller_staff')
-              .select('id')
-              .eq('email', emailUser.email)
-              .eq('is_active', true)
-              .maybeSingle();
+            const { data: ctxRows } = await supabase.rpc('my_staff_context');
+            const ss = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
             if (!ss) {
               intentionalSignOut.current = true;
               await supabase.auth.signOut();

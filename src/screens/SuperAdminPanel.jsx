@@ -14,6 +14,7 @@ import MedicineBandsTab from './MedicineBandsTab';
 const TABS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: '🏠' },
   { id: 'sellers',      label: 'Sellers',       icon: '🏪' },
+  { id: 'aggregators',  label: 'Aggregators',   icon: '📦' },
   { id: 'routing',      label: 'Routing',       icon: '🎯' },
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
@@ -488,6 +489,7 @@ export default function SuperAdminPanel() {
             loading={loadingSellers} onApprove={approveSeller} onReject={rejectSeller}
           />
         )}
+        {activeTab === 'aggregators' && <TabAggregators />}
         {activeTab === 'routing'     && <TabRouting />}
         {activeTab === 'pharmacists' && (
           <TabPharmacists
@@ -856,6 +858,345 @@ function DocRow({ label, value }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #F0F0F0' }}>
       <span style={{ fontSize: '12px', color: '#888' }}>{label}</span>
       <span style={{ fontSize: '12px', color: '#1A1A1A', fontWeight: '600' }}>{value || '—'}</span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// TAB: Aggregators
+// ══════════════════════════════════════════════════════════════
+function TabAggregators() {
+  const [sellers,     setSellers]     = useState([]);
+  const [wholesalers, setWholesalers] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [togglingId,  setTogglingId]  = useState(null);
+
+  useEffect(() => {
+    loadSellers();
+    loadWholesalers();
+  }, []);
+
+  const loadSellers = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('id, store_name, seller_type, is_aggregator')
+      .eq('seller_type', 'retailer')
+      .order('store_name', { ascending: true });
+    if (error) { console.error('TabAggregators loadSellers error:', error); setLoading(false); return; }
+    setSellers(data || []);
+    setLoading(false);
+  };
+
+  // Wholesaler list — loaded once, passed down to each aggregator's mapping
+  // section to populate the "add wholesaler" dropdown + resolve names.
+  const loadWholesalers = async () => {
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('id, store_name')
+      .eq('seller_type', 'wholesaler')
+      .order('store_name', { ascending: true });
+    if (error) { console.error('TabAggregators loadWholesalers error:', error); return; }
+    setWholesalers(data || []);
+  };
+
+  const toggleAggregator = async (seller) => {
+    const prevValue = seller.is_aggregator;
+    const nextValue = !prevValue;
+    setTogglingId(seller.id);
+    setSellers((prev) => prev.map((s) => (s.id === seller.id ? { ...s, is_aggregator: nextValue } : s)));
+
+    const { data, error } = await supabase
+      .from('sellers')
+      .update({ is_aggregator: nextValue })
+      .eq('id', seller.id)
+      .select();
+
+    setTogglingId(null);
+
+    if (error || !data || data.length === 0) {
+      // Revert the optimistic flip — either the request failed, or RLS/the
+      // trigger silently discarded it (0 rows back from .select()).
+      setSellers((prev) => prev.map((s) => (s.id === seller.id ? { ...s, is_aggregator: prevValue } : s)));
+      alert('Aggregator flag update nahi hua: ' + (error?.message || 'Update reflect nahi hua'));
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <p style={s.sectionTitle}>Aggregators</p>
+      <p style={{ fontSize: '12px', color: '#888', margin: '-8px 0 0' }}>Aggregator flag sirf super-admin set kar sakta hai.</p>
+
+      {loading && <p style={s.emptyText}>Load ho raha hai...</p>}
+      {!loading && sellers.length === 0 && <p style={s.emptyText}>Koi retailer seller nahi</p>}
+
+      {sellers.map((seller) => (
+        <div key={seller.id}>
+          <div style={{ ...s.regCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+            <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: 0, flex: 1, minWidth: 0 }}>{seller.store_name}</p>
+            <div
+              style={{ width: '44px', height: '24px', borderRadius: '12px', backgroundColor: seller.is_aggregator ? '#1A6B3C' : '#ccc', cursor: togglingId === seller.id ? 'default' : 'pointer', position: 'relative', transition: 'background 0.2s', opacity: togglingId === seller.id ? 0.6 : 1, flexShrink: 0 }}
+              onClick={() => { if (togglingId !== seller.id) toggleAggregator(seller); }}
+            >
+              <div style={{ position: 'absolute', top: '3px', left: seller.is_aggregator ? '23px' : '3px', width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+            </div>
+          </div>
+
+          {/* Mapping section only for aggregators that are ON — toggling
+              OFF just hides this, existing aggregator_wholesalers rows for
+              this seller are left untouched in the DB. */}
+          {seller.is_aggregator && (
+            <AggregatorMappingSection aggregatorId={seller.id} wholesalers={wholesalers} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One mapping row — store_name + editable priority (Save on click/blur,
+// not per-keystroke) + Remove. A separate component (not inline JSX in the
+// .map() below) because the priority input needs its own local state/hook,
+// which a bare map callback can't hold.
+function AggregatorMappingRow({ mapping, name, onSavePriority, onRemove, removing }) {
+  const [priorityInput,  setPriorityInput]  = useState(String(mapping.priority));
+  // Tracked separately from priorityInput (and from the mapping prop, which
+  // only updates once the parent's reload round-trips back) so the Save
+  // button's dirty/clean comparison is exact and immediate, not dependent
+  // on re-fetch timing.
+  const [savedPriority,  setSavedPriority]  = useState(mapping.priority);
+  const [saving,         setSaving]         = useState(false);
+
+  // Keep both in sync if the list reloads with a different value from
+  // elsewhere (e.g. another admin changed it).
+  useEffect(() => {
+    setPriorityInput(String(mapping.priority));
+    setSavedPriority(mapping.priority);
+  }, [mapping.priority]);
+
+  const isDirty = priorityInput.trim() !== String(savedPriority);
+
+  const handleSave = async () => {
+    const trimmed = priorityInput.trim();
+    const n = Number(trimmed);
+    if (trimmed === '' || !Number.isInteger(n) || n <= 0) {
+      alert('Priority ek positive number hona chahiye');
+      setPriorityInput(String(savedPriority));
+      return;
+    }
+    if (n === savedPriority) return; // unchanged — nothing to save
+
+    setSaving(true);
+    const ok = await onSavePriority(mapping.id, n);
+    setSaving(false);
+    if (ok) {
+      // Update the tracked saved value immediately — don't wait for the
+      // parent's reload to come back, so the button dims right away.
+      setSavedPriority(n);
+      setPriorityInput(String(n));
+    } else {
+      setPriorityInput(String(savedPriority)); // revert on failure
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F0F0', gap: '8px' }}>
+      <span style={{ fontSize: '13px', color: '#1A1A1A', flex: 1, minWidth: 0 }}>{name}</span>
+      <input
+        style={{ ...s.inputSm, width: '56px', padding: '4px 6px', flexShrink: 0 }}
+        type="number" min="1" step="1"
+        value={priorityInput}
+        onChange={(e) => setPriorityInput(e.target.value)}
+        onBlur={handleSave}
+        disabled={saving}
+      />
+      <button
+        style={
+          isDirty
+            ? { ...s.approveBtn, padding: '4px 10px', fontSize: '11px', opacity: saving ? 0.7 : 1, cursor: saving ? 'default' : 'pointer', flexShrink: 0 }
+            : { ...s.approveBtn, padding: '4px 10px', fontSize: '11px', backgroundColor: '#E0E0E0', color: '#999', cursor: 'not-allowed', flexShrink: 0 }
+        }
+        onClick={handleSave}
+        disabled={saving || !isDirty}
+      >
+        {saving ? '...' : 'Save'}
+      </button>
+      <button
+        style={{ ...s.rejectBtn, padding: '4px 10px', fontSize: '11px', opacity: removing ? 0.7 : 1, flexShrink: 0 }}
+        onClick={() => onRemove(mapping.id)}
+        disabled={removing}
+      >
+        {removing ? '...' : 'Remove'}
+      </button>
+    </div>
+  );
+}
+
+// Sourced-wholesalers mapping for one aggregator seller — direct-table
+// reads/writes on aggregator_wholesalers (RLS already superadmin-only,
+// 047_aggregatorStaff.sql). No RPC needed for this chunk.
+function AggregatorMappingSection({ aggregatorId, wholesalers }) {
+  const [mappings,    setMappings]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [selectedWh,  setSelectedWh]  = useState('');
+  const [priorityInput, setPriorityInput] = useState('100');
+  const [adding,      setAdding]      = useState(false);
+  const [removingId,  setRemovingId]  = useState(null);
+  const [syncing,     setSyncing]     = useState(false);
+  const [syncResult,  setSyncResult]  = useState(null); // { text, isError } | null — this aggregator only
+
+  useEffect(() => {
+    loadMappings();
+  }, [aggregatorId]);
+
+  const loadMappings = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('aggregator_wholesalers')
+      .select('id, wholesaler_seller_id, priority, is_active')
+      .eq('aggregator_seller_id', aggregatorId)
+      .order('priority', { ascending: true });
+    if (error) { console.error('AggregatorMappingSection loadMappings error:', error); setLoading(false); return; }
+    setMappings(data || []);
+    setLoading(false);
+  };
+
+  const wholesalerName = (id) => wholesalers.find((w) => w.id === id)?.store_name || '—';
+  const mappedIds = new Set(mappings.map((m) => m.wholesaler_seller_id));
+  const availableWholesalers = wholesalers.filter((w) => !mappedIds.has(w.id));
+
+  const addMapping = async () => {
+    if (!selectedWh) { alert('Wholesaler chuno'); return; }
+    const n = Number(priorityInput);
+    const priority = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 100;
+    setAdding(true);
+    const { data, error } = await supabase
+      .from('aggregator_wholesalers')
+      .insert({ aggregator_seller_id: aggregatorId, wholesaler_seller_id: selectedWh, priority })
+      .select();
+    setAdding(false);
+    if (error || !data || data.length === 0) {
+      alert('Wholesaler add nahi hua: ' + (error?.message || 'Insert reflect nahi hua'));
+      return;
+    }
+    setSelectedWh('');
+    setPriorityInput('100');
+    await loadMappings();
+  };
+
+  const removeMapping = async (mappingId) => {
+    setRemovingId(mappingId);
+    const { data, error } = await supabase
+      .from('aggregator_wholesalers')
+      .delete()
+      .eq('id', mappingId)
+      .select();
+    setRemovingId(null);
+    if (error || !data || data.length === 0) {
+      alert('Wholesaler remove nahi hua: ' + (error?.message || 'Delete reflect nahi hua'));
+      return;
+    }
+    await loadMappings();
+  };
+
+  // Returns true/false so the row's own input knows whether to keep the
+  // edited value or revert to the last-saved priority.
+  const savePriority = async (mappingId, newPriority) => {
+    const { data, error } = await supabase
+      .from('aggregator_wholesalers')
+      .update({ priority: newPriority })
+      .eq('id', mappingId)
+      .select();
+    if (error || !data || data.length === 0) {
+      alert('Priority update nahi hua: ' + (error?.message || 'Update reflect nahi hua'));
+      return false;
+    }
+    await loadMappings(); // re-sorts by priority ascending
+    return true;
+  };
+
+  // sync_aggregator_inventory(p_aggregator_id) — 049_aggregatorSync.sql.
+  // RETURNS JSONB: { synced, deactivated, skipped_no_mrp } counts.
+  const syncInventory = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    const { data, error } = await supabase.rpc('sync_aggregator_inventory', { p_aggregator_id: aggregatorId });
+    setSyncing(false);
+    if (error) {
+      setSyncResult({ text: 'Sync fail hua: ' + error.message, isError: true });
+      return;
+    }
+    if (data && typeof data === 'object') {
+      setSyncResult({
+        text: `${data.synced ?? 0} medicines synced, ${data.deactivated ?? 0} deactivated`
+          + (data.skipped_no_mrp ? `, ${data.skipped_no_mrp} skipped (no MRP)` : ''),
+        isError: false,
+      });
+    } else {
+      setSyncResult({ text: 'Sync complete', isError: false });
+    }
+  };
+
+  return (
+    <div style={{ ...s.formCard, marginTop: '-8px' }}>
+      <p style={{ fontSize: '12px', fontWeight: '700', color: '#444', margin: '0 0 8px' }}>Sourced Wholesalers</p>
+
+      {loading && <p style={s.emptyText}>Load ho raha hai...</p>}
+      {!loading && mappings.length === 0 && (
+        <p style={{ fontSize: '12px', color: '#888', margin: '0 0 8px' }}>Koi wholesaler mapped nahi</p>
+      )}
+
+      {!loading && mappings.map((m) => (
+        <AggregatorMappingRow
+          key={m.id}
+          mapping={m}
+          name={wholesalerName(m.wholesaler_seller_id)}
+          onSavePriority={savePriority}
+          onRemove={removeMapping}
+          removing={removingId === m.id}
+        />
+      ))}
+
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px' }}>
+        <select
+          style={{ ...s.inputSm, flex: 1 }}
+          value={selectedWh}
+          onChange={(e) => setSelectedWh(e.target.value)}
+        >
+          <option value="">-- Wholesaler chuno --</option>
+          {availableWholesalers.map((w) => (
+            <option key={w.id} value={w.id}>{w.store_name}</option>
+          ))}
+        </select>
+        <input
+          style={{ ...s.inputSm, width: '70px', flex: 'none' }}
+          type="number" min="0" step="1"
+          value={priorityInput}
+          onChange={(e) => setPriorityInput(e.target.value)}
+        />
+        <button
+          style={{ ...s.approveBtn, padding: '8px 14px', opacity: adding ? 0.7 : 1, flexShrink: 0 }}
+          onClick={addMapping}
+          disabled={adding}
+        >
+          {adding ? '...' : 'Add'}
+        </button>
+      </div>
+
+      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #F0F0F0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <button
+          style={{ ...s.approveBtn, padding: '8px 14px', opacity: syncing ? 0.7 : 1, alignSelf: 'flex-start' }}
+          onClick={syncInventory}
+          disabled={syncing}
+        >
+          {syncing ? 'Sync ho raha hai...' : '🔄 Sync Inventory'}
+        </button>
+        {syncResult && (
+          <p style={{ fontSize: '12px', margin: 0, color: syncResult.isError ? '#DC2626' : '#1A6B3C' }}>
+            {syncResult.text}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
