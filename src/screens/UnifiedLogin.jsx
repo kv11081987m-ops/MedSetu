@@ -139,6 +139,24 @@ export default function UnifiedLogin() {
             >
               Privacy Policy
             </a>
+            {' '}·{' '}
+            <a
+              href="/terms.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ ...s.termLink, textDecoration: 'underline' }}
+            >
+              Terms & Conditions
+            </a>
+            {' '}·{' '}
+            <a
+              href="/refund.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ ...s.termLink, textDecoration: 'underline' }}
+            >
+              Return & Refund
+            </a>
             {' '}se agree karte hain
           </p>
         </div>
