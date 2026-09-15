@@ -220,16 +220,32 @@ export function effectiveMrp(sellerMrp, masterMrpMax) {
 // (is_available + available>0, exactly as before).
 export async function fetchSellersForMedicine(medicineId, mrpMode = false, masterMrpMax = 0) {
   if (!medicineId) return [];
+  // sellers(...) embed jaan-boojhkar NAHI — seller_inventory ke seller_id aur
+  // sourced_from_wholesaler_id dono sellers ko FK karte hain, PostgREST embed
+  // ambiguous -> HTTP 300 "Multiple Choices". fetchCallQueue (PharmacistPanel)
+  // me yahi fix laga tha. Do alag queries + client-side merge.
   let query = supabase
     .from('seller_inventory')
-    .select('selling_price, mrp, seller_hidden, stock_quantity, reserved_quantity, sellers(id, store_name, address, phone, rating, is_open, seller_type)')
+    .select('seller_id, selling_price, mrp, seller_hidden, stock_quantity, reserved_quantity')
     .eq('medicine_id', medicineId);
   query = mrpMode ? query.eq('seller_hidden', false) : query.eq('is_available', true);
 
   const { data, error } = await query.order('selling_price', { ascending: true });
   if (error) { console.error('fetchSellersForMedicine error:', error); return []; }
+
+  const sellerIds = [...new Set((data || []).map((row) => row.seller_id).filter(Boolean))];
+  let sellersById = {};
+  if (sellerIds.length > 0) {
+    const { data: sellerRows, error: sellerError } = await supabase
+      .from('sellers')
+      .select('id, store_name, address, phone, rating, is_open, seller_type')
+      .in('id', sellerIds);
+    if (sellerError) { console.error('fetchSellersForMedicine (sellers) error:', sellerError); return []; }
+    sellersById = Object.fromEntries((sellerRows || []).map((s) => [s.id, s]));
+  }
+
   let rows = (data || [])
-    .map((row) => ({ ...row, available: (row.stock_quantity || 0) - (row.reserved_quantity || 0) }))
+    .map((row) => ({ ...row, sellers: sellersById[row.seller_id] || null, available: (row.stock_quantity || 0) - (row.reserved_quantity || 0) }))
     .filter((row) => row.sellers?.seller_type === 'retailer');
   if (!mrpMode) {
     rows = rows.filter((row) => row.available > 0);
