@@ -432,14 +432,34 @@ export default function Checkout() {
     try {
       const storedUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
       if (!storedUser?.id) { alert('Login session problem — dobara login karein'); return; }
+      // is_default hamesha false — savedAddresses (cached state) stale ho
+      // sakti hai, aur agar DB me already ek default ho to stale-true
+      // idx_one_default_address violate karke INSERT hi fail kar deta.
+      // Default-status decide karte hain INSERT ke BAAD, ek fresh DB count
+      // se (neeche) — set_default_address RPC hi purana default unset
+      // karke naya set karta hai, is INSERT se wo kabhi touch nahi hota.
       const { data, error } = await saveAddress({
         userId: storedUser.id,
-        address: { ...newCheckoutAddress, is_default: savedAddresses.length === 0 },
+        address: { ...newCheckoutAddress, is_default: false },
       });
       if (error || !data) {
         alert('Address save nahi hua: ' + (error?.message || 'Unknown error'));
         return;
       }
+
+      // Fresh count (cache par bharosa nahi) — agar ye user ka pehla hi
+      // address nikla (abhi-inserted wala included), to use RPC se default
+      // bana do. Count fail/1-se-zyada dono cases me chup-chaap non-default
+      // rehne dete hain — "Default Banao" button se manually set ho sakta hai.
+      const { count } = await supabase
+        .from('addresses')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', storedUser.id);
+      if (count === 1) {
+        const result = await setDefaultAddress(data.id);
+        if (result?.success) data.is_default = true;
+      }
+
       setSavedAddresses((prev) => [...prev, data]);
       handleChooseAddress(data);
       setShowNewAddressForm(false);
