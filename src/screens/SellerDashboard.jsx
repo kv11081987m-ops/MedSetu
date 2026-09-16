@@ -352,10 +352,15 @@ function RateConfirmModal({ items, onConfirm, onClose, mrpMode }) {
 // ─── Edit Store Details Modal (Profile tab) ────────────────────
 function EditStoreModal({ seller, onSave, onClose }) {
   const [formData, setFormData] = useState({
-    owner_name:   seller?.owner_name   || '',
-    phone:        seller?.phone        || '',
-    drug_license: seller?.drug_license || '',
-    gst_number:   seller?.gst_number   || '',
+    store_name:      seller?.store_name      || '',
+    owner_name:      seller?.owner_name      || '',
+    phone:           seller?.phone           || '',
+    address:         seller?.address         || '',
+    district:        seller?.district        || '',
+    pharmacist_name: seller?.pharmacist_name || '',
+    drug_license:    seller?.drug_license    || '',
+    gst_number:      seller?.gst_number      || '',
+    aadhar_number:   seller?.aadhar_number   || '',
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
@@ -364,16 +369,26 @@ function EditStoreModal({ seller, onSave, onClose }) {
 
   const handleSubmit = async () => {
     setError('');
+    if (!formData.store_name.trim()) { setError('Store naam khaali nahi ho sakta'); return; }
     if (!formData.owner_name.trim()) { setError('Owner naam khaali nahi ho sakta'); return; }
     if (!/^\d{10}$/.test(formData.phone.trim())) { setError('Phone number 10 digit ka hona chahiye'); return; }
+    if (formData.aadhar_number.trim() && !/^\d{12}$/.test(formData.aadhar_number.trim())) {
+      setError('Aadhar number 12 digit ka hona chahiye');
+      return;
+    }
 
     setSaving(true);
     try {
       await onSave({
-        owner_name:   formData.owner_name.trim(),
-        phone:        formData.phone.trim(),
-        drug_license: formData.drug_license.trim() || null,
-        gst_number:   formData.gst_number.trim()   || null,
+        store_name:      formData.store_name.trim(),
+        owner_name:      formData.owner_name.trim(),
+        phone:           formData.phone.trim(),
+        address:         formData.address.trim()         || null,
+        district:        formData.district.trim()        || null,
+        pharmacist_name: formData.pharmacist_name.trim() || null,
+        drug_license:    formData.drug_license.trim()    || null,
+        gst_number:      formData.gst_number.trim()      || null,
+        aadhar_number:   formData.aadhar_number.trim()   || null,
       });
     } catch (err) {
       setError(err?.message || 'Save nahi hua — dobara try karo');
@@ -390,6 +405,11 @@ function EditStoreModal({ seller, onSave, onClose }) {
         </div>
 
         <div style={s.fieldWrap}>
+          <label style={s.label}>Store Naam *</label>
+          <input style={s.commRateInput} value={formData.store_name} onChange={set('store_name')} placeholder="Store ka naam" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
           <label style={s.label}>Owner Naam *</label>
           <input style={s.commRateInput} value={formData.owner_name} onChange={set('owner_name')} placeholder="Owner ka naam" disabled={saving} />
         </div>
@@ -400,6 +420,21 @@ function EditStoreModal({ seller, onSave, onClose }) {
         </div>
 
         <div style={s.fieldWrap}>
+          <label style={s.label}>Address</label>
+          <textarea style={{ ...s.commRateInput, minHeight: '60px', resize: 'vertical' }} value={formData.address} onChange={set('address')} placeholder="Optional" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
+          <label style={s.label}>District</label>
+          <input style={s.commRateInput} value={formData.district} onChange={set('district')} placeholder="Optional" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
+          <label style={s.label}>Pharmacist Naam</label>
+          <input style={s.commRateInput} value={formData.pharmacist_name} onChange={set('pharmacist_name')} placeholder="Optional" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
           <label style={s.label}>Drug License</label>
           <input style={s.commRateInput} value={formData.drug_license} onChange={set('drug_license')} placeholder="Optional" disabled={saving} />
         </div>
@@ -407,6 +442,11 @@ function EditStoreModal({ seller, onSave, onClose }) {
         <div style={s.fieldWrap}>
           <label style={s.label}>GST Number</label>
           <input style={s.commRateInput} value={formData.gst_number} onChange={set('gst_number')} placeholder="Optional" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
+          <label style={s.label}>Aadhar Number</label>
+          <input style={s.commRateInput} type="tel" inputMode="numeric" value={formData.aadhar_number} onChange={set('aadhar_number')} placeholder="12 digit ya khaali" maxLength={12} disabled={saving} />
         </div>
 
         {error && <p style={{ fontSize: '12px', color: '#DC3545', margin: 0, fontWeight: '600' }}>{error}</p>}
@@ -702,6 +742,10 @@ export default function SellerDashboard() {
     if (error) throw error;
     setSellerData((prev) => ({ ...prev, ...updates }));
     setShowEditStore(false);
+
+    // Fire-and-forget — superadmin review nudge must not block the save.
+    supabase.rpc('notify_superadmins_seller_updated', { p_seller_id: sellerData.id })
+      .catch((err) => console.warn('[notify admin]', err));
   };
 
   const acceptOrderImpl = async (orderId) => {
