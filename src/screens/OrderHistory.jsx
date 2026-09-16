@@ -28,7 +28,7 @@ const STATUS_MAP = {
   out_for_delivery:  { label: 'Raaste mein',      sub: 'Delivery boy aapke paas aa raha hai',    color: '#7C3AED', bg: '#F3EEFF', Icon: Truck        },
   delivered:         { label: 'Delivered',        sub: 'Order mil gaya',                         color: '#1A6B3C', bg: '#E8F5EE', Icon: CheckCircle  },
   cancelled:         { label: 'Cancelled',        sub: 'Order cancel ho gaya',                    color: '#C62828', bg: '#FFEBEE', Icon: XCircle      },
-  return_requested:  { label: 'Return Requested', sub: 'Return request bheji gayi hai',           color: '#F59E0B', bg: '#FFF8E1', Icon: Undo2        },
+  return_requested:  { label: 'Return Requested', sub: 'Return request bheji gayi — pickup pending', color: '#D97706', bg: '#FEF3C7', Icon: Undo2   },
   returned:          { label: 'Returned',         sub: 'Return complete ho gaya',                 color: '#6B7280', bg: '#F3F4F6', Icon: PackageX     },
 };
 
@@ -268,6 +268,7 @@ export default function OrderHistory() {
       p_type: 'return_update',
       p_ref_id: returnOrder.dbId,
     }).then(({ error }) => { if (error) console.warn('[notify return request]', error); });
+    alert('✅ Return request submit ho gayi! Delivery partner aapke paas pickup ke liye aayega.');
     setReturnOrder(null);
   };
 

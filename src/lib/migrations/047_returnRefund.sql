@@ -277,9 +277,23 @@ GRANT EXECUTE ON FUNCTION request_return(uuid, text, text, text) TO authenticate
 -- ────────────────────────────────────────────────────
 -- 5) RPC: seller_review_return (seller accepts/rejects the request)
 -- ────────────────────────────────────────────────────
+-- PART C addendum — pickup/received sub-flow (Option B): the "pickup
+-- Schedule Karo" / "Return Received" buttons on an already-accepted
+-- return call this SAME RPC again with p_action = 'pickup_scheduled' /
+-- 'return_received'. The original guard below only ever allowed a call
+-- when status = 'requested' — which the FIRST 'accepted' call already
+-- moves away from, so a second call on the same return_id always hit
+-- "Sirf requested status par seller review ho sakta hai" and the whole
+-- pickup/received flow was unreachable. Widened to a two-stage guard:
+-- stage 1 (accepted/rejected) still requires status='requested'; stage 2
+-- (pickup_scheduled/return_received) requires status='seller_reviewed'
+-- AND the return is not already rejected (seller_action IN
+-- ('accepted','pickup_scheduled') — so 'return_received' is reachable
+-- whether or not 'pickup_scheduled' happened first, matching the UI
+-- which shows both buttons together with no forced order).
 CREATE OR REPLACE FUNCTION seller_review_return(
   p_return_id   uuid,
-  p_action      text,  -- 'accepted' | 'rejected'
+  p_action      text,  -- 'accepted' | 'rejected' | 'pickup_scheduled' | 'return_received'
   p_note        text DEFAULT NULL
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -305,13 +319,20 @@ BEGIN
     RETURN jsonb_build_object('success',false,'message','Authorized nahi');
   END IF;
 
-  IF v_return.status != 'requested' THEN
-    RETURN jsonb_build_object('success',false,
-      'message','Sirf requested status par seller review ho sakta hai');
+  IF p_action NOT IN ('accepted','rejected','pickup_scheduled','return_received') THEN
+    RETURN jsonb_build_object('success',false,'message','Invalid action');
   END IF;
 
-  IF p_action NOT IN ('accepted','rejected') THEN
-    RETURN jsonb_build_object('success',false,'message','Invalid action');
+  IF p_action IN ('accepted','rejected') THEN
+    IF v_return.status != 'requested' THEN
+      RETURN jsonb_build_object('success',false,
+        'message','Sirf requested status par seller review ho sakta hai');
+    END IF;
+  ELSE
+    IF v_return.status != 'seller_reviewed' OR v_return.seller_action NOT IN ('accepted','pickup_scheduled') THEN
+      RETURN jsonb_build_object('success',false,
+        'message','Sirf accept ki hui return par pickup/receive update ho sakta hai');
+    END IF;
   END IF;
 
   UPDATE order_returns SET
@@ -494,10 +515,37 @@ GRANT EXECUTE ON FUNCTION process_refund(uuid,text) TO authenticated;
 --   -- order terminal status (deviation #9):
 --   SELECT status FROM orders WHERE id = (SELECT order_id FROM order_returns WHERE id = '<return-id>');
 --   -- expect: 'returned'
+--
+-- 9. PART C smoke (pickup/received sub-flow, seller session, apna
+--    ACCEPTED return_id se):
+--   SELECT seller_review_return('<return-id>'::uuid, 'pickup_scheduled', 'Delivery partner pickup ke liye bheja ja raha hai');
+--   -- expect: {"success": true, "action": "pickup_scheduled"}
+--   SELECT seller_review_return('<return-id>'::uuid, 'return_received', 'Medicine wapas mil gayi');
+--   -- expect: {"success": true, "action": "return_received"}
+--   -- ek 'requested' (abhi tak accept nahi hui) return par seedha try -> expect failure:
+--   SELECT seller_review_return('<other-return-id>'::uuid, 'pickup_scheduled', NULL);
+--   -- expect: {"success": false, "message": "Sirf accept ki hui return par pickup/receive update ho sakta hai"}
+
+-- ================================================================
+-- PART C — seller_action CHECK constraint: 'pickup_scheduled' aur
+-- 'return_received' add karo (table already live hai, isliye ALTER
+-- TABLE — CREATE TABLE ka CHECK ab is ALTER se supersede ho jaata hai).
+-- ================================================================
+ALTER TABLE order_returns
+  DROP CONSTRAINT IF EXISTS order_returns_seller_action_check;
+
+ALTER TABLE order_returns
+  ADD CONSTRAINT order_returns_seller_action_check
+  CHECK (seller_action IN (
+    'accepted','rejected','pickup_scheduled','return_received'
+  ));
 
 -- ================================================================
 -- ROLLBACK
 -- ================================================================
+-- ALTER TABLE order_returns DROP CONSTRAINT IF EXISTS order_returns_seller_action_check;
+-- ALTER TABLE order_returns ADD CONSTRAINT order_returns_seller_action_check
+--   CHECK (seller_action IS NULL OR seller_action IN ('accepted','rejected'));
 -- DROP FUNCTION IF EXISTS process_refund(uuid, text);
 -- DROP FUNCTION IF EXISTS admin_decide_return(uuid, text, numeric, text);
 -- DROP FUNCTION IF EXISTS seller_review_return(uuid, text, text);

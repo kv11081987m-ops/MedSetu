@@ -501,10 +501,16 @@ export default function SellerDashboard() {
   // apne aap sirf is seller ke orders ki returns dikhata hai, isliye
   // koi seller_id filter yahan nahi chahiye.
   const fetchReturnRequests = async () => {
+    // 'requested' (naya, action chahiye) + 'seller_reviewed' with
+    // seller_action accepted/pickup_scheduled (Pickup/Received button
+    // wapas dikhne chahiye page-reload ke baad bhi — reviewReturnImpl ka
+    // 'accepted' case ise list se remove nahi karta, locally update karta
+    // hai, isliye fetch ko bhi wahi state dobara pick karna aana chahiye).
+    // rejected/return_received terminal hain, in mein nahi aate.
     const { data, error } = await supabase
       .from('order_returns')
       .select('*, orders(order_number, total_amount, customer_name)')
-      .eq('status', 'requested')
+      .or('status.eq.requested,and(status.eq.seller_reviewed,seller_action.in.(accepted,pickup_scheduled))')
       .order('requested_at', { ascending: false });
     if (error) { console.error('fetchReturnRequests error:', error); return; }
     setReturnRequests(data || []);
@@ -790,37 +796,56 @@ export default function SellerDashboard() {
 
   const declineOrder = (orderId) => withOrderBusy(orderId, () => declineOrderImpl(orderId));
 
-  // Return requests — accept/reject via seller_review_return RPC
-  // (guarded: ownership + status='requested' checked server-side).
-  const reviewReturnImpl = async (ret, action) => {
+  // Return requests — accept/reject/pickup_scheduled/return_received,
+  // sab isi ek seller_review_return RPC se (guarded server-side: ownership
+  // + stage-appropriate status/seller_action check — 047_returnRefund.sql).
+  //
+  // 'accepted' ke baad card list se remove NAHI hota — locally
+  // seller_reviewed+accepted par update hota hai, taaki "Pickup Schedule
+  // Karo"/"Return Received" buttons usi card par dikh sakein. Baaki teeno
+  // action (rejected/pickup_scheduled/return_received) terminal hain is
+  // list ke liye, list se remove ho jaate hain.
+  const RETURN_NOTIFY_COPY = {
+    accepted:         { title: 'Return Accept Ho Gaya',      body: 'Store ne aapki return request accept kar li, admin approval baaki hai' },
+    rejected:         { title: 'Return Reject Ho Gaya',      body: 'Store ne aapki return request reject kar di' },
+    pickup_scheduled: { title: 'Pickup Schedule Ho Gaya 🛵', body: 'Aapki medicine pickup ke liye delivery partner aa raha hai 🛵' },
+    return_received:  { title: 'Return Receive Ho Gaya ✅',  body: 'Aapki medicine seller tak pahunch gayi ✅ Refund process hoga' },
+  };
+
+  const reviewReturnImpl = async (ret, action, note = null) => {
     const { data, error } = await supabase.rpc('seller_review_return', {
       p_return_id: ret.id,
       p_action: action,
-      p_note: null,
+      p_note: note,
     });
     if (error || !data?.success) {
       alert('Return review nahi hui: ' + (data?.message || error?.message || 'Unknown error'));
       return;
     }
-    setReturnRequests((prev) => prev.filter((r) => r.id !== ret.id));
+    if (action === 'accepted') {
+      setReturnRequests((prev) =>
+        prev.map((r) => r.id === ret.id ? { ...r, status: 'seller_reviewed', seller_action: 'accepted' } : r)
+      );
+    } else {
+      setReturnRequests((prev) => prev.filter((r) => r.id !== ret.id));
+    }
     // create_notification khud caller (yahan: seller) ke role se customer
     // ko resolve kar leta hai — ref_id = orders.id, return ka id nahi
     // (existing convention, notification-tap handlers order_id expect
     // karte hain).
+    const copy = RETURN_NOTIFY_COPY[action];
     supabase.rpc('create_notification', {
-      p_title: action === 'accepted' ? 'Return Accept Ho Gaya' : 'Return Reject Ho Gaya',
-      p_body: action === 'accepted'
-        ? 'Store ne aapki return request accept kar li, admin approval baaki hai'
-        : 'Store ne aapki return request reject kar di',
+      p_title: copy.title,
+      p_body: copy.body,
       p_type: 'return_update',
       p_ref_id: ret.order_id,
     }).then(({ error }) => { if (error) console.warn('[notify return review]', error); });
   };
 
-  const reviewReturn = (ret, action) => {
+  const reviewReturn = (ret, action, note = null) => {
     if (returnBusyIds.has(ret.id)) return;
     setReturnBusyIds((prev) => new Set(prev).add(ret.id));
-    reviewReturnImpl(ret, action).finally(() => {
+    reviewReturnImpl(ret, action, note).finally(() => {
       setReturnBusyIds((prev) => { const next = new Set(prev); next.delete(ret.id); return next; });
     });
   };
@@ -1149,22 +1174,42 @@ export default function SellerDashboard() {
                         </span>
                       </div>
                       {ret.reason_detail && <p style={s.returnDetail}>{ret.reason_detail}</p>}
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          style={{ ...s.acceptBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
-                          disabled={isReturnBusy(ret.id)}
-                          onClick={() => reviewReturn(ret, 'accepted')}
-                        >
-                          <Check size={14} color="#FFFFFF" /> Accept
-                        </button>
-                        <button
-                          style={{ ...s.declineBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
-                          disabled={isReturnBusy(ret.id)}
-                          onClick={() => reviewReturn(ret, 'rejected')}
-                        >
-                          <X size={14} color="#DC3545" /> Reject
-                        </button>
-                      </div>
+                      {ret.status === 'requested' ? (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            style={{ ...s.acceptBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
+                            disabled={isReturnBusy(ret.id)}
+                            onClick={() => reviewReturn(ret, 'accepted')}
+                          >
+                            <Check size={14} color="#FFFFFF" /> Accept
+                          </button>
+                          <button
+                            style={{ ...s.declineBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
+                            disabled={isReturnBusy(ret.id)}
+                            onClick={() => reviewReturn(ret, 'rejected')}
+                          >
+                            <X size={14} color="#DC3545" /> Reject
+                          </button>
+                        </div>
+                      ) : (
+                        // seller_reviewed + accepted/pickup_scheduled — Option B flow
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            style={{ ...s.acceptBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
+                            disabled={isReturnBusy(ret.id)}
+                            onClick={() => reviewReturn(ret, 'pickup_scheduled', 'Delivery partner pickup ke liye bheja ja raha hai')}
+                          >
+                            <RotateCcw size={14} color="#FFFFFF" /> Pickup Schedule Karo
+                          </button>
+                          <button
+                            style={{ ...s.acceptBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1, backgroundColor: '#0C447C' }}
+                            disabled={isReturnBusy(ret.id)}
+                            onClick={() => reviewReturn(ret, 'return_received', 'Medicine wapas mil gayi')}
+                          >
+                            <Check size={14} color="#FFFFFF" /> Return Received ✅
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
