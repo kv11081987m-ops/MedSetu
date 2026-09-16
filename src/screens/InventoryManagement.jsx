@@ -651,6 +651,8 @@ function BulkModal({ sellerId, onClose, onDone, mrpMode }) {
         unit:               r.unit || 'strips',
         expiry_date,
         batch_number:       r.batch_number || null,
+        commission_band:    r.commission_band || null,
+        dosage_form:        r.dosage_form     || null,
         min_order_quantity: Number(r.min_order_quantity) || 1,
       };
     });
