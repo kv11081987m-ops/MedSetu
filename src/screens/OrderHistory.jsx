@@ -10,6 +10,7 @@ import {
   ShoppingBag, MapPin, RotateCcw,
   Banknote, Smartphone, FileText, Download,
   Package, PackageCheck, Truck,
+  Undo2, PackageX, X,
 } from 'lucide-react';
 
 
@@ -27,7 +28,19 @@ const STATUS_MAP = {
   out_for_delivery:  { label: 'Raaste mein',      sub: 'Delivery boy aapke paas aa raha hai',    color: '#7C3AED', bg: '#F3EEFF', Icon: Truck        },
   delivered:         { label: 'Delivered',        sub: 'Order mil gaya',                         color: '#1A6B3C', bg: '#E8F5EE', Icon: CheckCircle  },
   cancelled:         { label: 'Cancelled',        sub: 'Order cancel ho gaya',                    color: '#C62828', bg: '#FFEBEE', Icon: XCircle      },
+  return_requested:  { label: 'Return Requested', sub: 'Return request bheji gayi hai',           color: '#F59E0B', bg: '#FFF8E1', Icon: Undo2        },
+  returned:          { label: 'Returned',         sub: 'Return complete ho gaya',                 color: '#6B7280', bg: '#F3F4F6', Icon: PackageX     },
 };
+
+// order_returns.reason -> display label (047_returnRefund.sql ke CHECK
+// constraint wali values ke saath match)
+const RETURN_REASONS = [
+  { value: 'wrong_item',    label: 'Galat item mila' },
+  { value: 'damaged',       label: 'Damaged/tuta hua mila' },
+  { value: 'not_delivered', label: 'Mila hi nahi' },
+  { value: 'expired',       label: 'Expired product' },
+  { value: 'other',         label: 'Kuch aur' },
+];
 
 // "Chal Rahe" (was "Processing") now covers every not-yet-delivered,
 // not-cancelled status — the filter chip's own grouping, and the same
@@ -43,7 +56,7 @@ const FILTER_STATUS = {
 };
 
 // ─── Order Card ───────────────────────────────────────────────
-function OrderCard({ order, onTrack, onReorder, onCancel, onDetail, onDownloadBill, downloadingId }) {
+function OrderCard({ order, onTrack, onReorder, onCancel, onDetail, onDownloadBill, downloadingId, onReturn }) {
   const [expanded, setExpanded] = useState(false);
   const st = STATUS_MAP[order.status];
   const displayItems = order.items.slice(0, 2);
@@ -136,6 +149,11 @@ function OrderCard({ order, onTrack, onReorder, onCancel, onDetail, onDownloadBi
                 {downloadingId === order.dbId ? 'Bill Ban Raha Hai...' : 'Bill (PDF)'}
               </button>
             )}
+            {/* Return/Refund (047_returnRefund.sql) — delivered orders only */}
+            <button style={s.btnRedOutlined} onClick={() => onReturn(order)}>
+              <Undo2 size={13} color="#DC3545" />
+              Return Karo
+            </button>
           </>
         )}
 
@@ -170,6 +188,13 @@ export default function OrderHistory() {
   const [dbLoading, setDbLoading]       = useState(true);
   const [downloadingId, setDownloadingId] = useState(null);
 
+  // Return-request modal — null = closed, order object = open for that order
+  const [returnOrder,      setReturnOrder]      = useState(null);
+  const [returnReason,     setReturnReason]     = useState('');
+  const [returnDetail,     setReturnDetail]     = useState('');
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnError,      setReturnError]      = useState('');
+
   useEffect(() => {
     const userId = getCurrentUserId();
     fetchOrders(userId)
@@ -203,6 +228,47 @@ export default function OrderHistory() {
     setDbOrders((prev) =>
       prev.map((o) => o.dbId === order.dbId ? { ...o, status: 'cancelled', refund: o.amount } : o)
     );
+  };
+
+  const handleOpenReturn = (order) => {
+    setReturnOrder(order);
+    setReturnReason('');
+    setReturnDetail('');
+    setReturnError('');
+  };
+
+  const handleSubmitReturn = async () => {
+    if (!returnOrder?.dbId) return;
+    if (!returnReason) { setReturnError('Reason chuniye'); return; }
+    setReturnSubmitting(true);
+    setReturnError('');
+    // photo upload abhi nahi — p_photo_url: null (047_returnRefund.sql
+    // ka storage bucket already ready hai jab ye aage add hoga).
+    const { data, error } = await supabase.rpc('request_return', {
+      p_order_id: returnOrder.dbId,
+      p_reason: returnReason,
+      p_reason_detail: returnDetail.trim() || null,
+      p_photo_url: null,
+    });
+    setReturnSubmitting(false);
+    if (error || !data?.success) {
+      setReturnError(data?.message || error?.message || 'Return request submit nahi hui');
+      return;
+    }
+    setDbOrders((prev) =>
+      prev.map((o) => o.dbId === returnOrder.dbId ? { ...o, status: 'return_requested' } : o)
+    );
+    // Caller (customer) ke role se create_notification khud seller ko
+    // resolve kar leta hai — ref_id = orders.id (existing convention,
+    // OrderTracking/CustomerHome ke notif-tap handlers isi ko expect
+    // karte hain).
+    supabase.rpc('create_notification', {
+      p_title: 'Naya Return Request 🔄',
+      p_body: `Order #${returnOrder.id} ke liye customer ne return request bheji hai`,
+      p_type: 'return_update',
+      p_ref_id: returnOrder.dbId,
+    }).then(({ error }) => { if (error) console.warn('[notify return request]', error); });
+    setReturnOrder(null);
   };
 
   const handleDownloadBill = async (order) => {
@@ -356,6 +422,7 @@ export default function OrderHistory() {
                   onDetail={(o) => navigate('/order-tracking', { state: { orderId: o.dbId } })}
                   onDownloadBill={handleDownloadBill}
                   downloadingId={downloadingId}
+                  onReturn={handleOpenReturn}
                 />
               ))}
             </div>
@@ -366,6 +433,53 @@ export default function OrderHistory() {
 
         {/* ── Bottom Nav (shared, R3-C3) ── */}
         <BottomNav />
+
+        {/* ── Return Request modal ── */}
+        {returnOrder && (
+          <div style={s.modalOverlay} onClick={() => !returnSubmitting && setReturnOrder(null)}>
+            <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+              <div style={s.modalHeader}>
+                <span style={s.modalTitle}>Return Request — #{returnOrder.id}</span>
+                <button style={s.modalCloseBtn} onClick={() => setReturnOrder(null)} disabled={returnSubmitting}>
+                  <X size={18} color="#888888" />
+                </button>
+              </div>
+
+              <label style={s.modalLabel}>Reason</label>
+              <select
+                style={s.modalSelect}
+                value={returnReason}
+                onChange={(e) => { setReturnReason(e.target.value); setReturnError(''); }}
+                disabled={returnSubmitting}
+              >
+                <option value="">-- Reason chuniye --</option>
+                {RETURN_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+
+              <label style={s.modalLabel}>Detail (optional)</label>
+              <textarea
+                style={s.modalTextarea}
+                placeholder="Thoda aur bataiye..."
+                value={returnDetail}
+                onChange={(e) => setReturnDetail(e.target.value)}
+                disabled={returnSubmitting}
+                rows={3}
+              />
+
+              {returnError && <p style={s.modalError}>{returnError}</p>}
+
+              <button
+                style={{ ...s.orderNowBtn, width: '100%', justifyContent: 'center', opacity: returnSubmitting ? 0.7 : 1 }}
+                onClick={handleSubmitReturn}
+                disabled={returnSubmitting}
+              >
+                {returnSubmitting ? 'Submit ho raha hai...' : 'Submit Karo'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -777,5 +891,82 @@ const s = {
     fontWeight: '700',
     cursor: 'pointer',
     fontFamily: 'inherit',
+  },
+
+  // Return Request modal
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+    padding: '20px',
+  },
+  modalBox: {
+    width: '100%',
+    maxWidth: '360px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '16px',
+    padding: '18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '4px',
+  },
+  modalTitle: {
+    fontSize: '15px',
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  modalCloseBtn: {
+    background: 'none',
+    border: 'none',
+    padding: '2px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  modalLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#555555',
+    margin: '2px 0 -4px',
+  },
+  modalSelect: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1.5px solid rgba(12,68,124,0.25)',
+    borderRadius: '10px',
+    padding: '10px 12px',
+    fontSize: '14px',
+    color: '#1A1A1A',
+    fontFamily: 'inherit',
+    outline: 'none',
+    backgroundColor: '#FFFFFF',
+  },
+  modalTextarea: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1.5px solid rgba(12,68,124,0.25)',
+    borderRadius: '10px',
+    padding: '10px 12px',
+    fontSize: '13px',
+    color: '#1A1A1A',
+    fontFamily: 'inherit',
+    outline: 'none',
+    resize: 'vertical',
+  },
+  modalError: {
+    fontSize: '12.5px',
+    fontWeight: '600',
+    color: '#DC3545',
+    margin: 0,
   },
 };

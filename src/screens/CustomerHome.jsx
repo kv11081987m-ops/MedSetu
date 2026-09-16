@@ -505,7 +505,13 @@ export default function CustomerHome() {
                         setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
                         if (!n.is_read) markNotificationRead(n.id);
                         setShowNotif(false);
-                        if (n.ref_id) navigate('/order-tracking', { state: { orderId: n.ref_id } });
+                        // return_update ka ref_id order_returns.id hota hai (seller/admin
+                        // review actions se, 047_returnRefund.sql), orders.id nahi — is
+                        // route ko wo direct nahi le sakta, isliye Order History par bhej
+                        // do (wahan return status card khud dikh jaata hai) na ki
+                        // OrderTracking (jo ek order_id expect karta hai).
+                        if (n.type === 'return_update') navigate('/orders');
+                        else if (n.ref_id) navigate('/order-tracking', { state: { orderId: n.ref_id } });
                       }}
                     >
                       <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: getNotifColor(n.type) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

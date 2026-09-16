@@ -173,7 +173,7 @@ export const updateOrderStatus = async (orderId, status) => {
 // label/colour per real status instead). 'pending' is the fallback for
 // any value outside the known set — it's the DB column's own default,
 // the least-presumptuous guess for something unexpected.
-const KNOWN_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled', 'awaiting_pharmacist'];
+const KNOWN_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled', 'awaiting_pharmacist', 'return_requested', 'returned'];
 
 export function mapOrder(row) {
   const itemNames = (row.order_items || []).map((i) => i.name);

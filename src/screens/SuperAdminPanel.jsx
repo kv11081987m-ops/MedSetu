@@ -18,6 +18,7 @@ const TABS = [
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
   { id: 'offers',       label: 'Offers',        icon: '🎁' },
+  { id: 'returns',      label: 'Returns',       icon: '↩️' },
   { id: 'bands',        label: 'Bands',         icon: '🏷️' },
   { id: 'settings',     label: 'Settings',      icon: '⚙️' },
 ];
@@ -79,6 +80,9 @@ export default function SuperAdminPanel() {
   const [adminForm, setAdminForm] = useState({ naam: '', email: '', permissions: [] });
   const PERMISSIONS = ['approve_sellers', 'manage_orders', 'manage_disputes', 'view_reports', 'manage_pharmacists'];
 
+  // ── Return/Refund queue state (047_returnRefund.sql) ──────
+  const [returns, setReturns] = useState([]);
+
   useEffect(() => {
     loadStats();
     loadSellerCommissions();
@@ -87,6 +91,7 @@ export default function SuperAdminPanel() {
     loadAdmins();
     loadSettings();
     loadOffers();
+    loadReturns();
   }, []);
 
   // Realtime: refresh stats whenever any order changes (delivered → commission updated)
@@ -224,6 +229,16 @@ export default function SuperAdminPanel() {
       .order('created_at', { ascending: false });
     if (error) { console.error('loadOffers error:', error); return; }
     setOffers(data || []);
+  };
+
+  const loadReturns = async () => {
+    const { data, error } = await supabase
+      .from('order_returns')
+      .select('*, orders(order_number, total_amount, customer_name, customer_phone)')
+      .in('status', ['requested', 'seller_reviewed', 'approved'])
+      .order('requested_at', { ascending: false });
+    if (error) { console.error('loadReturns error:', error); return; }
+    setReturns(data || []);
   };
 
   const loadSettings = async () => {
@@ -502,6 +517,7 @@ export default function SuperAdminPanel() {
           />
         )}
         {activeTab === 'offers'      && <TabOffers offers={offers} setOffers={setOffers} offerForm={offerForm} setOfferForm={setOfferForm} loadOffers={loadOffers} />}
+        {activeTab === 'returns'     && <TabReturns returns={returns} loadReturns={loadReturns} />}
         {activeTab === 'bands'       && <MedicineBandsTab />}
         {activeTab === 'settings'    && (
           <TabSettings
@@ -1043,6 +1059,156 @@ function TabOffers({ offers, setOffers, offerForm, setOfferForm, loadOffers }) {
             </div>
           </div>
         ))
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// TAB: Returns (047_returnRefund.sql) — final approve/reject +
+// mark-refunded queue. Seller has already had first pass
+// (seller_review_return) on 'requested' rows before they reach here as
+// 'seller_reviewed'; superadmin can also decide straight from
+// 'requested' (seller review isn't a hard gate on admin_decide_return).
+// ══════════════════════════════════════════════════════════════
+const RETURN_REASON_LABELS = {
+  wrong_item:    'Galat item mila',
+  damaged:       'Damaged/tuta hua mila',
+  not_delivered: 'Mila hi nahi',
+  expired:       'Expired product',
+  other:         'Kuch aur',
+};
+
+function TabReturns({ returns, loadReturns }) {
+  const [refundInputs, setRefundInputs] = useState({});
+  const [noteInputs,   setNoteInputs]   = useState({});
+  const [busyIds,      setBusyIds]      = useState(new Set());
+  const isBusy = (id) => busyIds.has(id);
+
+  const withBusy = async (id, fn) => {
+    if (busyIds.has(id)) return;
+    setBusyIds((prev) => new Set(prev).add(id));
+    try { await fn(); }
+    finally { setBusyIds((prev) => { const next = new Set(prev); next.delete(id); return next; }); }
+  };
+
+  const decide = (ret, action) => withBusy(ret.id, async () => {
+    const refundAmount = action === 'approved' ? Number(refundInputs[ret.id]) : null;
+    if (action === 'approved' && (!refundAmount || refundAmount <= 0)) {
+      alert('Approve karne ke liye valid refund amount daalo');
+      return;
+    }
+    const { data, error } = await supabase.rpc('admin_decide_return', {
+      p_return_id: ret.id,
+      p_action: action,
+      p_refund_amount: refundAmount,
+      p_note: noteInputs[ret.id] || null,
+    });
+    if (error || !data?.success) {
+      alert('Return decide nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    // Customer ko notification yahan se nahi bhejni — admin_decide_return
+    // khud RPC ke andar seedha notifications table mein INSERT karta hai
+    // (047_returnRefund.sql, Fix 1). create_notification() yahan se call
+    // karne se ya to kuch nahi hoga (superadmin order ka party nahi hai,
+    // silently false return karta) ya double-notify ho jaata.
+    await loadReturns();
+  });
+
+  const markRefunded = (ret) => withBusy(ret.id, async () => {
+    const { data, error } = await supabase.rpc('process_refund', { p_return_id: ret.id });
+    if (error || !data?.success) {
+      alert('Refund mark nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    // process_refund customer ko notify nahi karta (SQL side; superadmin
+    // caller ke liye create_notification() bhi yahan se silently no-op
+    // hi karega) — abhi ke liye jaan-boojh ke gap, JS se fake/broken
+    // call add karne ke bajaye. Customer ko refund_status list/UI se hi
+    // pata chalega jab tak yeh resolve na ho.
+    await loadReturns();
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <p style={s.sectionTitle}>Return/Refund Queue</p>
+
+      {returns.length === 0 ? (
+        <p style={s.emptyText}>Koi return request pending nahi</p>
+      ) : (
+        returns.map((ret) => {
+          const o = ret.orders || {};
+          const canDecide = ret.status === 'requested' || ret.status === 'seller_reviewed';
+          const canMarkRefunded = ret.status === 'approved' && ret.refund_status === 'pending';
+          return (
+            <div key={ret.id} style={s.regCard}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                <div>
+                  <p style={{ fontSize: '15px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 2px' }}>
+                    #{o.order_number || ret.order_id} — {o.customer_name || 'Customer'}
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#888', margin: '0 0 2px' }}>
+                    {o.customer_phone || '—'} · Order ₹{o.total_amount ?? '—'}
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#555', margin: 0 }}>
+                    Reason: {RETURN_REASON_LABELS[ret.reason] || ret.reason}
+                    {ret.reason_detail ? ` — ${ret.reason_detail}` : ''}
+                  </p>
+                </div>
+                <span style={{ ...s.filterChip, ...s.filterChipActive, flexShrink: 0 }}>
+                  {ret.status}
+                </span>
+              </div>
+
+              {ret.seller_action && (
+                <p style={{ fontSize: '12px', color: ret.seller_action === 'accepted' ? '#1A6B3C' : '#DC3545', margin: '8px 0 0' }}>
+                  Seller: {ret.seller_action === 'accepted' ? 'Accept kiya' : 'Reject kiya'}
+                  {ret.seller_note ? ` — ${ret.seller_note}` : ''}
+                </p>
+              )}
+
+              {canDecide && (
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <input
+                    style={{ ...s.inputSm, flex: 1 }}
+                    type="number"
+                    placeholder="Refund amount ₹"
+                    value={refundInputs[ret.id] || ''}
+                    onChange={(e) => setRefundInputs((p) => ({ ...p, [ret.id]: e.target.value }))}
+                  />
+                  <input
+                    style={{ ...s.inputSm, flex: 1 }}
+                    placeholder="Note (optional)"
+                    value={noteInputs[ret.id] || ''}
+                    onChange={(e) => setNoteInputs((p) => ({ ...p, [ret.id]: e.target.value }))}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                {canDecide && (
+                  <>
+                    <button style={{ ...s.approveBtn, opacity: isBusy(ret.id) ? 0.6 : 1 }} disabled={isBusy(ret.id)} onClick={() => decide(ret, 'approved')}>
+                      Approve
+                    </button>
+                    <button style={{ ...s.rejectBtn, opacity: isBusy(ret.id) ? 0.6 : 1 }} disabled={isBusy(ret.id)} onClick={() => decide(ret, 'rejected')}>
+                      Reject
+                    </button>
+                  </>
+                )}
+                {canMarkRefunded && (
+                  <button style={{ ...s.approveBtn, opacity: isBusy(ret.id) ? 0.6 : 1 }} disabled={isBusy(ret.id)} onClick={() => markRefunded(ret)}>
+                    Refund Done ✅
+                  </button>
+                )}
+                {ret.status === 'approved' && ret.refund_status === 'processed' && (
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#1A6B3C' }}>✓ Refund ₹{ret.refund_amount} processed</span>
+                )}
+              </div>
+            </div>
+          );
+        })
       )}
     </div>
   );

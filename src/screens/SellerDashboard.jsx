@@ -5,6 +5,7 @@ import {
   AlertTriangle, User, Phone, CheckCircle, X, Check,
   BarChart2, Package, Settings, Plus, TrendingUp,
   Home, ClipboardList, Wallet, UserCircle, Edit3, LogOut,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -40,6 +41,16 @@ const ORDER_FILTERS = [
   { label: 'Delivered', value: 'delivered' },
   { label: 'Cancelled', value: 'cancelled' },
 ];
+
+// order_returns.reason -> display label (047_returnRefund.sql ke CHECK
+// constraint wali values ke saath match)
+const RETURN_REASON_LABELS = {
+  wrong_item:     'Galat item mila',
+  damaged:        'Damaged/tuta hua mila',
+  not_delivered:  'Mila hi nahi',
+  expired:        'Expired product',
+  other:          'Kuch aur',
+};
 
 const formatOrderTime = (dateStr) => {
   if (!dateStr) return '';
@@ -442,6 +453,9 @@ export default function SellerDashboard() {
   const [pendingOrders, setPendingOrders] = useState([]);
   const [allOrders,     setAllOrders]     = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
+  const [returnRequests,   setReturnRequests]   = useState([]);
+  const [returnBusyIds,    setReturnBusyIds]    = useState(new Set());
+  const isReturnBusy = (id) => returnBusyIds.has(id);
   const [todayStats,       setTodayStats]       = useState({ totalOrders: 0, pendingCount: 0, todayEarnings: 0, lowStockCount: 0, todayCommission: 0 });
   const [platformCommission, setPlatformCommission] = useState(5);
   const [mrpMode, setMrpMode] = useState(false);
@@ -481,6 +495,19 @@ export default function SellerDashboard() {
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
     if (data) setPendingOrders(data);
+  };
+
+  // Return requests — RLS (seller_see_returns, 047_returnRefund.sql)
+  // apne aap sirf is seller ke orders ki returns dikhata hai, isliye
+  // koi seller_id filter yahan nahi chahiye.
+  const fetchReturnRequests = async () => {
+    const { data, error } = await supabase
+      .from('order_returns')
+      .select('*, orders(order_number, total_amount, customer_name)')
+      .eq('status', 'requested')
+      .order('requested_at', { ascending: false });
+    if (error) { console.error('fetchReturnRequests error:', error); return; }
+    setReturnRequests(data || []);
   };
 
   const fetchTodayStats = async (sellerId) => {
@@ -553,6 +580,7 @@ export default function SellerDashboard() {
         fetchTodayStats(seller.id),
         fetchLowStock(seller.id),
         fetchMrpMode().then(setMrpMode),
+        fetchReturnRequests(),
       ]);
     } catch (err) {
       console.error('Seller fetch:', err);
@@ -761,6 +789,41 @@ export default function SellerDashboard() {
   };
 
   const declineOrder = (orderId) => withOrderBusy(orderId, () => declineOrderImpl(orderId));
+
+  // Return requests — accept/reject via seller_review_return RPC
+  // (guarded: ownership + status='requested' checked server-side).
+  const reviewReturnImpl = async (ret, action) => {
+    const { data, error } = await supabase.rpc('seller_review_return', {
+      p_return_id: ret.id,
+      p_action: action,
+      p_note: null,
+    });
+    if (error || !data?.success) {
+      alert('Return review nahi hui: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    setReturnRequests((prev) => prev.filter((r) => r.id !== ret.id));
+    // create_notification khud caller (yahan: seller) ke role se customer
+    // ko resolve kar leta hai — ref_id = orders.id, return ka id nahi
+    // (existing convention, notification-tap handlers order_id expect
+    // karte hain).
+    supabase.rpc('create_notification', {
+      p_title: action === 'accepted' ? 'Return Accept Ho Gaya' : 'Return Reject Ho Gaya',
+      p_body: action === 'accepted'
+        ? 'Store ne aapki return request accept kar li, admin approval baaki hai'
+        : 'Store ne aapki return request reject kar di',
+      p_type: 'return_update',
+      p_ref_id: ret.order_id,
+    }).then(({ error }) => { if (error) console.warn('[notify return review]', error); });
+  };
+
+  const reviewReturn = (ret, action) => {
+    if (returnBusyIds.has(ret.id)) return;
+    setReturnBusyIds((prev) => new Set(prev).add(ret.id));
+    reviewReturnImpl(ret, action).finally(() => {
+      setReturnBusyIds((prev) => { const next = new Set(prev); next.delete(ret.id); return next; });
+    });
+  };
 
   // future: yeh action rider app se bhi trigger hoga — kept as its own
   // clean status-update function (same shape as cancelConfirmedOrderImpl
@@ -1061,6 +1124,52 @@ export default function SellerDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Return Requests — customer-initiated (047_returnRefund.sql),
+                sirf tab dikhta hai jab koi 'requested' state mein ho. */}
+            {returnRequests.length > 0 && (
+              <div style={s.section}>
+                <div style={s.sectionHead}>
+                  <div style={s.sectionTitleRow}>
+                    <RotateCcw size={14} color="#F59E0B" />
+                    <span style={s.sectionTitle}>Return Requests</span>
+                  </div>
+                  <span style={s.sectionSub}>{returnRequests.length} pending</span>
+                </div>
+                <div style={s.pendingList}>
+                  {returnRequests.map((ret) => (
+                    <div key={ret.id} style={s.returnCard}>
+                      <div style={s.pendTop}>
+                        <div style={s.pendLeft}>
+                          <span style={s.pendId}>#{ret.orders?.order_number || ret.order_id}</span>
+                          <span style={s.pendAgo}>{ret.orders?.customer_name || 'Customer'} · {formatOrderTime(ret.requested_at)}</span>
+                        </div>
+                        <span style={{ ...s.statusBadge, backgroundColor: '#FFF8E1', color: '#B45309' }}>
+                          {RETURN_REASON_LABELS[ret.reason] || ret.reason}
+                        </span>
+                      </div>
+                      {ret.reason_detail && <p style={s.returnDetail}>{ret.reason_detail}</p>}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          style={{ ...s.acceptBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
+                          disabled={isReturnBusy(ret.id)}
+                          onClick={() => reviewReturn(ret, 'accepted')}
+                        >
+                          <Check size={14} color="#FFFFFF" /> Accept
+                        </button>
+                        <button
+                          style={{ ...s.declineBtn, opacity: isReturnBusy(ret.id) ? 0.6 : 1 }}
+                          disabled={isReturnBusy(ret.id)}
+                          onClick={() => reviewReturn(ret, 'rejected')}
+                        >
+                          <X size={14} color="#DC3545" /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Quick Actions */}
             <div style={s.section}>
@@ -1520,6 +1629,8 @@ const s = {
 
   // Order card
   pendCard:     { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #E65100', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
+  returnCard:   { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #F59E0B', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
+  returnDetail: { fontSize: '12px', color: '#666666', margin: 0, lineHeight: '1.4' },
   pendTop:      { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
   pendLeft:     { display: 'flex', flexDirection: 'column', gap: '3px' },
   pendId:       { fontSize: '13px', fontWeight: '800', color: '#1A6B3C', fontFamily: 'monospace' },
