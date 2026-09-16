@@ -33,11 +33,12 @@ const DOSAGE_COLOR_DEFAULT = '#9CA3AF'; // grey — unknown/missing dosage_form
 // chip, small inline Add button instead of the old full-width one.
 // addToCart/handleQuickAdd logic is untouched from before this redesign.
 export default function MedicineCard({ medicine, type, mrpMode }) {
-  const { addToCart } = useCart();
+  const { addToCart, cartItems } = useCart();
   const med      = mapMedicine(medicine);
   const rateInfo = getRatePerDose(medicine, med.price);
   const [added,      setAdded]      = useState(false);
   const [addLoading, setAddLoading] = useState(false);
+  const isInCart = cartItems.some((i) => i.id === med.id);
 
   const stripColor = DOSAGE_COLORS[medicine.dosage_form] || DOSAGE_COLOR_DEFAULT;
   const tagLabel = type === 'janaushadhi' ? 'JAN AUSHADHI' : type === 'generic' ? 'GENERIC' : 'BRANDED';
@@ -49,7 +50,7 @@ export default function MedicineCard({ medicine, type, mrpMode }) {
   // card's data loaded) — picks the cheapest currently-available seller,
   // same as before R3-A, just without a dropdown to cache it in.
   const handleQuickAdd = async () => {
-    if (addLoading || added) return;
+    if (addLoading || added || isInCart) return;
     setAddLoading(true);
     const sellerList = await fetchSellersForMedicine(med.id, mrpMode, med.mrp);
     setAddLoading(false);
@@ -88,9 +89,9 @@ export default function MedicineCard({ medicine, type, mrpMode }) {
           </div>
           <button
             onClick={handleQuickAdd}
-            style={{ ...s.addBtn, background: added ? '#E8F5EE' : '#1A6B3C', color: added ? '#1A6B3C' : '#fff', cursor: addLoading ? 'wait' : 'pointer' }}
+            style={{ ...s.addBtn, background: (added || isInCart) ? '#E8F5EE' : '#1A6B3C', color: (added || isInCart) ? '#1A6B3C' : '#fff', cursor: addLoading ? 'wait' : 'pointer' }}
           >
-            {addLoading ? '...' : added ? '✓ Added' : '+ Add'}
+            {addLoading ? '...' : (added || isInCart) ? '✓ Added' : '+ Add'}
           </button>
         </div>
       </div>
