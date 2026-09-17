@@ -1,0 +1,40 @@
+-- ══════════════════════════════════════════════════
+-- MedSetu — staff_assignment.seller_id: drop NOT NULL
+-- DOCUMENTATION ONLY — already applied directly via Supabase SQL Editor.
+-- Do NOT re-run against the live DB from this file.
+-- ══════════════════════════════════════════════════
+--
+-- 052_deliveryPartner.sql introduced role_type='delivery_partner' on
+-- staff_assignment, with delivery_partner rows leaving seller_id and
+-- deployed_wholesaler_id both NULL (a delivery partner isn't scoped to
+-- one seller — see confirm_delivery/is_active_delivery_partner, which
+-- only ever check staff_id + role_type, never seller_id). But
+-- staff_assignment.seller_id was still NOT NULL from the original
+-- aggregator-staff schema migration (predates role_type, when every
+-- assignment row WAS seller-scoped by definition) — that constraint was
+-- never revisited when 052 added the delivery_partner path, so an
+-- attempt to insert a delivery_partner assignment would have failed on
+-- this column alone.
+--
+-- Fixed live via:
+--   ALTER TABLE staff_assignment ALTER COLUMN seller_id DROP NOT NULL;
+--
+-- Read-only verify (run after, confirmed already):
+--   SELECT column_name, is_nullable FROM information_schema.columns
+--   WHERE table_name = 'staff_assignment' AND column_name = 'seller_id';
+--   -- confirmed: is_nullable = YES
+--
+-- seller_staff rows (role_type='seller_staff', the pre-052 default) are
+-- unaffected — nothing forces seller_id to be set now, but nothing stops
+-- the app from continuing to always set it for that role either; this
+-- only removes a constraint that was blocking the delivery_partner path,
+-- it adds no new validation of its own.
+
+
+-- ================================================================
+-- ROLLBACK
+-- ================================================================
+-- Only safe if no delivery_partner (or other NULL-seller_id) rows exist
+-- yet — would fail with a NOT NULL violation otherwise:
+--
+-- ALTER TABLE staff_assignment ALTER COLUMN seller_id SET NOT NULL;
