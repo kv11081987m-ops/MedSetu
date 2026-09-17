@@ -96,6 +96,11 @@ export default function StaffLogin() {
             💊 Pehli Baar? Pharmacist Account Banao
           </button>
         )}
+        {selectedRole === 'delivery_partner' && (
+          <button style={s.registerBtn} onClick={() => navigate('/delivery-partner-register')}>
+            🛵 Pehli Baar? Delivery Partner Account Banao
+          </button>
+        )}
 
         {/* ── Form Card ── */}
         <div style={s.card}>

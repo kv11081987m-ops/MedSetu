@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { intentionalSignOut } from '../context/AuthContext';
 import { formatIST } from '../lib/formatTime';
 import { updateOrderStatus } from '../lib/orders';
+import { getSignedDeliveryDocUrl } from '../lib/deliveryDocs';
 import {
   approveCommissionRequest as approveCommissionRequestDb,
   rejectCommissionRequest  as rejectCommissionRequestDb,
@@ -14,6 +15,7 @@ import MedicineBandsTab from './MedicineBandsTab';
 const TABS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: '🏠' },
   { id: 'sellers',      label: 'Sellers',       icon: '🏪' },
+  { id: 'delivery_partners', label: 'Delivery Partners', icon: '🛵' },
   { id: 'routing',      label: 'Routing',       icon: '🎯' },
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
@@ -24,6 +26,7 @@ const TABS = [
 ];
 
 const SELLER_FILTER_OPTS = ['pending', 'approved', 'rejected', 'all'];
+const DELIVERY_PARTNER_FILTER_OPTS = ['pending', 'approved', 'rejected', 'expired', 'all'];
 
 export default function SuperAdminPanel() {
   const navigate = useNavigate();
@@ -52,6 +55,11 @@ export default function SuperAdminPanel() {
   const [loadingSellers,      setLoadingSellers]      = useState(false);
   const [loadingPharmacists,  setLoadingPharmacists]  = useState(false);
   const [sellerCommissions,   setSellerCommissions]   = useState([]);
+
+  // ── Delivery Partner registrations (055_deliveryPartnerRegistration.sql) ──
+  const [allDeliveryPartners,     setAllDeliveryPartners]     = useState([]);
+  const [deliveryPartnerFilter,   setDeliveryPartnerFilter]   = useState('pending');
+  const [loadingDeliveryPartners, setLoadingDeliveryPartners] = useState(false);
 
   // ── Settings state ────────────────────────────────────────
   const [settings, setSettings] = useState({
@@ -87,6 +95,7 @@ export default function SuperAdminPanel() {
     loadStats();
     loadSellerCommissions();
     loadSellers();
+    loadDeliveryPartners();
     loadPharmacists();
     loadAdmins();
     loadSettings();
@@ -208,6 +217,35 @@ export default function SuperAdminPanel() {
     setAllSellers(data || []);
     setPendingSellers((data || []).filter((s) => s.status === 'pending'));
     setLoadingSellers(false);
+  };
+
+  const loadDeliveryPartners = async () => {
+    setLoadingDeliveryPartners(true);
+    const { data } = await supabase.from('delivery_partner_registrations').select('*').order('created_at', { ascending: false });
+    setAllDeliveryPartners(data || []);
+    setLoadingDeliveryPartners(false);
+  };
+
+  const approveDeliveryPartner = async (registrationId) => {
+    const { data, error } = await supabase.rpc('approve_delivery_partner', { p_registration_id: registrationId });
+    if (error || !data?.success) {
+      alert('Approve nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    setAllDeliveryPartners((p) => p.map((r) => r.id === registrationId ? { ...r, status: 'approved' } : r));
+    alert(`✅ Approve ho gaya!\nStaff Code: ${data.staff_code}`);
+  };
+
+  const rejectDeliveryPartner = async (registrationId) => {
+    const reasonText = window.prompt('Rejection ka reason batao:') || 'Documents incomplete hain';
+    if (reasonText === null) return;
+    const { data, error } = await supabase.rpc('reject_delivery_partner', { p_registration_id: registrationId, p_reason: reasonText });
+    if (error || !data?.success) {
+      alert('Reject nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    setAllDeliveryPartners((p) => p.map((r) => r.id === registrationId ? { ...r, status: 'rejected' } : r));
+    alert('Delivery partner reject kar diya.\nReason: ' + reasonText);
   };
 
   const loadPharmacists = async () => {
@@ -460,6 +498,10 @@ export default function SuperAdminPanel() {
   const filteredSellers = sellerFilter === 'all' ? allSellers : allSellers.filter((s) => s.status === sellerFilter);
   const displayedCount = sellerFilter === 'pending' ? stats.pendingSellers : sellerFilter === 'approved' ? stats.activeSellers : filteredSellers.length;
 
+  const filteredDeliveryPartners = deliveryPartnerFilter === 'all'
+    ? allDeliveryPartners
+    : allDeliveryPartners.filter((r) => r.status === deliveryPartnerFilter);
+
   // Save button dirty-check (Fix 10a) — savedSnapshot is only set once
   // loadSettings() resolves, so there's nothing meaningful to compare
   // against before that.
@@ -501,6 +543,12 @@ export default function SuperAdminPanel() {
           <TabSellers
             sellers={filteredSellers} filter={sellerFilter} setFilter={setSellerFilter}
             loading={loadingSellers} onApprove={approveSeller} onReject={rejectSeller}
+          />
+        )}
+        {activeTab === 'delivery_partners' && (
+          <TabDeliveryPartners
+            registrations={filteredDeliveryPartners} filter={deliveryPartnerFilter} setFilter={setDeliveryPartnerFilter}
+            loading={loadingDeliveryPartners} onApprove={approveDeliveryPartner} onReject={rejectDeliveryPartner}
           />
         )}
         {activeTab === 'routing'     && <TabRouting />}
@@ -872,6 +920,86 @@ function DocRow({ label, value }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #F0F0F0' }}>
       <span style={{ fontSize: '12px', color: '#888' }}>{label}</span>
       <span style={{ fontSize: '12px', color: '#1A1A1A', fontWeight: '600' }}>{value || '—'}</span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// TAB: Delivery Partners
+// ══════════════════════════════════════════════════════════════
+function TabDeliveryPartners({ registrations, filter, setFilter, loading, onApprove, onReject }) {
+  const [expanded,  setExpanded]  = useState(null);
+  const [openingId, setOpeningId] = useState(null);
+
+  const handleViewDoc = async (reg) => {
+    if (!reg.aadhar_image_url) { alert('Koi document upload nahi hai'); return; }
+    setOpeningId(reg.id);
+    const url = await getSignedDeliveryDocUrl(reg.aadhar_image_url);
+    setOpeningId(null);
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    else alert('Document abhi khul nahi paa raha');
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <p style={s.sectionTitle}>Delivery Partner Registrations</p>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {DELIVERY_PARTNER_FILTER_OPTS.map((f) => (
+          <button key={f} style={{ ...s.filterChip, ...(filter === f ? s.filterChipActive : {}) }} onClick={() => setFilter(f)}>
+            {f.charAt(0).toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {loading && <p style={s.emptyText}>Load ho raha hai...</p>}
+      {!loading && registrations.length === 0 && <p style={s.emptyText}>Koi record nahi</p>}
+
+      {registrations.map((reg) => (
+        <div key={reg.id} style={{ ...s.regCard, borderLeftColor: reg.status === 'pending' ? '#F59E0B' : reg.status === 'approved' ? '#10B981' : reg.status === 'expired' ? '#888888' : '#EF4444' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <p style={{ fontSize: '16px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 2px' }}>{reg.name}</p>
+              <p style={{ fontSize: '12px', color: '#888', margin: 0 }}>{reg.vehicle_type || 'Vehicle type nahi diya'}</p>
+            </div>
+            <span style={{ ...s.statusChip, backgroundColor: reg.status === 'pending' ? '#FEF3C7' : reg.status === 'approved' ? '#D1FAE5' : reg.status === 'expired' ? '#F0F0F0' : '#FEE2E2', color: reg.status === 'pending' ? '#B45309' : reg.status === 'approved' ? '#065F46' : reg.status === 'expired' ? '#555555' : '#991B1B' }}>
+              {reg.status}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '12px', color: '#666', display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+            <span>📱 {reg.mobile}</span>
+            {reg.email && <span>📧 {reg.email}</span>}
+            <span>🕐 Registered: {formatIST(reg.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+
+          <button style={s.expandBtn} onClick={() => setExpanded(expanded === reg.id ? null : reg.id)}>
+            {expanded === reg.id ? '▲ Details Chhupao' : '▼ Details Dekho'}
+          </button>
+
+          {expanded === reg.id && (
+            <div style={s.docsBox}>
+              <DocRow label="Address"       value={reg.address} />
+              <DocRow label="Aadhar Number" value={reg.aadhar_number} />
+              <DocRow label="Vehicle Type"  value={reg.vehicle_type} />
+              {reg.rejection_reason && <DocRow label="Rejection Reason" value={reg.rejection_reason} />}
+              <button
+                style={{ ...s.expandBtn, marginTop: '8px', opacity: reg.aadhar_image_url ? 1 : 0.5 }}
+                onClick={() => handleViewDoc(reg)}
+                disabled={!reg.aadhar_image_url || openingId === reg.id}
+              >
+                {openingId === reg.id ? 'Khul Raha Hai...' : reg.aadhar_image_url ? '📄 Document Dekho' : 'Koi Document Nahi'}
+              </button>
+            </div>
+          )}
+
+          {reg.status === 'pending' && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={s.approveBtn} onClick={() => onApprove(reg.id)}>✓ Approve</button>
+              <button style={s.rejectBtn}  onClick={() => onReject(reg.id)}>✗ Reject</button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

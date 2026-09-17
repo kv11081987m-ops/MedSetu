@@ -25,6 +25,7 @@ import UserProfile         from './screens/UserProfile';
 import StaffLogin          from './screens/StaffLogin';
 import SellerRegister      from './screens/SellerRegister';
 import PharmacistRegister  from './screens/PharmacistRegister';
+import DeliveryPartnerRegister from './screens/DeliveryPartnerRegister';
 import SuperAdminPanel     from './screens/SuperAdminPanel';
 import MedicineImport      from './screens/MedicineImport';
 import WholesalerLocator   from './screens/WholesalerLocator';
@@ -205,8 +206,9 @@ function AppRoutes() {
         <Route path="/delivery-partner" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerPanel /></ProtectedRoute>} />
 
         {/* ── Registration (public) ── */}
-        <Route path="/seller-register"     element={<SellerRegister />} />
-        <Route path="/pharmacist-register" element={<PharmacistRegister />} />
+        <Route path="/seller-register"           element={<SellerRegister />} />
+        <Route path="/pharmacist-register"       element={<PharmacistRegister />} />
+        <Route path="/delivery-partner-register" element={<DeliveryPartnerRegister />} />
 
         {/* ── Super Admin (special protected) ── */}
         <Route path="/super-admin"       element={<SuperAdminRoute><SuperAdminPanel /></SuperAdminRoute>} />
