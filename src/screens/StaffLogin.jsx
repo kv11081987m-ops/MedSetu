@@ -4,16 +4,18 @@ import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 const ROLES = [
-  { id: 'admin',      label: 'Admin' },
-  { id: 'pharmacist', label: 'Pharmacist' },
-  { id: 'seller',     label: 'Seller' },
+  { id: 'admin',            label: 'Admin' },
+  { id: 'pharmacist',       label: 'Pharmacist' },
+  { id: 'seller',           label: 'Seller' },
+  { id: 'delivery_partner', label: 'Delivery Partner' },
 ];
 
 const REDIRECT_ROUTE = {
-  admin:       '/admin',
-  pharmacist:  '/pharmacist',
-  seller:      '/seller-dashboard',
-  super_admin: '/super-admin',
+  admin:            '/admin',
+  pharmacist:       '/pharmacist',
+  seller:           '/seller-dashboard',
+  delivery_partner: '/delivery-partner',
+  super_admin:      '/super-admin',
 };
 
 export default function StaffLogin() {
@@ -132,8 +134,8 @@ const s = {
   title:    { fontSize: '22px', fontWeight: '700', color: '#1A1A1A', margin: '0 0 4px' },
   subtitle: { fontSize: '13px', color: '#888888', margin: 0 },
 
-  roleRow:       { display: 'flex', gap: '10px' },
-  roleBtn:       { flex: 1, padding: '10px 0', borderRadius: '10px', border: '1.5px solid #E0E0E0', backgroundColor: '#FFFFFF', fontSize: '14px', fontWeight: '600', color: '#888888', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s ease' },
+  roleRow:       { display: 'flex', flexWrap: 'wrap', gap: '10px' },
+  roleBtn:       { flex: '1 1 calc(50% - 5px)', minWidth: '110px', padding: '10px 6px', borderRadius: '10px', border: '1.5px solid #E0E0E0', backgroundColor: '#FFFFFF', fontSize: '13px', fontWeight: '600', color: '#888888', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s ease' },
   roleBtnActive: { border: '1.5px solid #1A6B3C', color: '#1A6B3C', backgroundColor: '#F0FDF4' },
 
   registerBtn: {

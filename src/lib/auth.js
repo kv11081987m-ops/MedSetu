@@ -126,3 +126,20 @@ export const getCurrentSeller = async () => {
     return null;
   }
 };
+
+export const getCurrentStaff = async () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    if (user?.email) {
+      const { data } = await supabase
+        .from('staff')
+        .select('*')
+        .eq('email', user.email)
+        .maybeSingle();
+      if (data) return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};

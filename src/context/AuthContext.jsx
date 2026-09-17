@@ -486,14 +486,40 @@ export function AuthProvider({ children }) {
               window.location.href = '/staff-login';
               return;
             }
+          } else if (staffRole === 'delivery_partner') {
+            // Delivery partners live in the staff/staff_assignment two-table
+            // model (052_deliveryPartner.sql), not staff_whitelist — verify
+            // there's an active role_type='delivery_partner' assignment for
+            // this email instead. No magic-link fallback branch needed here
+            // (unlike the whitelist roles above) since this role only ever
+            // signs in via the same-browser Google OAuth redirect above,
+            // where pendingRole is always set.
+            const { data: staffRow } = await supabase
+              .from('staff').select('id').eq('email', emailUser.email).maybeSingle();
+            const { data: assignment } = staffRow
+              ? await supabase
+                  .from('staff_assignment').select('id')
+                  .eq('staff_id', staffRow.id).eq('role_type', 'delivery_partner').eq('is_active', true)
+                  .maybeSingle()
+              : { data: null };
+            if (!assignment) {
+              intentionalSignOut.current = true;
+              await supabase.auth.signOut();
+              localStorage.removeItem('staff_pending_role');
+              markResolved();
+              alert('❌ Aap active delivery partner nahi hain.\n\nSuperAdmin se sampark karein.');
+              window.location.href = '/staff-login';
+              return;
+            }
           }
 
           if (staffRole && staffRole !== 'customer') {
             const alreadyThisRole = localStorage.getItem('medsetu_role') === staffRole;
             const ROLE_OWN_ROUTES = {
-              seller:     ['/seller-dashboard', '/inventory', '/wholesalers', '/wholesaler-inventory', '/b2b-checkout'],
-              pharmacist: ['/pharmacist'],
-              admin:      ['/admin'],
+              seller:           ['/seller-dashboard', '/inventory', '/wholesalers', '/wholesaler-inventory', '/b2b-checkout'],
+              pharmacist:       ['/pharmacist'],
+              admin:            ['/admin'],
+              delivery_partner: ['/delivery-partner'],
             };
             const alreadyOnOwnRoute = (ROLE_OWN_ROUTES[staffRole] || []).includes(window.location.pathname);
             localStorage.setItem('medsetu_role', staffRole);
@@ -559,7 +585,7 @@ export function AuthProvider({ children }) {
             // (actual browser path) as a second, race-immune guard — see the
             // SuperAdmin branch above for why the path check was necessary.
             if (!alreadyThisRole && !alreadyOnOwnRoute) {
-              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', super_admin: '/super-admin' };
+              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', delivery_partner: '/delivery-partner', super_admin: '/super-admin' };
               window.location.href = routes[staffRole] || '/home';
             }
             return;
