@@ -465,6 +465,64 @@ function EditStoreModal({ seller, onSave, onClose }) {
   );
 }
 
+// ─── Add Staff Modal (Profile tab — Mera Staff) ────────────────
+function AddStaffModal({ onSave, onClose }) {
+  const [name,    setName]    = useState('');
+  const [email,   setEmail]   = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState('');
+
+  const handleSubmit = async () => {
+    setError('');
+    if (!name.trim()) { setError('Naam khaali nahi ho sakta'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError('Valid email daalo'); return; }
+
+    setSaving(true);
+    try {
+      await onSave({ name: name.trim(), email: email.trim().toLowerCase() });
+    } catch (err) {
+      setError(err?.message || 'Add nahi hua — dobara try karo');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={s.modalOverlay} onClick={saving ? undefined : onClose}>
+      <div style={s.modalSheet} onClick={(e) => e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <p style={s.modalTitle}>Naya Staff Jodo</p>
+        </div>
+
+        <div style={s.fieldWrap}>
+          <label style={s.label}>Naam *</label>
+          <input style={s.commRateInput} value={name} onChange={(e) => setName(e.target.value)} placeholder="Staff ka naam" disabled={saving} />
+        </div>
+
+        <div style={s.fieldWrap}>
+          <label style={s.label}>Email *</label>
+          <input style={s.commRateInput} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="staff@email.com" disabled={saving} />
+        </div>
+        <p style={{ fontSize: '11px', color: '#AAAAAA', margin: 0 }}>
+          Staff isi email se Google login karega — Staff Login screen se "Seller Staff" role select karke.
+        </p>
+
+        {error && <p style={{ fontSize: '12px', color: '#DC3545', margin: 0, fontWeight: '600' }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={{ ...s.acceptBtn, opacity: saving ? 0.7 : 1 }} onClick={handleSubmit} disabled={saving}>
+            <Check size={16} color="#FFFFFF" />
+            {saving ? 'Add Ho Raha Hai...' : 'Add Karo'}
+          </button>
+          <button style={s.declineBtn} onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function SellerDashboard() {
   const navigate = useNavigate();
@@ -525,6 +583,11 @@ export default function SellerDashboard() {
   const [reqMode,          setReqMode]          = useState('flat');
   const [reqRate,          setReqRate]          = useState('');
   const [reqSubmitting,    setReqSubmitting]    = useState(false);
+
+  // ── Mera Staff (056_sellerStaffSimple.sql) ────────────────
+  const [myStaff,          setMyStaff]          = useState([]);
+  const [loadingStaff,     setLoadingStaff]     = useState(false);
+  const [showAddStaff,     setShowAddStaff]     = useState(false);
 
   // ── Fetch helpers ──────────────────────────────────────────
   const fetchPendingOrders = async (sellerId) => {
@@ -627,6 +690,7 @@ export default function SellerDashboard() {
         fetchLowStock(seller.id),
         fetchMrpMode().then(setMrpMode),
         fetchReturnRequests(),
+        fetchMyStaff(seller.id),
       ]);
     } catch (err) {
       console.error('Seller fetch:', err);
@@ -636,6 +700,40 @@ export default function SellerDashboard() {
   };
 
   useEffect(() => { fetchSellerData(); }, []);
+
+  const fetchMyStaff = async (sellerId) => {
+    setLoadingStaff(true);
+    const { data, error } = await supabase
+      .from('staff_assignment')
+      .select('id, staff_id, is_active, started_at, staff:staff_id (name, staff_code, email)')
+      .eq('seller_id', sellerId)
+      .eq('role_type', 'seller_staff')
+      .eq('is_active', true)
+      .order('started_at', { ascending: false });
+    if (error) console.error('fetchMyStaff error:', error);
+    setMyStaff(data || []);
+    setLoadingStaff(false);
+  };
+
+  const handleAddStaff = async ({ name, email }) => {
+    const { data, error } = await supabase.rpc('add_seller_staff', { p_name: name, p_email: email });
+    if (error || !data?.success) {
+      throw new Error(data?.message || error?.message || 'Staff add nahi hua');
+    }
+    setShowAddStaff(false);
+    await fetchMyStaff(sellerData.id);
+    alert(`✅ Staff add ho gaya!\nStaff Code: ${data.staff_code}\n\n${name} ko batao Staff Login se "Seller Staff" role select karke login karein.`);
+  };
+
+  const handleRemoveStaff = async (assignment) => {
+    if (!window.confirm(`${assignment.staff?.name || 'Ye staff'} ko hatana hai?`)) return;
+    const { data, error } = await supabase.rpc('end_seller_staff', { p_staff_id: assignment.staff_id });
+    if (error || !data?.success) {
+      alert('Hatane mein dikkat: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    await fetchMyStaff(sellerData.id);
+  };
 
   // Own notifications — medsetu_user.id is this seller's resolved users.id,
   // set by AuthContext at SIGNED_IN (email upsert), same as PharmacistPanel.
@@ -1525,6 +1623,36 @@ export default function SellerDashboard() {
               </div>
             </div>
 
+            {/* ── Mera Staff ── */}
+            <div style={s.infoCard}>
+              <p style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A', margin: '14px 16px 4px' }}>Mera Staff</p>
+
+              {loadingStaff && <p style={{ fontSize: '12px', color: '#888', padding: '0 16px 12px' }}>Load ho raha hai...</p>}
+              {!loadingStaff && myStaff.length === 0 && (
+                <p style={{ fontSize: '12px', color: '#888', padding: '0 16px 12px' }}>Abhi koi staff nahi jode gaye</p>
+              )}
+              {myStaff.map((a) => (
+                <div key={a.id} style={s.infoRow}>
+                  <div>
+                    <p style={{ ...s.infoValue, margin: 0 }}>{a.staff?.name || a.staff?.email}</p>
+                    <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0', fontFamily: 'monospace' }}>{a.staff?.staff_code}</p>
+                  </div>
+                  <button
+                    style={{ background: 'none', border: '1.5px solid #DC3545', color: '#DC3545', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}
+                    onClick={() => handleRemoveStaff(a)}
+                  >
+                    Hatao
+                  </button>
+                </div>
+              ))}
+
+              <div style={{ padding: '12px 16px' }}>
+                <button style={{ ...s.editBtn, padding: '11px' }} onClick={() => setShowAddStaff(true)}>
+                  + Naya Staff Jodo
+                </button>
+              </div>
+            </div>
+
             <button style={s.editBtn} onClick={() => setShowEditStore(true)}>
               <Edit3 size={16} color="#1A6B3C" />
               Store Details Edit Karo
@@ -1633,6 +1761,13 @@ export default function SellerDashboard() {
             seller={sellerData}
             onSave={handleSaveStoreDetails}
             onClose={() => setShowEditStore(false)}
+          />
+        )}
+
+        {showAddStaff && (
+          <AddStaffModal
+            onSave={handleAddStaff}
+            onClose={() => setShowAddStaff(false)}
           />
         )}
       </div>

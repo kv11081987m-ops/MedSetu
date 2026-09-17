@@ -511,6 +511,22 @@ export function AuthProvider({ children }) {
               window.location.href = '/staff-login';
               return;
             }
+          } else if (staffRole === 'seller_staff') {
+            // Verified via my_seller_staff_context() (056_sellerStaffSimple.sql)
+            // rather than a direct table check, per spec — it's the same
+            // RPC SellerStaffPanel.jsx itself calls, so login-time
+            // verification and panel-time context resolution can never
+            // disagree about who counts as active staff.
+            const { data: ctx } = await supabase.rpc('my_seller_staff_context');
+            if (!ctx?.success) {
+              intentionalSignOut.current = true;
+              await supabase.auth.signOut();
+              localStorage.removeItem('staff_pending_role');
+              markResolved();
+              alert('❌ Aap active seller staff nahi hain.\n\nApne seller se sampark karein.');
+              window.location.href = '/staff-login';
+              return;
+            }
           }
 
           if (staffRole && staffRole !== 'customer') {
@@ -520,6 +536,7 @@ export function AuthProvider({ children }) {
               pharmacist:       ['/pharmacist'],
               admin:            ['/admin'],
               delivery_partner: ['/delivery-partner'],
+              seller_staff:     ['/seller-staff-panel'],
             };
             const alreadyOnOwnRoute = (ROLE_OWN_ROUTES[staffRole] || []).includes(window.location.pathname);
             localStorage.setItem('medsetu_role', staffRole);
@@ -585,7 +602,7 @@ export function AuthProvider({ children }) {
             // (actual browser path) as a second, race-immune guard — see the
             // SuperAdmin branch above for why the path check was necessary.
             if (!alreadyThisRole && !alreadyOnOwnRoute) {
-              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', delivery_partner: '/delivery-partner', super_admin: '/super-admin' };
+              const routes = { admin: '/admin', pharmacist: '/pharmacist', seller: '/seller-dashboard', delivery_partner: '/delivery-partner', seller_staff: '/seller-staff-panel', super_admin: '/super-admin' };
               window.location.href = routes[staffRole] || '/home';
             }
             return;

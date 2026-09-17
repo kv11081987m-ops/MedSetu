@@ -32,6 +32,7 @@ import WholesalerLocator   from './screens/WholesalerLocator';
 import WholesalerInventory from './screens/WholesalerInventory';
 import B2BCheckout        from './screens/B2BCheckout';
 import DeliveryPartnerPanel from './screens/DeliveryPartnerPanel';
+import SellerStaffPanel     from './screens/SellerStaffPanel';
 
 // Fire connection test once on module load (dev only)
 if (import.meta.env.DEV) testSupabaseConnection();
@@ -65,6 +66,7 @@ function roleHome(role) {
   if (role === 'admin')            return '/admin';
   if (role === 'pharmacist')       return '/pharmacist';
   if (role === 'delivery_partner') return '/delivery-partner';
+  if (role === 'seller_staff')     return '/seller-staff-panel';
   if (role === 'super_admin')      return '/super-admin';
   return '/home';
 }
@@ -204,6 +206,7 @@ function AppRoutes() {
         <Route path="/pharmacist"       element={<ProtectedRoute allowedRoles={['pharmacist']}><PharmacistPanel /></ProtectedRoute>} />
         <Route path="/admin"            element={<ProtectedRoute allowedRoles={['admin']}><AdminPanel /></ProtectedRoute>} />
         <Route path="/delivery-partner" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerPanel /></ProtectedRoute>} />
+        <Route path="/seller-staff-panel" element={<ProtectedRoute allowedRoles={['seller_staff']}><SellerStaffPanel /></ProtectedRoute>} />
 
         {/* ── Registration (public) ── */}
         <Route path="/seller-register"           element={<SellerRegister />} />

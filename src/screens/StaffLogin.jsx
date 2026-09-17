@@ -8,6 +8,7 @@ const ROLES = [
   { id: 'pharmacist',       label: 'Pharmacist' },
   { id: 'seller',           label: 'Seller' },
   { id: 'delivery_partner', label: 'Delivery Partner' },
+  { id: 'seller_staff',     label: 'Seller Staff' },
 ];
 
 const REDIRECT_ROUTE = {
@@ -15,6 +16,7 @@ const REDIRECT_ROUTE = {
   pharmacist:       '/pharmacist',
   seller:           '/seller-dashboard',
   delivery_partner: '/delivery-partner',
+  seller_staff:     '/seller-staff-panel',
   super_admin:      '/super-admin',
 };
 
