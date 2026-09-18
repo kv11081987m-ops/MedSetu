@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Phone, IndianRupee, CheckCircle,
-  ClipboardList, Wallet, LogOut, Package, Clock, Store,
+  ClipboardList, Wallet, LogOut, Package, Clock, Store, Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getCurrentStaff } from '../lib/auth';
+import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 
 const STATUS_LABEL = { pending: 'Pending', settled: 'Settled' };
 const STATUS_COLOR = { pending: '#E65100', settled: '#1A6B3C' };
@@ -17,6 +18,14 @@ const STATUS_BG    = { pending: '#FFF3E0', settled: '#E8F5EE' };
 const ORDER_STATUS_LABEL = { confirmed: 'Confirm hua hai', preparing: 'Pack ho raha hai' };
 const ORDER_STATUS_COLOR = { confirmed: '#0C447C', preparing: '#E65100' };
 const ORDER_STATUS_BG    = { confirmed: '#E7F0FA', preparing: '#FFF3E0' };
+
+// Notification-sheet accent colours — same map shape as CustomerHome.jsx's
+// (local/unexported there too, not shared via lib/notifications.js).
+// delivery_upcoming is the only type this panel actually receives today
+// (058_deliveryEarlyVisibility.sql's broadcast); everything else falls
+// back to the same default blue CustomerHome.jsx uses.
+const NOTIF_COLORS = { delivery_upcoming: '#F97316' };
+const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 
 export default function DeliveryPartnerPanel() {
   const navigate = useNavigate();
@@ -29,6 +38,16 @@ export default function DeliveryPartnerPanel() {
   const [orders,     setOrders]     = useState([]);
   const [earnings,   setEarnings]   = useState([]);
   const [upcoming,   setUpcoming]   = useState([]);
+
+  // notifications.user_id references users(id), not staff(id) — staff has
+  // no users row of its own except via matching email (verified against
+  // 001_schema.sql, same email-match precedent as 058's broadcast loop).
+  // Resolved once on mount, then used for both the fetch and the realtime
+  // filter below.
+  const [notifUserId, setNotifUserId] = useState(null);
+  const [showNotif,   setShowNotif]   = useState(false);
+  const [notifs,      setNotifs]      = useState([]);
+  const unreadCount = notifs.filter((n) => !n.is_read).length;
 
   // Per-order UI state — which cards have an OTP already sent (input
   // shown) and what's currently typed into each one.
@@ -100,10 +119,46 @@ export default function DeliveryPartnerPanel() {
       const s = await getCurrentStaff();
       if (!s) { setLoading(false); return; }
       setStaff(s);
-      await Promise.all([fetchAvailableOrders(), fetchEarnings(s.id), fetchUpcomingOrders()]);
+
+      // users.id resolve — same email-match AuthContext.jsx already uses
+      // to upsert/read this same row on login, so it's known to work under
+      // RLS for a staff session reading their own row.
+      let resolvedUserId = null;
+      if (s.email) {
+        try {
+          const { data: userRow } = await supabase
+            .from('users').select('id').eq('email', s.email).maybeSingle();
+          resolvedUserId = userRow?.id || null;
+        } catch {}
+      }
+      setNotifUserId(resolvedUserId);
+
+      const tasks = [fetchAvailableOrders(), fetchEarnings(s.id), fetchUpcomingOrders()];
+      if (resolvedUserId) {
+        tasks.push(fetchUserNotifications(resolvedUserId).then(({ data }) => setNotifs(data || [])));
+      }
+      await Promise.all(tasks);
       setLoading(false);
     })();
   }, []);
+
+  // Realtime — new notification INSERT updates the bell instantly. Same
+  // pattern as CustomerHome.jsx's bell (INSERT-only, prepend payload.new),
+  // just keyed off the resolved users.id instead of localStorage.
+  useEffect(() => {
+    if (!notifUserId) return;
+    const channel = supabase
+      .channel(`notifs-${notifUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${notifUserId}` },
+        (payload) => {
+          setNotifs((prev) => prev.some((n) => n.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [notifUserId]);
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayEarning = earnings
@@ -195,9 +250,17 @@ export default function DeliveryPartnerPanel() {
             <p style={s.greet}>Namaste,</p>
             <p style={s.staffName}>{staff.name || staff.email}</p>
           </div>
-          <div style={s.earningBadge}>
-            <p style={s.earningBadgeVal}>₹{todayEarning.toLocaleString('en-IN')}</p>
-            <p style={s.earningBadgeLabel}>Aaj Ki Kamai</p>
+          <div style={s.headerRight}>
+            <button style={s.iconBtn} aria-label="Notifications" onClick={() => setShowNotif(true)}>
+              <div style={{ position: 'relative' }}>
+                <Bell size={20} color="#1A1A1A" />
+                {unreadCount > 0 && <span style={s.notifDot} />}
+              </div>
+            </button>
+            <div style={s.earningBadge}>
+              <p style={s.earningBadgeVal}>₹{todayEarning.toLocaleString('en-IN')}</p>
+              <p style={s.earningBadgeLabel}>Aaj Ki Kamai</p>
+            </div>
           </div>
         </div>
 
@@ -354,6 +417,63 @@ export default function DeliveryPartnerPanel() {
           </button>
         </nav>
 
+        {/* ── Notification Sheet ── */}
+        {showNotif && (
+          <div style={s.notifOverlay} onClick={() => setShowNotif(false)}>
+            <div style={s.notifSheet} onClick={(e) => e.stopPropagation()}>
+              <div style={s.notifHandle} />
+              <div style={s.notifHeader}>
+                <span style={s.notifTitle}>Notifications</span>
+                {unreadCount > 0 && (
+                  <button
+                    style={s.markAllBtn}
+                    onClick={() => {
+                      setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+                      markAllNotificationsRead(notifUserId);
+                    }}
+                  >
+                    Sab Read Karo
+                  </button>
+                )}
+              </div>
+              {notifs.length === 0 ? (
+                <div style={s.notifEmpty}>
+                  <Bell size={36} color="#CCCCCC" />
+                  <p style={{ fontSize: '14px', color: '#AAAAAA', margin: 0 }}>Koi notification nahi</p>
+                </div>
+              ) : (
+                <div style={s.notifList}>
+                  {notifs.map((n) => (
+                    <div
+                      key={n.id}
+                      style={{ ...s.notifRow, backgroundColor: n.is_read ? '#FFFFFF' : '#F0FBF4' }}
+                      onClick={() => {
+                        setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
+                        if (!n.is_read) markNotificationRead(n.id);
+                        setShowNotif(false);
+                        // Delivery-partner context, not customer — no order-tracking
+                        // route to send them to. Switch the relevant tab instead.
+                        if (n.type === 'delivery_upcoming') setActiveTab('upcoming');
+                        else if (n.type === 'order_placed') setActiveTab('available');
+                      }}
+                    >
+                      <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: getNotifColor(n.type) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: getNotifColor(n.type) }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ ...s.notifRowTitle, fontWeight: n.is_read ? '500' : '700' }}>{n.title}</p>
+                        <p style={s.notifRowSub}>{n.body}</p>
+                        <p style={s.notifRowTime}>{formatNotifTime(n.created_at)}</p>
+                      </div>
+                      {!n.is_read && <span style={s.unreadDot} />}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -369,9 +489,28 @@ const s = {
   header:            { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 14px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #F0F0F0', position: 'sticky', top: 0, zIndex: 10 },
   greet:             { fontSize: '12px', color: '#888888', margin: 0 },
   staffName:         { fontSize: '17px', fontWeight: '800', color: '#1A1A1A', margin: '1px 0' },
+  headerRight:       { display: 'flex', alignItems: 'center', gap: '10px' },
+  iconBtn:           { background: 'none', border: 'none', padding: '4px', cursor: 'pointer', borderRadius: '8px', display: 'flex', alignItems: 'center' },
   earningBadge:      { textAlign: 'right' },
   earningBadgeVal:   { fontSize: '18px', fontWeight: '800', color: '#1A6B3C', margin: 0 },
   earningBadgeLabel: { fontSize: '11px', color: '#888888', margin: 0 },
+
+  notifDot: { position: 'absolute', top: '-2px', right: '-2px', width: '8px', height: '8px', backgroundColor: '#EF4444', borderRadius: '50%', border: '1.5px solid #FFFFFF' },
+
+  // Notification sheet — same layout/pattern as CustomerHome.jsx's
+  notifOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 },
+  notifSheet:   { width: '100%', maxWidth: '480px', backgroundColor: '#FFFFFF', borderRadius: '20px 20px 0 0', padding: '12px 0 40px', maxHeight: '75vh', display: 'flex', flexDirection: 'column' },
+  notifHandle:  { width: '40px', height: '4px', backgroundColor: '#E0E0E0', borderRadius: '2px', margin: '0 auto 12px' },
+  notifHeader:  { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px 12px', borderBottom: '1px solid #F0F0F0' },
+  notifTitle:   { fontSize: '17px', fontWeight: '700', color: '#1A1A1A' },
+  markAllBtn:   { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', padding: 0 },
+  notifList:    { overflowY: 'auto', flex: 1 },
+  notifEmpty:   { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px 24px' },
+  notifRow:     { display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 20px', borderBottom: '1px solid #F5F5F5', cursor: 'pointer' },
+  notifRowTitle:{ fontSize: '14px', color: '#1A1A1A', margin: '0 0 3px' },
+  notifRowSub:  { fontSize: '12px', color: '#666666', margin: '0 0 4px', lineHeight: '1.4' },
+  notifRowTime: { fontSize: '11px', color: '#AAAAAA', margin: 0 },
+  unreadDot:    { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#1A6B3C', flexShrink: 0, marginTop: '6px' },
 
   body: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px' },
 
