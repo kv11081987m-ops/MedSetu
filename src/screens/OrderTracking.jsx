@@ -313,6 +313,19 @@ export default function OrderTracking() {
             </div>
           )}
 
+          {/* Delivery OTP — coupon-code style, shown only once the order is
+              actually out for delivery and generate_delivery_otp() has set
+              one. Pure display: the realtime subscription above already
+              re-fetches the full order on any UPDATE, so this just renders
+              from order.delivery_otp — no extra fetch/logic needed. */}
+          {order?.status === 'out_for_delivery' && order?.delivery_otp && (
+            <div style={s.otpCard}>
+              <p style={s.otpLabel}>🔐 Delivery OTP</p>
+              <p style={s.otpValue}>{order.delivery_otp}</p>
+              <p style={s.otpHint}>Delivery partner ko yeh OTP batayein delivery confirm karne ke liye</p>
+            </div>
+          )}
+
           {/* Stepper */}
           <div style={s.card}>
             {steps.map((step, i) => {
@@ -568,6 +581,37 @@ const s = {
     height: '100%',
     backgroundColor: '#E0A818',
     borderRadius: '3px',
+  },
+
+  // Delivery OTP — coupon-code style highlighted box
+  otpCard: {
+    backgroundColor: '#FFF9E6',
+    border: '2px dashed #E0A818',
+    borderRadius: '14px',
+    padding: '16px',
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  otpLabel: {
+    fontSize: '13px',
+    fontWeight: '700',
+    color: '#8A6D00',
+    margin: 0,
+  },
+  otpValue: {
+    fontSize: '34px',
+    fontWeight: '800',
+    color: '#1A1A1A',
+    letterSpacing: '10px',
+    fontFamily: 'monospace',
+    margin: '6px 0',
+  },
+  otpHint: {
+    fontSize: '12px',
+    color: '#888888',
+    margin: 0,
   },
 
   // Card
