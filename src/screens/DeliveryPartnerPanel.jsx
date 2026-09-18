@@ -107,7 +107,7 @@ export default function DeliveryPartnerPanel() {
     // fetchCallQueue skips a bare sellers(...) embed).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, status, sellers!seller_id(store_name, address), staff!accepted_by_staff_id(name)')
+      .select('id, order_number, status, delivered_by_staff_id, sellers!seller_id(store_name, address), staff!accepted_by_staff_id(name)')
       .in('status', ['confirmed', 'preparing'])
       .order('updated_at', { ascending: false });
     if (error) { console.error('fetchUpcomingOrders error:', error); return; }
@@ -160,6 +160,26 @@ export default function DeliveryPartnerPanel() {
     return () => { supabase.removeChannel(channel); };
   }, [notifUserId]);
 
+  // Realtime — auto-move a claimed order between sections as the seller
+  // advances it (confirmed -> preparing -> out_for_delivery), without a
+  // manual refresh. Scoped to only THIS partner's claimed orders
+  // (delivered_by_staff_id=eq.<own staff id>) — same postgres_changes
+  // pattern as OrderTracking.jsx, re-running both fetches (cheap, and
+  // simpler than patching a single row's status/embeds locally) on any
+  // UPDATE to one of them.
+  useEffect(() => {
+    if (!staff?.id) return;
+    const channel = supabase
+      .channel(`dp-orders-${staff.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `delivered_by_staff_id=eq.${staff.id}` },
+        () => { fetchUpcomingOrders(); fetchAvailableOrders(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [staff?.id]);
+
   const today = new Date(); today.setHours(0, 0, 0, 0);
   // Client-filtered subset of the already-fetched earnings array — no
   // separate DB call. Powers both the header badge amount and Section C's
@@ -170,21 +190,21 @@ export default function DeliveryPartnerPanel() {
     .filter((e) => e.status === 'pending')
     .reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
-  const handleAccept = async (order) => {
+  const handleClaim = async (order) => {
     setBusyId(order.id);
     const { data, error } = await supabase.rpc('claim_delivery_order', { p_order_id: order.id });
     setBusyId(null);
 
     if (error || !data?.success) {
-      alert(data?.message || error?.message || 'Order accept nahi hua');
-      // Someone else may have just claimed it (or it's no longer
-      // out_for_delivery) — refetch so the pool/card state matches the
-      // server exactly, same recovery path on success or failure.
-      await fetchAvailableOrders();
-      return;
+      alert(data?.message || error?.message || 'Order claim nahi hua');
     }
 
-    await fetchAvailableOrders();
+    // Refetch both, on success or failure — claimable from confirmed/
+    // preparing/out_for_delivery now (062_earlyClaimFlow.sql), so a claim
+    // (or someone else beating us to it) can move the order between
+    // Section A (upcoming) and Section B (available); same recovery path
+    // either way keeps both lists exactly matching the server.
+    await Promise.all([fetchUpcomingOrders(), fetchAvailableOrders()]);
   };
 
   const handlePickup = async (order) => {
@@ -307,8 +327,12 @@ export default function DeliveryPartnerPanel() {
                   )}
                   <p style={s.pendStatusNote}>Status: Packing Complete — Pickup Ready</p>
 
+                  {/* Fallback safety net — normally an order is already
+                      claimed by the time it reaches out_for_delivery (via
+                      Section A's early-claim below); this only shows if
+                      nobody claimed it earlier. */}
                   {!claimedByMe && (
-                    <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleAccept(order)}>
+                    <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleClaim(order)}>
                       <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Accept Karo'}
                     </button>
                   )}
@@ -349,28 +373,42 @@ export default function DeliveryPartnerPanel() {
 
             {upcoming.length === 0 && <p style={s.emptyText}>Abhi koi upcoming order nahi hai</p>}
 
-            {upcoming.map((order) => (
-              <div key={order.id} style={s.upcomingCard}>
-                <div style={s.pendTop}>
-                  <span style={s.pendId}>#{order.order_number}</span>
-                  <span style={{ ...s.statusBadge, color: ORDER_STATUS_COLOR[order.status] || '#888888', backgroundColor: ORDER_STATUS_BG[order.status] || '#F5F5F5' }}>
-                    {ORDER_STATUS_LABEL[order.status] || order.status}
-                  </span>
-                </div>
-
-                <div style={s.pendInfoRow}>
-                  <MapPin size={13} color="#888888" />
-                  <span style={s.pendInfoText}>{order.sellers?.store_name || 'Seller'}{order.sellers?.address ? ` — ${order.sellers.address}` : ''}</span>
-                </div>
-                {order.staff?.name && (
-                  <div style={s.pendInfoRow}>
-                    <Package size={13} color="#888888" />
-                    <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
+            {upcoming.map((order) => {
+              const claimedByMe = staff && order.delivered_by_staff_id === staff.id;
+              const busy = busyId === order.id;
+              return (
+                <div key={order.id} style={s.upcomingCard}>
+                  <div style={s.pendTop}>
+                    <span style={s.pendId}>#{order.order_number}</span>
+                    <span style={{ ...s.statusBadge, color: ORDER_STATUS_COLOR[order.status] || '#888888', backgroundColor: ORDER_STATUS_BG[order.status] || '#F5F5F5' }}>
+                      {ORDER_STATUS_LABEL[order.status] || order.status}
+                    </span>
                   </div>
-                )}
-                <p style={s.pendStatusNote}>Jald Ready Hoga</p>
-              </div>
-            ))}
+
+                  <div style={s.pendInfoRow}>
+                    <MapPin size={13} color="#888888" />
+                    <span style={s.pendInfoText}>{order.sellers?.store_name || 'Seller'}{order.sellers?.address ? ` — ${order.sellers.address}` : ''}</span>
+                  </div>
+                  {order.staff?.name && (
+                    <div style={s.pendInfoRow}>
+                      <Package size={13} color="#888888" />
+                      <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
+                    </div>
+                  )}
+
+                  {claimedByMe ? (
+                    <p style={s.acceptedNote}>✅ Aapne Claim Kiya — Rasta Mein Nikal Sakte Hain</p>
+                  ) : (
+                    <>
+                      <p style={s.pendStatusNote}>Jald Ready Hoga</p>
+                      <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleClaim(order)}>
+                        <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Claim Karo'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
 
             {/* SECTION C — Aaj Ki History (today's completed deliveries,
                 client-filtered from the earnings array already fetched for
