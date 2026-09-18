@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Phone, IndianRupee, CheckCircle,
-  ClipboardList, Wallet, LogOut, Package,
+  ClipboardList, Wallet, LogOut, Package, Clock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -11,6 +11,12 @@ import { getCurrentStaff } from '../lib/auth';
 const STATUS_LABEL = { pending: 'Pending', settled: 'Settled' };
 const STATUS_COLOR = { pending: '#E65100', settled: '#1A6B3C' };
 const STATUS_BG    = { pending: '#FFF3E0', settled: '#E8F5EE' };
+
+// Upcoming-tab order status — read-only preview, not the delivery_earnings
+// status above (different table, different vocabulary).
+const ORDER_STATUS_LABEL = { confirmed: 'Confirm hua hai', preparing: 'Pack ho raha hai' };
+const ORDER_STATUS_COLOR = { confirmed: '#0C447C', preparing: '#E65100' };
+const ORDER_STATUS_BG    = { confirmed: '#E7F0FA', preparing: '#FFF3E0' };
 
 export default function DeliveryPartnerPanel() {
   const navigate = useNavigate();
@@ -22,6 +28,7 @@ export default function DeliveryPartnerPanel() {
 
   const [orders,     setOrders]     = useState([]);
   const [earnings,   setEarnings]   = useState([]);
+  const [upcoming,   setUpcoming]   = useState([]);
 
   // Per-order UI state — which cards have an OTP already sent (input
   // shown) and what's currently typed into each one.
@@ -61,12 +68,32 @@ export default function DeliveryPartnerPanel() {
     setEarnings(data || []);
   };
 
+  const fetchUpcomingOrders = async () => {
+    // Read-only preview pool — confirmed/preparing orders, scoped to
+    // delivery_enabled pincodes entirely by RLS (the
+    // orders_select_delivery_partner_preview policy,
+    // 058_deliveryEarlyVisibility.sql), same as fetchAvailableOrders above
+    // adds no pincode filter of its own. sellers!seller_id / staff!
+    // accepted_by_staff_id — orders has more than one FK into both tables
+    // (seller_id + buyer_id; delivered_by_staff_id + accepted_by_staff_id),
+    // so the embed must name which FK to follow or PostgREST returns an
+    // ambiguous-relationship error (same reason PharmacistPanel.jsx's
+    // fetchCallQueue skips a bare sellers(...) embed).
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, order_number, status, sellers!seller_id(store_name, address), staff!accepted_by_staff_id(name)')
+      .in('status', ['confirmed', 'preparing'])
+      .order('updated_at', { ascending: false });
+    if (error) { console.error('fetchUpcomingOrders error:', error); return; }
+    setUpcoming(data || []);
+  };
+
   useEffect(() => {
     (async () => {
       const s = await getCurrentStaff();
       if (!s) { setLoading(false); return; }
       setStaff(s);
-      await Promise.all([fetchAvailableOrders(), fetchEarnings(s.id)]);
+      await Promise.all([fetchAvailableOrders(), fetchEarnings(s.id), fetchUpcomingOrders()]);
       setLoading(false);
     })();
   }, []);
@@ -207,6 +234,34 @@ export default function DeliveryPartnerPanel() {
             })}
           </>}
 
+          {activeTab === 'upcoming' && <>
+            <p style={s.tabTitle}>Upcoming Orders</p>
+
+            {upcoming.length === 0 && <p style={s.emptyText}>Abhi koi upcoming order nahi hai</p>}
+
+            {upcoming.map((order) => (
+              <div key={order.id} style={s.upcomingCard}>
+                <div style={s.pendTop}>
+                  <span style={s.pendId}>#{order.order_number}</span>
+                  <span style={{ ...s.statusBadge, color: ORDER_STATUS_COLOR[order.status] || '#888888', backgroundColor: ORDER_STATUS_BG[order.status] || '#F5F5F5' }}>
+                    {ORDER_STATUS_LABEL[order.status] || order.status}
+                  </span>
+                </div>
+
+                <div style={s.pendInfoRow}>
+                  <MapPin size={13} color="#888888" />
+                  <span style={s.pendInfoText}>{order.sellers?.store_name || 'Seller'}{order.sellers?.address ? ` — ${order.sellers.address}` : ''}</span>
+                </div>
+                {order.staff?.name && (
+                  <div style={s.pendInfoRow}>
+                    <Package size={13} color="#888888" />
+                    <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </>}
+
           {activeTab === 'earnings' && <>
             <p style={s.tabTitle}>Meri Kamai</p>
 
@@ -239,6 +294,10 @@ export default function DeliveryPartnerPanel() {
           <button style={s.navTab} onClick={() => setActiveTab('available')}>
             <ClipboardList size={22} color={activeTab === 'available' ? '#1A6B3C' : '#AAAAAA'} />
             <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'available' ? '#1A6B3C' : '#AAAAAA' }}>Available Orders</span>
+          </button>
+          <button style={s.navTab} onClick={() => setActiveTab('upcoming')}>
+            <Clock size={22} color={activeTab === 'upcoming' ? '#1A6B3C' : '#AAAAAA'} />
+            <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'upcoming' ? '#1A6B3C' : '#AAAAAA' }}>Upcoming</span>
           </button>
           <button style={s.navTab} onClick={() => setActiveTab('earnings')}>
             <Wallet size={22} color={activeTab === 'earnings' ? '#1A6B3C' : '#AAAAAA'} />
@@ -275,6 +334,7 @@ const s = {
   emptyText: { fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '32px 16px' },
 
   pendCard:     { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #7C3AED', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
+  upcomingCard: { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #0C447C', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
   pendTop:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   pendId:       { fontSize: '13px', fontWeight: '800', color: '#1A6B3C', fontFamily: 'monospace' },
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C' },
