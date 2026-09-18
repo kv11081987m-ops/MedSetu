@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Phone, IndianRupee, CheckCircle,
-  ClipboardList, Wallet, LogOut, Package, Clock,
+  ClipboardList, Wallet, LogOut, Package, Clock, Store,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -39,12 +39,19 @@ export default function DeliveryPartnerPanel() {
   const fetchAvailableOrders = async () => {
     // delivery_pincode / delivery_enabled scoping is enforced server-side
     // by the orders SELECT RLS policy (053_deliveryPartnerOrdersRLS.sql) —
-    // this query only adds the status/unclaimed filter on top of that.
+    // this query only adds the status filter on top of that. No client-side
+    // delivered_by_staff_id filter: 053's RLS already covers both the
+    // unclaimed pool (delivered_by_staff_id IS NULL) AND orders THIS
+    // partner just claimed (delivered_by_staff_id = self) — filtering
+    // delivered_by_staff_id IS NULL here would hide a just-claimed order
+    // right when it needs to show the "Pickup Karo" step. sellers!seller_id
+    // / staff!accepted_by_staff_id — orders has more than one FK into both
+    // tables, so the embed must name which FK to follow (same reason as
+    // fetchUpcomingOrders below).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp')
+      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp, delivered_by_staff_id, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
       .eq('status', 'out_for_delivery')
-      .is('delivered_by_staff_id', null)
       .order('assigned_at', { ascending: true });
     if (error) { console.error('fetchAvailableOrders error:', error); return; }
     setOrders(data || []);
@@ -105,6 +112,23 @@ export default function DeliveryPartnerPanel() {
   const totalPending = earnings
     .filter((e) => e.status === 'pending')
     .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+  const handleAccept = async (order) => {
+    setBusyId(order.id);
+    const { data, error } = await supabase.rpc('claim_delivery_order', { p_order_id: order.id });
+    setBusyId(null);
+
+    if (error || !data?.success) {
+      alert(data?.message || error?.message || 'Order accept nahi hua');
+      // Someone else may have just claimed it (or it's no longer
+      // out_for_delivery) — refetch so the pool/card state matches the
+      // server exactly, same recovery path on success or failure.
+      await fetchAvailableOrders();
+      return;
+    }
+
+    await fetchAvailableOrders();
+  };
 
   const handlePickup = async (order) => {
     setBusyId(order.id);
@@ -185,6 +209,7 @@ export default function DeliveryPartnerPanel() {
             {orders.length === 0 && <p style={s.emptyText}>Abhi koi order available nahi hai</p>}
 
             {orders.map((order) => {
+              const claimedByMe = staff && order.delivered_by_staff_id === staff.id;
               const otpStage = otpSentIds.has(order.id);
               const busy = busyId === order.id;
               return (
@@ -204,14 +229,34 @@ export default function DeliveryPartnerPanel() {
                       <span style={s.pendInfoText}>{order.customer_phone}</span>
                     </div>
                   )}
+                  <div style={s.pendInfoRow}>
+                    <Store size={13} color="#888888" />
+                    <span style={s.pendInfoText}>Firm: {order.sellers?.store_name || '—'}</span>
+                  </div>
+                  {order.staff?.name && (
+                    <div style={s.pendInfoRow}>
+                      <Package size={13} color="#888888" />
+                      <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
+                    </div>
+                  )}
+                  <p style={s.pendStatusNote}>Status: Packing Complete — Pickup Ready</p>
 
-                  {!otpStage && (
-                    <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handlePickup(order)}>
-                      <Package size={15} color="#FFFFFF" /> {busy ? '...' : 'Pickup Karo'}
+                  {!claimedByMe && (
+                    <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleAccept(order)}>
+                      <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Accept Karo'}
                     </button>
                   )}
 
-                  {otpStage && (
+                  {claimedByMe && !otpStage && (
+                    <>
+                      <p style={s.acceptedNote}>✅ Accepted — Ab Pickup Karo</p>
+                      <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handlePickup(order)}>
+                        <Package size={15} color="#FFFFFF" /> {busy ? '...' : 'Pickup Karo'}
+                      </button>
+                    </>
+                  )}
+
+                  {claimedByMe && otpStage && (
                     <>
                       <p style={s.otpHint}>OTP bhej diya, customer ko batao ki delivery partner ko OTP bataye</p>
                       <input
@@ -340,6 +385,8 @@ const s = {
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C' },
   pendInfoRow:  { display: 'flex', alignItems: 'center', gap: '6px' },
   pendInfoText: { fontSize: '13px', color: '#444444' },
+  pendStatusNote: { fontSize: '12px', color: '#0C447C', fontWeight: '600', margin: 0 },
+  acceptedNote:   { fontSize: '12px', color: '#1A6B3C', fontWeight: '700', margin: 0 },
 
   acceptBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 
