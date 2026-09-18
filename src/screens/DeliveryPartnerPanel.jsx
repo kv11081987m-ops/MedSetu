@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Phone, IndianRupee, CheckCircle,
-  ClipboardList, Wallet, LogOut, Package, Clock, Store, Bell,
+  ClipboardList, Wallet, LogOut, Package, Store, Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -33,7 +33,7 @@ export default function DeliveryPartnerPanel() {
 
   const [staff,      setStaff]      = useState(null);
   const [loading,    setLoading]    = useState(true);
-  const [activeTab,  setActiveTab]  = useState('available');
+  const [activeTab,  setActiveTab]  = useState('orders');
 
   const [orders,     setOrders]     = useState([]);
   const [earnings,   setEarnings]   = useState([]);
@@ -161,9 +161,11 @@ export default function DeliveryPartnerPanel() {
   }, [notifUserId]);
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayEarning = earnings
-    .filter((e) => new Date(e.created_at) >= today)
-    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  // Client-filtered subset of the already-fetched earnings array — no
+  // separate DB call. Powers both the header badge amount and Section C's
+  // "Aaj Ki History" list below (same today-cutoff, so they always agree).
+  const todayEarnings = earnings.filter((e) => new Date(e.created_at) >= today);
+  const todayEarning = todayEarnings.reduce((sum, e) => sum + Number(e.amount || 0), 0);
   const totalPending = earnings
     .filter((e) => e.status === 'pending')
     .reduce((sum, e) => sum + Number(e.amount || 0), 0);
@@ -266,8 +268,9 @@ export default function DeliveryPartnerPanel() {
 
         {/* ── Body ── */}
         <div style={s.body}>
-          {activeTab === 'available' && <>
-            <p style={s.tabTitle}>Available Orders</p>
+          {activeTab === 'orders' && <>
+            {/* SECTION B — Pickup Ke Liye Ready (actionable, shown first) */}
+            <p style={s.tabTitle}>Pickup Ke Liye Ready</p>
 
             {orders.length === 0 && <p style={s.emptyText}>Abhi koi order available nahi hai</p>}
 
@@ -340,10 +343,9 @@ export default function DeliveryPartnerPanel() {
                 </div>
               );
             })}
-          </>}
 
-          {activeTab === 'upcoming' && <>
-            <p style={s.tabTitle}>Upcoming Orders</p>
+            {/* SECTION A — Aa Rahe Hain (read-only preview, confirmed/preparing) */}
+            <p style={s.sectionHeading}>Aa Rahe Hain</p>
 
             {upcoming.length === 0 && <p style={s.emptyText}>Abhi koi upcoming order nahi hai</p>}
 
@@ -366,6 +368,24 @@ export default function DeliveryPartnerPanel() {
                     <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
                   </div>
                 )}
+                <p style={s.pendStatusNote}>Jald Ready Hoga</p>
+              </div>
+            ))}
+
+            {/* SECTION C — Aaj Ki History (today's completed deliveries,
+                client-filtered from the earnings array already fetched for
+                the "Meri Kamai" tab — no separate DB call). */}
+            <p style={s.sectionHeading}>Aaj Ki History</p>
+
+            {todayEarnings.length === 0 && <p style={s.emptyText}>Aaj abhi tak koi delivery nahi hui</p>}
+
+            {todayEarnings.map((e) => (
+              <div key={e.id} style={s.earnRow}>
+                <div>
+                  <p style={s.earnOrderNo}>#{e.orders?.order_number || e.order_id}</p>
+                  <p style={s.earnDate}>{new Date(e.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p>
+                </div>
+                <span style={s.earnAmount}>₹{Number(e.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
               </div>
             ))}
           </>}
@@ -399,13 +419,9 @@ export default function DeliveryPartnerPanel() {
 
         {/* ── Bottom Nav ── */}
         <nav style={s.bottomNav}>
-          <button style={s.navTab} onClick={() => setActiveTab('available')}>
-            <ClipboardList size={22} color={activeTab === 'available' ? '#1A6B3C' : '#AAAAAA'} />
-            <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'available' ? '#1A6B3C' : '#AAAAAA' }}>Available Orders</span>
-          </button>
-          <button style={s.navTab} onClick={() => setActiveTab('upcoming')}>
-            <Clock size={22} color={activeTab === 'upcoming' ? '#1A6B3C' : '#AAAAAA'} />
-            <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'upcoming' ? '#1A6B3C' : '#AAAAAA' }}>Upcoming</span>
+          <button style={s.navTab} onClick={() => setActiveTab('orders')}>
+            <ClipboardList size={22} color={activeTab === 'orders' ? '#1A6B3C' : '#AAAAAA'} />
+            <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'orders' ? '#1A6B3C' : '#AAAAAA' }}>Orders</span>
           </button>
           <button style={s.navTab} onClick={() => setActiveTab('earnings')}>
             <Wallet size={22} color={activeTab === 'earnings' ? '#1A6B3C' : '#AAAAAA'} />
@@ -450,11 +466,10 @@ export default function DeliveryPartnerPanel() {
                       onClick={() => {
                         setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
                         if (!n.is_read) markNotificationRead(n.id);
+                        // Single-page layout now (no more tab-switch) — every
+                        // section this notification could point to is already
+                        // on screen, so tapping just marks it read and closes.
                         setShowNotif(false);
-                        // Delivery-partner context, not customer — no order-tracking
-                        // route to send them to. Switch the relevant tab instead.
-                        if (n.type === 'delivery_upcoming') setActiveTab('upcoming');
-                        else if (n.type === 'order_placed') setActiveTab('available');
                       }}
                     >
                       <div style={{ width: '36px', height: '36px', borderRadius: '18px', backgroundColor: getNotifColor(n.type) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -514,8 +529,9 @@ const s = {
 
   body: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px' },
 
-  tabTitle:  { fontSize: '20px', fontWeight: '800', color: '#1A1A1A', margin: '4px 0 2px' },
-  emptyText: { fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '32px 16px' },
+  tabTitle:      { fontSize: '20px', fontWeight: '800', color: '#1A1A1A', margin: '4px 0 2px' },
+  sectionHeading:{ fontSize: '17px', fontWeight: '800', color: '#1A1A1A', margin: '18px 0 2px' },
+  emptyText:     { fontSize: '13px', color: '#AAAAAA', textAlign: 'center', padding: '32px 16px' },
 
   pendCard:     { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #7C3AED', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
   upcomingCard: { backgroundColor: '#FFFFFF', borderRadius: '14px', borderLeft: '4px solid #0C447C', padding: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' },
