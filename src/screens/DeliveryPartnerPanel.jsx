@@ -29,16 +29,6 @@ export default function DeliveryPartnerPanel() {
   const [otpInputs,  setOtpInputs]  = useState({});
   const [busyId,     setBusyId]     = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      const s = await getCurrentStaff();
-      if (!s) { setLoading(false); return; }
-      setStaff(s);
-      await Promise.all([fetchAvailableOrders(), fetchEarnings(s.id)]);
-      setLoading(false);
-    })();
-  }, []);
-
   const fetchAvailableOrders = async () => {
     // delivery_pincode / delivery_enabled scoping is enforced server-side
     // by the orders SELECT RLS policy (053_deliveryPartnerOrdersRLS.sql) —
@@ -70,6 +60,16 @@ export default function DeliveryPartnerPanel() {
     if (error) { console.error('fetchEarnings error:', error); return; }
     setEarnings(data || []);
   };
+
+  useEffect(() => {
+    (async () => {
+      const s = await getCurrentStaff();
+      if (!s) { setLoading(false); return; }
+      setStaff(s);
+      await Promise.all([fetchAvailableOrders(), fetchEarnings(s.id)]);
+      setLoading(false);
+    })();
+  }, []);
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayEarning = earnings

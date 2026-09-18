@@ -1,6 +1,6 @@
 -- ══════════════════════════════════════════════════
 -- MedSetu — Pharmacist Rx-gate: RLS / storage policy changes
--- 045_pharmacistGate.sql ke saath jodne wale policy edits jo LIVE DB me
+-- 045b_pharmacistGate.sql ke saath jodne wale policy edits jo LIVE DB me
 -- manually (ALTER / DROP+CREATE POLICY se) lag chuke the par ab tak kisi
 -- migration me record nahi the. Ye file repo = live parity ke liye.
 --
@@ -14,7 +14,7 @@
 -- Depends on:
 --   • 015_rlsPhase5b.sql       — orders_insert_own ka base
 --   • 014_rlsPhase5a.sql       — is_approved_pharmacist(), is_active_superadmin()
---   • 045_pharmacistGate.sql   — 'awaiting_pharmacist' status
+--   • 045b_pharmacistGate.sql  — 'awaiting_pharmacist' status
 --
 -- NOTE — role binding (polroles): is dump me sirf expression tha, role list
 --   nahi. 015 apni policies me koi explicit `TO` clause nahi likhta
