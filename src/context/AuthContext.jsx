@@ -468,6 +468,34 @@ export function AuthProvider({ children }) {
                 }
               }
             } catch {}
+
+            // Not in staff_whitelist (admin/pharmacist/seller) — try
+            // seller_staff next, same RPC SellerStaffPanel.jsx itself
+            // calls at panel-time, so login-time and panel-time
+            // verification can never disagree.
+            if (!staffRole) {
+              try {
+                const { data: ctx } = await supabase.rpc('my_seller_staff_context');
+                if (ctx?.success) staffRole = 'seller_staff';
+              } catch {}
+            }
+
+            // Not seller_staff either — try delivery_partner last, same
+            // staff/staff_assignment two-table check as the pendingRole
+            // branch below (052_deliveryPartner.sql).
+            if (!staffRole) {
+              try {
+                const { data: staffRow } = await supabase
+                  .from('staff').select('id').eq('email', emailUser.email).maybeSingle();
+                const { data: assignment } = staffRow
+                  ? await supabase
+                      .from('staff_assignment').select('id')
+                      .eq('staff_id', staffRow.id).eq('role_type', 'delivery_partner').eq('is_active', true)
+                      .maybeSingle()
+                  : { data: null };
+                if (assignment) staffRole = 'delivery_partner';
+              } catch {}
+            }
           } else if (staffRole === 'seller' || staffRole === 'pharmacist' || staffRole === 'admin') {
             // pendingRole set hai — verify whitelist approval
             const { data: wl } = await supabase
@@ -490,10 +518,10 @@ export function AuthProvider({ children }) {
             // Delivery partners live in the staff/staff_assignment two-table
             // model (052_deliveryPartner.sql), not staff_whitelist — verify
             // there's an active role_type='delivery_partner' assignment for
-            // this email instead. No magic-link fallback branch needed here
-            // (unlike the whitelist roles above) since this role only ever
-            // signs in via the same-browser Google OAuth redirect above,
-            // where pendingRole is always set.
+            // this email instead. Reached here when pendingRole was
+            // explicitly set (StaffLogin) — the whitelist-fallback branch
+            // above (no pendingRole case, e.g. UnifiedLogin / magic link)
+            // does the equivalent check itself.
             const { data: staffRow } = await supabase
               .from('staff').select('id').eq('email', emailUser.email).maybeSingle();
             const { data: assignment } = staffRow
