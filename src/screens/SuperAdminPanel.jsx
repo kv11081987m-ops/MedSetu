@@ -270,10 +270,20 @@ export default function SuperAdminPanel() {
   };
 
   const loadReturns = async () => {
+    // Gate (067_returnPickupFlow.sql): admin only sees returns once the
+    // delivery-partner pickup leg is confirmed AND the seller has marked
+    // it received (seller_action='return_received') — earlier stages
+    // (requested / seller reviewing / pickup in progress) stay out of
+    // this queue entirely, matching admin_decide_return's own backend
+    // gate so there's no frontend-only illusion of restriction.
+    // seller_action is never touched again once set, so 'approved' returns
+    // still match this same filter (for markRefunded below) — status='rejected'
+    // is excluded explicitly, same as the old status-list ever did.
     const { data, error } = await supabase
       .from('order_returns')
       .select('*, orders(order_number, total_amount, customer_name, customer_phone)')
-      .in('status', ['requested', 'seller_reviewed', 'approved'])
+      .eq('seller_action', 'return_received')
+      .neq('status', 'rejected')
       .order('requested_at', { ascending: false });
     if (error) { console.error('loadReturns error:', error); return; }
     setReturns(data || []);
@@ -1207,6 +1217,23 @@ const RETURN_REASON_LABELS = {
   other:         'Kuch aur',
 };
 
+// This queue's own loadReturns filter only ever returns seller_action=
+// 'return_received' rows (067_returnPickupFlow.sql's gate), but this map
+// stays complete for all 4 values in case ret rows land here from a wider
+// query later.
+const SELLER_ACTION_LABEL = {
+  accepted:         'Accept kiya',
+  rejected:         'Reject kiya',
+  pickup_scheduled: 'Pickup schedule kiya',
+  return_received:  'Return receive kiya',
+};
+const SELLER_ACTION_COLOR = {
+  accepted:         '#1A6B3C',
+  rejected:         '#DC3545',
+  pickup_scheduled: '#E65100',
+  return_received:  '#1A6B3C',
+};
+
 function TabReturns({ returns, loadReturns }) {
   const [refundInputs, setRefundInputs] = useState({});
   const [noteInputs,   setNoteInputs]   = useState({});
@@ -1267,7 +1294,7 @@ function TabReturns({ returns, loadReturns }) {
       ) : (
         returns.map((ret) => {
           const o = ret.orders || {};
-          const canDecide = ret.status === 'requested' || ret.status === 'seller_reviewed';
+          const canDecide = ret.status === 'seller_reviewed' && ret.seller_action === 'return_received';
           const canMarkRefunded = ret.status === 'approved' && ret.refund_status === 'pending';
           return (
             <div key={ret.id} style={s.regCard}>
@@ -1290,8 +1317,8 @@ function TabReturns({ returns, loadReturns }) {
               </div>
 
               {ret.seller_action && (
-                <p style={{ fontSize: '12px', color: ret.seller_action === 'accepted' ? '#1A6B3C' : '#DC3545', margin: '8px 0 0' }}>
-                  Seller: {ret.seller_action === 'accepted' ? 'Accept kiya' : 'Reject kiya'}
+                <p style={{ fontSize: '12px', color: SELLER_ACTION_COLOR[ret.seller_action] || '#555', margin: '8px 0 0' }}>
+                  Seller: {SELLER_ACTION_LABEL[ret.seller_action] || ret.seller_action}
                   {ret.seller_note ? ` — ${ret.seller_note}` : ''}
                 </p>
               )}

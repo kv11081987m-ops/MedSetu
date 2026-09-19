@@ -38,6 +38,7 @@ export default function DeliveryPartnerPanel() {
   const [orders,     setOrders]     = useState([]);
   const [earnings,   setEarnings]   = useState([]);
   const [upcoming,   setUpcoming]   = useState([]);
+  const [returnPickups, setReturnPickups] = useState([]);
 
   // notifications.user_id references users(id), not staff(id) — staff has
   // no users row of its own except via matching email (verified against
@@ -94,6 +95,21 @@ export default function DeliveryPartnerPanel() {
     setEarnings(data || []);
   };
 
+  const fetchReturnPickups = async () => {
+    // RLS (067_returnPickupFlow.sql, order_returns_select_delivery_partner)
+    // already scopes this to: unclaimed + accepted + serviceable-pincode
+    // returns, OR ones this partner already claimed — no extra filtering
+    // needed client-side, same division of labour as fetchAvailableOrders.
+    // sellers!seller_id — orders has more than one FK into sellers
+    // (seller_id + buyer_id), so the embed must name which FK to follow.
+    const { data, error } = await supabase
+      .from('order_returns')
+      .select('id, order_id, reason, pickup_staff_id, pickup_confirmed_at, orders:order_id(order_number, customer_name, customer_phone, delivery_address, delivery_pincode, sellers!seller_id(store_name, address))')
+      .order('seller_reviewed_at', { ascending: true });
+    if (error) { console.error('fetchReturnPickups error:', error); return; }
+    setReturnPickups(data || []);
+  };
+
   const fetchUpcomingOrders = async () => {
     // Read-only preview pool — confirmed/preparing orders, scoped to
     // delivery_enabled pincodes entirely by RLS (the
@@ -133,7 +149,7 @@ export default function DeliveryPartnerPanel() {
       }
       setNotifUserId(resolvedUserId);
 
-      const tasks = [fetchAvailableOrders(), fetchEarnings(s.id), fetchUpcomingOrders()];
+      const tasks = [fetchAvailableOrders(), fetchEarnings(s.id), fetchUpcomingOrders(), fetchReturnPickups()];
       if (resolvedUserId) {
         tasks.push(fetchUserNotifications(resolvedUserId).then(({ data }) => setNotifs(data || [])));
       }
@@ -241,6 +257,28 @@ export default function DeliveryPartnerPanel() {
     setOtpInputs((prev) => { const next = { ...prev }; delete next[order.id]; return next; });
     alert(`✅ Delivered! ₹${data.amount ?? 25} kamaye`);
     await fetchEarnings(staff.id);
+  };
+
+  const handleClaimReturn = async (ret) => {
+    setBusyId(ret.id);
+    const { data, error } = await supabase.rpc('claim_return_pickup', { p_return_id: ret.id });
+    setBusyId(null);
+    if (error || !data?.success) {
+      alert(data?.message || error?.message || 'Return pickup claim nahi hua');
+    }
+    await fetchReturnPickups();
+  };
+
+  const handleConfirmReturnPickup = async (ret) => {
+    setBusyId(ret.id);
+    const { data, error } = await supabase.rpc('confirm_return_pickup', { p_return_id: ret.id });
+    setBusyId(null);
+    if (error || !data?.success) {
+      alert(data?.message || error?.message || 'Pickup confirm nahi hua');
+      return;
+    }
+    alert(`✅ Return pickup confirm hua! ₹${data.amount ?? 18} kamaye`);
+    await Promise.all([fetchReturnPickups(), fetchEarnings(staff.id)]);
   };
 
   const doLogout = () => { handleLogout(); navigate('/login'); };
@@ -361,6 +399,55 @@ export default function DeliveryPartnerPanel() {
                       />
                       <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleConfirm(order)}>
                         <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Confirm Delivery'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* SECTION D — Return Pickups (actionable, grouped with Section B) */}
+            <p style={s.sectionHeading}>Return Pickups</p>
+
+            {returnPickups.length === 0 && <p style={s.emptyText}>Abhi koi return pickup available nahi hai</p>}
+
+            {returnPickups.map((ret) => {
+              const o = ret.orders || {};
+              const claimedByMe = staff && ret.pickup_staff_id === staff.id;
+              const busy = busyId === ret.id;
+              return (
+                <div key={ret.id} style={s.pendCard}>
+                  <div style={s.pendTop}>
+                    <span style={s.pendId}>#{o.order_number || ret.order_id}</span>
+                  </div>
+
+                  <div style={s.pendInfoRow}>
+                    <MapPin size={13} color="#888888" />
+                    <span style={s.pendInfoText}>Pickup: {o.customer_name || 'Customer'} — {o.delivery_address || o.delivery_pincode}</span>
+                  </div>
+                  {o.customer_phone && (
+                    <div style={s.pendInfoRow}>
+                      <Phone size={13} color="#888888" />
+                      <span style={s.pendInfoText}>{o.customer_phone}</span>
+                    </div>
+                  )}
+                  <div style={s.pendInfoRow}>
+                    <Store size={13} color="#888888" />
+                    <span style={s.pendInfoText}>Wapas dena: {o.sellers?.store_name || '—'}{o.sellers?.address ? ` — ${o.sellers.address}` : ''}</span>
+                  </div>
+                  <p style={s.pendStatusNote}>Reason: {ret.reason}</p>
+
+                  {!claimedByMe && (
+                    <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleClaimReturn(ret)}>
+                      <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Claim Karo'}
+                    </button>
+                  )}
+
+                  {claimedByMe && !ret.pickup_confirmed_at && (
+                    <>
+                      <p style={s.acceptedNote}>✅ Aapne Claim Kiya — Customer Se Le Kar Seller Ko Wapas Karo</p>
+                      <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleConfirmReturnPickup(ret)}>
+                        <Package size={15} color="#FFFFFF" /> {busy ? '...' : 'Pickup Confirm Karo'}
                       </button>
                     </>
                   )}
