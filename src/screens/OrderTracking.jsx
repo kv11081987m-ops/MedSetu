@@ -122,6 +122,27 @@ function CancelDialog({ onConfirm, onClose, cancelling }) {
   );
 }
 
+// ─── Delay dialog (069_delayedOrderSystem.sql) ─────────────────
+// No backdrop-dismiss — unlike CancelDialog this needs an explicit
+// decision (keep or cancel), not a "tap outside to ignore".
+function DelayDialog({ note, onAcknowledge, onCancelOrder, acknowledging }) {
+  return (
+    <div style={s.dialogOverlay}>
+      <div style={s.dialogBox} onClick={(e) => e.stopPropagation()}>
+        <div style={s.delayDialogIcon}>
+          <Clock size={28} color="#B45309" />
+        </div>
+        <h3 style={s.dialogTitle}>Order Mein Thoda Samay Lagega 🙏</h3>
+        <p style={s.dialogSub}>{note}</p>
+        <button style={{ ...s.keepOrderBtn, opacity: acknowledging ? 0.6 : 1 }} disabled={acknowledging} onClick={onAcknowledge}>
+          {acknowledging ? 'Update ho raha hai...' : 'Order Rakhein'}
+        </button>
+        <button style={s.dialogBack} disabled={acknowledging} onClick={onCancelOrder}>Cancel Karo</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function OrderTracking() {
   const navigate = useNavigate();
@@ -133,6 +154,7 @@ export default function OrderTracking() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled]   = useState(false);
+  const [acknowledgingDelay, setAcknowledgingDelay] = useState(false);
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
   const [billLoading, setBillLoading] = useState(false);
 
@@ -188,6 +210,21 @@ export default function OrderTracking() {
       setCancelled(true);
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const handleAcknowledgeDelay = async () => {
+    if (acknowledgingDelay || !order?.id) return;
+    setAcknowledgingDelay(true);
+    try {
+      const { data, error } = await supabase.rpc('acknowledge_order_delay', { p_order_id: order.id });
+      if (error || !data?.success) {
+        alert('Update nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+        return;
+      }
+      setOrder((prev) => (prev ? { ...prev, delayed_acknowledged: true } : prev));
+    } finally {
+      setAcknowledgingDelay(false);
     }
   };
 
@@ -485,6 +522,18 @@ export default function OrderTracking() {
             onConfirm={handleCancelConfirm}
             onClose={() => setShowCancel(false)}
             cancelling={cancelling}
+          />
+        )}
+
+        {/* Delay Dialog (069_delayedOrderSystem.sql) — hidden while
+            CancelDialog is up so "Cancel Karo" here swaps cleanly into the
+            real confirm step; reappears if the customer backs out of that. */}
+        {!showCancel && order?.is_delayed && !order?.delayed_acknowledged && (
+          <DelayDialog
+            note={order.delayed_note}
+            onAcknowledge={handleAcknowledgeDelay}
+            onCancelOrder={() => setShowCancel(true)}
+            acknowledging={acknowledgingDelay}
           />
         )}
       </div>
@@ -973,6 +1022,30 @@ const s = {
     borderRadius: '12px',
     fontSize: '15px',
     fontWeight: '600',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+
+  // Delay dialog
+  delayDialogIcon: {
+    width: '64px',
+    height: '64px',
+    borderRadius: '32px',
+    backgroundColor: '#FFF3E0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '4px',
+  },
+  keepOrderBtn: {
+    width: '100%',
+    padding: '13px',
+    backgroundColor: '#1A6B3C',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '15px',
+    fontWeight: '700',
     cursor: 'pointer',
     fontFamily: 'inherit',
   },

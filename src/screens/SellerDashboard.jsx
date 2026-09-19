@@ -82,6 +82,7 @@ const mapOrderDisplay = (order) => {
     // old direct confirmed -> delivered flow untouched; only B2C gets the
     // new out_for_delivery middle step.
     isB2B:    isB2B,
+    isDelayed: order.is_delayed || false,
     _id:      order.id,
   };
 };
@@ -101,7 +102,7 @@ const mapB2BPurchase = (order) => ({
 });
 
 // ─── Sub-components ───────────────────────────────────────────
-function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, onCancelConfirmed, busy }) {
+function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, onCancelConfirmed, onMarkDelayed, busy }) {
   const statusColor = STATUS_COLOR[order.status] || '#888888';
   const statusBg    = STATUS_BG[order.status]    || '#F5F5F5';
   const statusLabel = STATUS_LABEL[order.status] || order.status;
@@ -148,6 +149,9 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
           >
             🩺 Rx Dekho
           </span>
+        )}
+        {order.isDelayed && (
+          <span style={{ ...s.badge, color: '#B45309', backgroundColor: '#FFF3E0' }}>⏳ Delayed</span>
         )}
       </div>
 
@@ -196,6 +200,15 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
             <X size={15} color="#DC3545" /> {busy ? '...' : 'Cancel'}
           </button>
         </div>
+      )}
+
+      {/* 069_delayedOrderSystem.sql — a side-flag, never blocks Pack/
+          Handover/Cancel/Deliver above; only shown while there's still
+          time for a delay warning to matter (confirmed/preparing). */}
+      {(order.status === 'confirmed' || order.status === 'preparing') && (
+        <button style={{ ...s.delayBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onMarkDelayed(order._id)}>
+          <Clock size={13} color="#B45309" /> {busy ? '...' : 'Delay Mark Karo'}
+        </button>
       )}
     </div>
   );
@@ -1068,6 +1081,23 @@ export default function SellerDashboard() {
 
   const cancelConfirmedOrder = (orderId) => withOrderBusy(orderId, () => cancelConfirmedOrderImpl(orderId));
 
+  // 069_delayedOrderSystem.sql — a side-flag on top of the existing status,
+  // not a new status value (see that migration's header for why). Note is
+  // optional, same "prompt, empty = default text, never blocks" idiom as
+  // declineOrderImpl's reject-reason prompt above.
+  const markDelayedImpl = async (orderId) => {
+    const note = window.prompt('Delay ki wajah (optional, blank chhod sakte hain):')?.trim() || null;
+    const { data, error } = await supabase.rpc('mark_order_delayed', { p_order_id: orderId, p_note: note });
+    if (error || !data?.success) {
+      console.error('markOrderDelayed failed:', error || data?.message);
+      alert('Delay mark nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
+    }
+    await fetchAllOrders(sellerData.id, orderFilter);
+  };
+
+  const markOrderDelayed = (orderId) => withOrderBusy(orderId, () => markDelayedImpl(orderId));
+
   // ── B2B Lot Auto-Add: retailer confirms receipt of a delivered order ──
   const handleReceiveLot = async (orderId) => {
     if (!sellerData?.id) return;
@@ -1286,7 +1316,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {pendingDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1457,7 +1487,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {allDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1873,6 +1903,7 @@ const s = {
   pendBtns:     { display: 'flex', gap: '8px' },
   acceptBtn:    { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
   declineBtn:   { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#FFFFFF', color: '#DC3545', border: '1.5px solid #DC3545', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  delayBtn:     { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px', backgroundColor: '#FFF8E1', color: '#B45309', border: '1px solid #F0C34E', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   receivedBadge:{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', backgroundColor: '#E8F5EE', color: '#1A6B3C', borderRadius: '10px', fontSize: '13px', fontWeight: '700' },
 
   // Rate Confirm Modal

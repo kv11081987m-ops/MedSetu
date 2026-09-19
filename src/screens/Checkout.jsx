@@ -251,6 +251,9 @@ export default function Checkout() {
 
   const [selectedAddress,     setSelectedAddress]     = useState('');
   const [selectedPincode,     setSelectedPincode]     = useState('');
+  // 069_delayedOrderSystem.sql — informational only, never blocks ordering;
+  // separate from the get_routing_candidates serviceability gate below.
+  const [isBatchZone,         setIsBatchZone]         = useState(false);
   const [selectedLatitude,    setSelectedLatitude]    = useState(null);
   const [selectedLongitude,   setSelectedLongitude]   = useState(null);
   // Captured on "Chuno" (A4a) — A4b now reads this for orderData.customerPhone.
@@ -370,6 +373,26 @@ export default function Checkout() {
     };
     fetchDefaultAddress();
   }, []);
+
+  // ── Batch-zone banner (069_delayedOrderSystem.sql) — a lightweight,
+  // non-blocking lookup of the pincode's delivery_speed_tier, independent
+  // of the get_routing_candidates serviceability gate at order-placement
+  // time. Re-runs whenever the resolved pincode changes (default address
+  // load, picker selection, or a freshly-saved address).
+  useEffect(() => {
+    if (delivery !== 'home' || !selectedPincode || selectedPincode.length !== 6) {
+      setIsBatchZone(false);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('serviceable_pincodes')
+      .select('delivery_speed_tier')
+      .eq('pincode', selectedPincode)
+      .maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsBatchZone(data?.delivery_speed_tier === 'batch'); });
+    return () => { cancelled = true; };
+  }, [selectedPincode, delivery]);
 
   // ── Address Picker (A4a) — fetch on open, same query shape
   // UserProfile.jsx's fetchAddresses uses ──────────────────────
@@ -1031,6 +1054,15 @@ export default function Checkout() {
 
           <div style={{ height: '90px' }} />
         </div>
+
+        {/* ── Batch-zone banner (069_delayedOrderSystem.sql) — informational
+            only, never blocks Place Order ── */}
+        {isBatchZone && delivery === 'home' && (
+          <div style={{ ...s.freeDelivNudge, backgroundColor: '#EAF2FF', border: '1px solid #0C447C', color: '#0C447C', margin: '0 12px 10px' }}>
+            <span>📍</span>
+            <span>Aapke yahan instant delivery suvidha abhi nahi hai. Kripya hume samay dein — hum 1-2 din mein aapko medicine uplabdh kara denge.</span>
+          </div>
+        )}
 
         {/* ── Order error ── */}
         {orderError ? (
