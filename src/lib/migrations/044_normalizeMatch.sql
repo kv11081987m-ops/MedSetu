@@ -27,29 +27,47 @@
 -- ─────────────────────────────────────────────────────────────
 -- (1) normalize_med_name(text)
 -- ─────────────────────────────────────────────────────────────
--- ⚠️ TODO — YAHAN LIVE DB WALA EXACT DEFINITION PASTE KARO.
---   Ye function abhi sirf live DB me manually banaya gaya hai; iska
---   asli source is repo me kahin nahi hai. Neeche jo hai wo sirf
---   dekha-gaya-behaviour ke aadhaar par likha placeholder-jaisा dhaancha
---   HAI NAHI — isko chalane se pehle live definition se REPLACE karna
---   zaroori hai, warna CREATE OR REPLACE live function ko badal dega.
---
---   Live definition nikaalne ke liye SQL Editor me:
---     SELECT pg_get_functiondef('public.normalize_med_name(text)'::regprocedure);
---   Uska pura output (CREATE OR REPLACE FUNCTION ... $function$;) yahan
---   chipka do, is comment block ki jagah.
---
--- >>>>>>>>>>>>>>>>>>>> PASTE normalize_med_name HERE <<<<<<<<<<<<<<<<<<<<
---
--- CREATE OR REPLACE FUNCTION public.normalize_med_name(p_name text)
---  RETURNS text
---  LANGUAGE ...
---  IMMUTABLE ...
--- AS $function$
---   ...
--- $function$;
---
--- >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> END <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+-- Recorded from the live DB on 2026-09-19 (was previously only a manually
+-- created live function, not committed anywhere in this repo — a fresh-DB
+-- migration replay would have broken here since (2)'s functional index
+-- depends on this function existing first). Verified live via:
+--   SELECT provolatile, pg_get_functiondef(oid) FROM pg_proc
+--   WHERE proname = 'normalize_med_name';
+-- provolatile = 'i' (IMMUTABLE), as required for the functional index below.
+
+CREATE OR REPLACE FUNCTION public.normalize_med_name(p_name text)
+ RETURNS text
+ LANGUAGE plpgsql
+ IMMUTABLE
+AS $function$
+DECLARE
+  t text; tok text; toks text[]; out_toks text[] := '{}';
+BEGIN
+  IF p_name IS NULL THEN RETURN ''; END IF;
+  t := lower(p_name);
+  t := replace(t, '\', ' ');                                          -- NEW: Marg backslash
+  t := regexp_replace(t, '[0-9]+\s*\*\s*[0-9]+\s*[a-z]*', ' ', 'g');  -- NEW: pack-size (1*21TAB, 1*100ML)
+  t := regexp_replace(t, '[^a-z0-9 ]', ' ', 'g');
+  t := regexp_replace(t, '([0-9])(mcg|mg|ml|gms|gm|kg|iu|g|l)([^a-z0-9]|$)', '\1\3', 'g');
+  t := regexp_replace(t, '\s+', ' ', 'g');
+  t := trim(t);
+  toks := string_to_array(t, ' ');
+  FOREACH tok IN ARRAY toks LOOP
+    tok := CASE tok
+      WHEN 'cap' THEN 'capsule' WHEN 'caps' THEN 'capsule'
+      WHEN 'tab' THEN 'tablet'  WHEN 'tabs' THEN 'tablet'
+      WHEN 'syp' THEN 'syrup'   WHEN 'syr'  THEN 'syrup'
+      WHEN 'susp' THEN 'suspension' WHEN 'inj' THEN 'injection'
+      WHEN 'sol' THEN 'solution' WHEN 'soln' THEN 'solution'
+      WHEN 'oint' THEN 'ointment' WHEN 'crm' THEN 'cream'
+      ELSE tok
+    END;
+    IF tok <> '' THEN out_toks := out_toks || tok; END IF;
+  END LOOP;
+  SELECT array_agg(x ORDER BY x) INTO out_toks FROM unnest(out_toks) AS x;
+  RETURN coalesce(array_to_string(out_toks, ' '), '');
+END;
+$function$;
 
 -- ─────────────────────────────────────────────────────────────
 -- (2) Functional index — normalized match ab indexed

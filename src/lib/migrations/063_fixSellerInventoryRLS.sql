@@ -1,0 +1,78 @@
+-- ══════════════════════════════════════════════════
+-- MedSetu — fix: seller_inventory wide-open INSERT/UPDATE policies
+-- ══════════════════════════════════════════════════
+--
+-- Bug (found via full code audit, 2026-09-19): seller_inventory had two
+-- permissive policies per write command — an owner-scoped one AND a
+-- wide-open USING(true)/WITH CHECK(true) one, both TO public:
+--
+--   seller_inv_insert             INSERT  WITH CHECK (true)
+--   seller_inventory_insert_owner INSERT  WITH CHECK (owner-or-superadmin)
+--   seller_inv_update             UPDATE  USING (true)
+--   seller_inventory_update_owner UPDATE  USING (owner-or-superadmin)
+--
+-- Postgres OR's permissive policies for the same command together, so the
+-- `true` policy made the owner-scoped one meaningless. Combined with `anon`
+-- holding full table-level INSERT/UPDATE grants (default Supabase setup),
+-- ANY unauthenticated request — no login required — could insert a
+-- seller_inventory row for any seller_id, or overwrite any existing
+-- seller's price/stock/medicine_id/seller_hidden. seller_inv_insert/
+-- seller_inv_update predate the _owner policies (likely left over from
+-- before ownership checks existed) and were never dropped when the
+-- proper ones were added.
+--
+-- seller_inv_select / seller_inventory_select_all (both USING(true) for
+-- SELECT) are NOT touched — public read access to the catalog is
+-- intentional (customers browse all sellers' listings). DELETE was
+-- already fine (only seller_inventory_delete_owner exists, no `true`
+-- sibling).
+--
+-- Fix: drop the two wide-open write policies. The owner-scoped ones
+-- (seller_inventory_insert_owner, seller_inventory_update_owner) already
+-- exist and are correct — untouched here.
+
+DROP POLICY IF EXISTS "seller_inv_insert" ON seller_inventory;
+DROP POLICY IF EXISTS "seller_inv_update" ON seller_inventory;
+
+-- ================================================================
+-- VERIFY — run after applying
+-- ================================================================
+-- SELECT policyname, cmd FROM pg_policies WHERE tablename = 'seller_inventory' ORDER BY cmd, policyname;
+--   -- INSERT: only seller_inventory_insert_owner
+--   -- UPDATE: only seller_inventory_update_owner
+--   -- DELETE: only seller_inventory_delete_owner (unchanged)
+--   -- SELECT: seller_inv_select + seller_inventory_select_all (unchanged, both true — intentional)
+--
+-- Real RLS-evaluated session tests (not the postgres superuser, which
+-- bypasses RLS and would pass either way):
+--
+-- 1) Owner (Sarthak, seller b209fcbe-9af3-4f46-8f16-71221108025a,
+--    auth_id 81fa9dd0-fea3-4ade-acaf-992f2dc2c256) updating their own row
+--    -- should still succeed:
+--   BEGIN;
+--   SET LOCAL ROLE authenticated;
+--   SELECT set_config('request.jwt.claims', '{"sub":"81fa9dd0-fea3-4ade-acaf-992f2dc2c256"}', true);
+--   UPDATE seller_inventory SET stock_quantity = stock_quantity WHERE id = '1620f069-2270-44eb-a17d-d5d4e1b53bf4';
+--   -- expect: UPDATE 1
+--   ROLLBACK;
+--
+-- 2) anon updating a row it doesn't own -- should now be blocked:
+--   BEGIN;
+--   SET LOCAL ROLE anon;
+--   UPDATE seller_inventory SET stock_quantity = 999999 WHERE id = '1620f069-2270-44eb-a17d-d5d4e1b53bf4';
+--   -- expect: UPDATE 0 (no matching row visible under RLS, not an error)
+--   ROLLBACK;
+--
+-- 3) anon inserting a new row for someone else's seller_id -- should now be blocked:
+--   BEGIN;
+--   SET LOCAL ROLE anon;
+--   INSERT INTO seller_inventory (seller_id, medicine_id, selling_price, stock_quantity)
+--   VALUES ('b209fcbe-9af3-4f46-8f16-71221108025a', gen_random_uuid(), 1, 1);
+--   -- expect: ERROR - new row violates row-level security policy
+--   ROLLBACK;
+
+-- ================================================================
+-- ROLLBACK — reintroduces the vulnerability, not recommended
+-- ================================================================
+-- CREATE POLICY "seller_inv_insert" ON seller_inventory FOR INSERT WITH CHECK (true);
+-- CREATE POLICY "seller_inv_update" ON seller_inventory FOR UPDATE USING (true);
