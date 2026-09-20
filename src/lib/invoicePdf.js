@@ -119,7 +119,18 @@ export async function generateInvoicePDF(order) {
     seller.gst_number ? `GSTIN: ${seller.gst_number}` : null,
     seller.owner_name ? `Prop: ${seller.owner_name}` : null,
   ].filter(Boolean);
-  soldByLines.forEach((line, i) => doc.text(line, margin, soldByTop + i * 13, { maxWidth: pageWidth / 2 - margin - 10 }));
+  // Wrap-aware: splitTextToSize tells us up front how many lines a long
+  // field (e.g. address+district) will actually take, so cursorY advances
+  // by the real rendered height instead of a flat 13pt-per-field guess
+  // that only held while every field happened to fit on one line.
+  let soldByCursorY = soldByTop;
+  soldByLines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(line, pageWidth / 2 - margin - 10);
+    wrapped.forEach((wLine) => {
+      doc.text(wLine, margin, soldByCursorY);
+      soldByCursorY += 13;
+    });
+  });
 
   // ── Bill To (customer block, same row) ──
   const billToX = pageWidth / 2 + 10;
@@ -137,9 +148,16 @@ export async function generateInvoicePDF(order) {
     order.delivery_pincode ? `Pincode: ${order.delivery_pincode}` : null,
     order.customer_phone ? `Phone: ${order.customer_phone}` : null,
   ].filter(Boolean);
-  billToLines.forEach((line, i) => doc.text(line, billToX, billToTop + i * 13, { maxWidth: pageWidth - margin - billToX }));
+  let billToCursorY = billToTop;
+  billToLines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(line, pageWidth - margin - billToX);
+    wrapped.forEach((wLine) => {
+      doc.text(wLine, billToX, billToCursorY);
+      billToCursorY += 13;
+    });
+  });
 
-  y = Math.max(soldByTop + soldByLines.length * 13, billToTop + billToLines.length * 13) + 20;
+  y = Math.max(soldByCursorY, billToCursorY) + 20;
 
   // ── Items table ──
   const rows = items.map((it, i) => [
