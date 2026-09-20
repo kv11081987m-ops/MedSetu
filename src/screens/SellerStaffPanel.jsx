@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { generateInvoicePDF } from '../lib/invoicePdf';
 
-const STATUS_LABEL = { pending: 'Naya Order', confirmed: 'Accept Ho Gaya', preparing: 'Pack Ho Raha' };
+const STATUS_LABEL = { pending: 'Naya Order', confirmed: 'Accept Ho Gaya', preparing: 'Packing Complete' };
 const STATUS_COLOR = { pending: '#E65100', confirmed: '#2563EB', preparing: '#7C3AED' };
 const STATUS_BG    = { pending: '#FFF3E0', confirmed: '#EAF2FF', preparing: '#F3EEFF' };
 

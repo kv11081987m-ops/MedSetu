@@ -15,7 +15,7 @@ const STATUS_BG    = { pending: '#FFF3E0', settled: '#E8F5EE' };
 
 // Upcoming-tab order status — read-only preview, not the delivery_earnings
 // status above (different table, different vocabulary).
-const ORDER_STATUS_LABEL = { confirmed: 'Confirm hua hai', preparing: 'Pack ho raha hai' };
+const ORDER_STATUS_LABEL = { confirmed: 'Confirm hua hai', preparing: 'Packing Complete — Jald Ready Hoga' };
 const ORDER_STATUS_COLOR = { confirmed: '#0C447C', preparing: '#E65100' };
 const ORDER_STATUS_BG    = { confirmed: '#E7F0FA', preparing: '#FFF3E0' };
 
