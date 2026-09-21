@@ -102,9 +102,13 @@ export default function DeliveryPartnerPanel() {
     // needed client-side, same division of labour as fetchAvailableOrders.
     // sellers!seller_id — orders has more than one FK into sellers
     // (seller_id + buyer_id), so the embed must name which FK to follow.
+    // status/seller_action added (072_deliveryPartnerReturnHistory.sql) so
+    // the UI can tell an actionable pickup apart from one the seller has
+    // since marked return_received — RLS now keeps a partner's own claimed
+    // rows visible either way, where before they vanished at that point.
     const { data, error } = await supabase
       .from('order_returns')
-      .select('id, order_id, reason, pickup_staff_id, pickup_confirmed_at, orders:order_id(order_number, customer_name, customer_phone, delivery_address, delivery_pincode, sellers!seller_id(store_name, address))')
+      .select('id, order_id, reason, status, seller_action, pickup_staff_id, pickup_confirmed_at, orders:order_id(order_number, customer_name, customer_phone, delivery_address, delivery_pincode, sellers!seller_id(store_name, address))')
       .order('seller_reviewed_at', { ascending: true });
     if (error) { console.error('fetchReturnPickups error:', error); return; }
     setReturnPickups(data || []);
@@ -205,6 +209,11 @@ export default function DeliveryPartnerPanel() {
   const totalPending = earnings
     .filter((e) => e.status === 'pending')
     .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  // 072_deliveryPartnerReturnHistory.sql — same query now also returns a
+  // partner's own return_received rows (previously RLS hid them outright),
+  // so split them out into their own read-only sub-section here.
+  const activeReturnPickups    = returnPickups.filter((r) => r.seller_action !== 'return_received');
+  const completedReturnPickups = returnPickups.filter((r) => r.seller_action === 'return_received');
 
   const handleClaim = async (order) => {
     setBusyId(order.id);
@@ -409,9 +418,9 @@ export default function DeliveryPartnerPanel() {
             {/* SECTION D — Return Pickups (actionable, grouped with Section B) */}
             <p style={s.sectionHeading}>Return Pickups</p>
 
-            {returnPickups.length === 0 && <p style={s.emptyText}>Abhi koi return pickup available nahi hai</p>}
+            {activeReturnPickups.length === 0 && <p style={s.emptyText}>Abhi koi return pickup available nahi hai</p>}
 
-            {returnPickups.map((ret) => {
+            {activeReturnPickups.map((ret) => {
               const o = ret.orders || {};
               const claimedByMe = staff && ret.pickup_staff_id === staff.id;
               const busy = busyId === ret.id;
@@ -454,6 +463,32 @@ export default function DeliveryPartnerPanel() {
                 </div>
               );
             })}
+
+            {/* Recent Completed — seller_action='return_received' rows.
+                072_deliveryPartnerReturnHistory.sql keeps these visible to
+                the partner who claimed them (previously RLS hid them the
+                moment the seller finalized receipt, so they just vanished
+                with no confirmation the pickup had actually completed). */}
+            {completedReturnPickups.length > 0 && (
+              <>
+                <p style={s.sectionHeading}>Recent Completed</p>
+                {completedReturnPickups.map((ret) => {
+                  const o = ret.orders || {};
+                  return (
+                    <div key={ret.id} style={{ ...s.pendCard, opacity: 0.75 }}>
+                      <div style={s.pendTop}>
+                        <span style={s.pendId}>#{o.order_number || ret.order_id}</span>
+                      </div>
+                      <div style={s.pendInfoRow}>
+                        <MapPin size={13} color="#888888" />
+                        <span style={s.pendInfoText}>{o.customer_name || 'Customer'} — {o.delivery_address || o.delivery_pincode}</span>
+                      </div>
+                      <p style={s.acceptedNote}>Received ✅</p>
+                    </div>
+                  );
+                })}
+              </>
+            )}
 
             {/* SECTION A — Aa Rahe Hain (read-only preview, confirmed/preparing) */}
             <p style={s.sectionHeading}>Aa Rahe Hain</p>

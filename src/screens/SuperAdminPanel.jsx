@@ -1263,6 +1263,14 @@ function TabReturns({ returns, loadReturns }) {
       alert('Return decide nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
       return;
     }
+    // No payment gateway is live — admin transfers manually, so the
+    // approve confirmation points them straight at the reference they
+    // just saw on the card (071_returnBankDetails.sql), or tells them to
+    // reach out themselves when the customer didn't leave one.
+    if (action === 'approved') {
+      const paymentHint = ret.refund_payment_details || 'contact karke';
+      alert(`✅ Refund approved (₹${refundAmount}). Ab customer ko ${paymentHint} manually transfer karein — payment-gateway abhi live nahi hai.`);
+    }
     // Customer ko notification yahan se nahi bhejni — admin_decide_return
     // khud RPC ke andar seedha notifications table mein INSERT karta hai
     // (047_returnRefund.sql, Fix 1). create_notification() yahan se call
@@ -1321,6 +1329,16 @@ function TabReturns({ returns, loadReturns }) {
                   Seller: {SELLER_ACTION_LABEL[ret.seller_action] || ret.seller_action}
                   {ret.seller_note ? ` — ${ret.seller_note}` : ''}
                 </p>
+              )}
+
+              {/* 071_returnBankDetails.sql — customer's optional manual-
+                  refund reference; freeform, admin reads and transfers by
+                  hand, nothing here auto-processes it. */}
+              {ret.refund_payment_details && (
+                <div style={s.paymentDetailsBox}>
+                  <span style={{ fontWeight: 700 }}>Payment Details:</span>{' '}
+                  <span style={{ fontFamily: 'monospace' }}>{ret.refund_payment_details}</span>
+                </div>
               )}
 
               {canDecide && (
@@ -1970,6 +1988,7 @@ const s = {
   filterChipActive: { border: '1.5px solid #1A6B3C', backgroundColor: '#F0FDF4', color: '#1A6B3C' },
   expandBtn:  { background: 'none', border: 'none', color: '#1A6B3C', fontSize: '12px', fontWeight: '600', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' },
   docsBox:    { backgroundColor: '#F9FAFB', borderRadius: '8px', padding: '10px', marginTop: '8px' },
+  paymentDetailsBox: { backgroundColor: '#FFF8E1', border: '1px solid #E0A818', borderRadius: '8px', padding: '8px 10px', marginTop: '8px', fontSize: '13px', color: '#5C4813', wordBreak: 'break-word' },
   approveBtn: { padding: '10px 16px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   rejectBtn:  { padding: '10px 16px', backgroundColor: 'transparent', color: '#DC2626', border: '1.5px solid #DC2626', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   removeBtn:  { padding: '6px 12px', backgroundColor: 'transparent', color: '#DC2626', border: '1px solid #DC2626', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },

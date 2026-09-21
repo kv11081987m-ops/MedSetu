@@ -192,6 +192,8 @@ export default function OrderHistory() {
   const [returnOrder,      setReturnOrder]      = useState(null);
   const [returnReason,     setReturnReason]     = useState('');
   const [returnDetail,     setReturnDetail]     = useState('');
+  // 071_returnBankDetails.sql — optional, freeform, admin's manual-refund reference only.
+  const [returnPaymentDetails, setReturnPaymentDetails] = useState('');
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnError,      setReturnError]      = useState('');
 
@@ -234,6 +236,7 @@ export default function OrderHistory() {
     setReturnOrder(order);
     setReturnReason('');
     setReturnDetail('');
+    setReturnPaymentDetails('');
     setReturnError('');
   };
 
@@ -249,6 +252,7 @@ export default function OrderHistory() {
       p_reason: returnReason,
       p_reason_detail: returnDetail.trim() || null,
       p_photo_url: null,
+      p_refund_payment_details: returnPaymentDetails.trim() || null,
     });
     setReturnSubmitting(false);
     if (error || !data?.success) {
@@ -458,6 +462,15 @@ export default function OrderHistory() {
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
+
+              <label style={s.modalLabel}>Refund Account Details (Bank A/C ya UPI ID) — optional, agar refund chahiye to bharein</label>
+              <input
+                style={s.modalSelect}
+                placeholder="Bank A/C No. ya UPI ID"
+                value={returnPaymentDetails}
+                onChange={(e) => setReturnPaymentDetails(e.target.value)}
+                disabled={returnSubmitting}
+              />
 
               <label style={s.modalLabel}>Detail (optional)</label>
               <textarea
