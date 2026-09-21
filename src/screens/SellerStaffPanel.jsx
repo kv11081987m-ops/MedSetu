@@ -50,9 +50,14 @@ export default function SellerStaffPanel() {
     // directly on the already-loaded row — same shape lib/orders.js's
     // fetchOrderById returns, which is what OrderHistory.jsx/OrderTracking.jsx
     // already pass to generateInvoicePDF.
+    // delivered_staff embed (074_staffPhoneAndReach.sql) — a delivery
+    // partner can claim as early as 'confirmed'/'preparing'
+    // (062_earlyClaimFlow.sql), so a rider can already be assigned while
+    // this staff member is still packing; delivered_by_staff_id and
+    // rider_reached_at themselves ride along on the `*` select already.
     const { data, error } = await supabase
       .from('orders')
-      .select('*, order_items (*), sellers!seller_id (store_name, address, phone, district, owner_name, drug_license, gst_number, invoice_prefix)')
+      .select('*, order_items (*), sellers!seller_id (store_name, address, phone, district, owner_name, drug_license, gst_number, invoice_prefix), delivered_staff:delivered_by_staff_id(name, phone)')
       .eq('seller_id', sellerId)
       .in('status', ['pending', 'confirmed', 'preparing'])
       .order('created_at', { ascending: true });
@@ -160,6 +165,22 @@ export default function SellerStaffPanel() {
                     <Phone size={13} color="#888888" />
                     <span style={s.pendInfoText}>{order.customer_phone}</span>
                   </div>
+                )}
+
+                {/* 074_staffPhoneAndReach.sql — rider-visibility card, only
+                    when a delivery partner has actually claimed this order
+                    (early-claim, 062_earlyClaimFlow.sql, so this can show
+                    even while still 'confirmed'/'preparing'). */}
+                {order.delivered_staff?.name && (
+                  order.rider_reached_at ? (
+                    <div style={s.riderBoxReached}>
+                      ✅ {order.delivered_staff.name} aa gaya hai — parcel handover karein
+                    </div>
+                  ) : (
+                    <div style={s.riderBoxAssigned}>
+                      🛵 {order.delivered_staff.name}{order.delivered_staff.phone ? ` ${order.delivered_staff.phone}` : ''} — Pickup ke liye assign ho gaya hai
+                    </div>
+                  )
                 )}
 
                 <div style={s.pendItems}>
@@ -270,6 +291,8 @@ const s = {
   pendItem:     { fontSize: '13px', color: '#333333', margin: 0 },
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C', marginTop: '4px' },
   staffLine:    { fontSize: '11px', color: '#888888', margin: 0 },
+  riderBoxAssigned: { fontSize: '12px', fontWeight: '600', color: '#0C447C', backgroundColor: '#EAF2FF', border: '1px solid #C7DDF5', borderRadius: '8px', padding: '8px 10px' },
+  riderBoxReached:  { fontSize: '12px', fontWeight: '600', color: '#1A6B3C', backgroundColor: '#E8F5EE', border: '1px solid #B8E0C8', borderRadius: '8px', padding: '8px 10px' },
   logExpanded:       { display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px', paddingTop: '10px', borderTop: '1px solid #F0F0F0' },
   logExpandedAmount: { fontSize: '14px', fontWeight: '800', color: '#1A6B3C', margin: '2px 0' },
 

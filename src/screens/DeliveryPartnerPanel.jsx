@@ -70,7 +70,7 @@ export default function DeliveryPartnerPanel() {
     // fetchUpcomingOrders below).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp, delivered_by_staff_id, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
+      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp, delivered_by_staff_id, rider_reached_at, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
       .eq('status', 'out_for_delivery')
       .order('assigned_at', { ascending: true });
     if (error) { console.error('fetchAvailableOrders error:', error); return; }
@@ -232,6 +232,20 @@ export default function DeliveryPartnerPanel() {
     await Promise.all([fetchUpcomingOrders(), fetchAvailableOrders()]);
   };
 
+  // 074_staffPhoneAndReach.sql — manual arrival signal, no GPS in this
+  // app. Lets SellerStaffPanel.jsx's rider-info card flip from "assigned"
+  // to "arrived" without any live-location tracking.
+  const handleReach = async (order) => {
+    setBusyId(order.id);
+    const { data, error } = await supabase.rpc('mark_rider_reached', { p_order_id: order.id });
+    setBusyId(null);
+    if (error || !data?.success) {
+      alert(data?.message || error?.message || 'Reach mark nahi hua');
+      return;
+    }
+    setOrders((prev) => prev.map((o) => o.id === order.id ? { ...o, rider_reached_at: new Date().toISOString() } : o));
+  };
+
   const handlePickup = async (order) => {
     setBusyId(order.id);
     if (!order.delivery_otp) {
@@ -387,6 +401,11 @@ export default function DeliveryPartnerPanel() {
                   {claimedByMe && !otpStage && (
                     <>
                       <p style={s.acceptedNote}>✅ Accepted — Ab Pickup Karo</p>
+                      {!order.rider_reached_at && (
+                        <button style={{ ...s.reachBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleReach(order)}>
+                          <MapPin size={15} color="#0C447C" /> {busy ? '...' : 'Store Reach Ho Gaya'}
+                        </button>
+                      )}
                       <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handlePickup(order)}>
                         <Package size={15} color="#FFFFFF" /> {busy ? '...' : 'Pickup Karo'}
                       </button>
@@ -704,6 +723,7 @@ const s = {
   acceptedNote:   { fontSize: '12px', color: '#1A6B3C', fontWeight: '700', margin: 0 },
 
   acceptBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  reachBtn:  { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#FFFFFF', color: '#0C447C', border: '1.5px solid #0C447C', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 
   otpHint:  { fontSize: '12px', color: '#7C3AED', margin: 0, fontWeight: '600' },
   otpInput: { width: '100%', padding: '10px', fontSize: '18px', fontWeight: '700', letterSpacing: '4px', textAlign: 'center', border: '1.5px solid #E0E0E0', borderRadius: '10px', fontFamily: 'inherit', boxSizing: 'border-box' },
