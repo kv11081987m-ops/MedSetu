@@ -16,6 +16,7 @@ export default function SellerStaffPanel() {
   const [context,       setContext]       = useState(null); // my_seller_staff_context() row
   const [storeName,     setStoreName]     = useState('');
   const [orders,        setOrders]        = useState([]);
+  const [myLog,         setMyLog]         = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [busyId,        setBusyId]        = useState(null);
   const [billLoadingId, setBillLoadingId] = useState(null);
@@ -31,7 +32,7 @@ export default function SellerStaffPanel() {
       const { data: seller } = await supabase.from('sellers').select('store_name').eq('id', ctx.seller_id).maybeSingle();
       setStoreName(seller?.store_name || '');
 
-      await fetchPool(ctx.seller_id);
+      await Promise.all([fetchPool(ctx.seller_id), fetchMyLog(ctx.staff_id)]);
       setLoading(false);
     })();
   }, []);
@@ -52,6 +53,22 @@ export default function SellerStaffPanel() {
     setOrders(data || []);
   };
 
+  // "Mera Log" — everything this staff member has ever accepted, no status
+  // filter (unlike fetchPool's pool, this is a history view — an order can
+  // legitimately show up here AND in the pool above while still active).
+  // seller_staff_view_orders RLS (056_sellerStaffSimple.sql) scopes by
+  // seller_id, not status, so every status is already readable here.
+  const fetchMyLog = async (staffId) => {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('order_number, customer_name, final_amount, status, updated_at, delivered_staff:delivered_by_staff_id(name)')
+      .eq('accepted_by_staff_id', staffId)
+      .order('updated_at', { ascending: false })
+      .limit(30);
+    if (error) { console.error('fetchMyLog error:', error); return; }
+    setMyLog(data || []);
+  };
+
   const runAction = async (order, rpcName) => {
     setBusyId(order.id);
     const { data, error } = await supabase.rpc(rpcName, { p_order_id: order.id });
@@ -60,7 +77,7 @@ export default function SellerStaffPanel() {
       alert(data?.message || error?.message || 'Kuch galat hua');
       return;
     }
-    await fetchPool(context.seller_id);
+    await Promise.all([fetchPool(context.seller_id), fetchMyLog(context.staff_id)]);
   };
 
   const handlePrint = async (order) => {
@@ -170,6 +187,29 @@ export default function SellerStaffPanel() {
               </div>
             );
           })}
+
+          {/* ── Mera Log — read-only history, every status, no actions ── */}
+          <p style={s.tabTitle}>Mera Log</p>
+
+          {myLog.length === 0 && <p style={s.hintText}>Abhi koi log nahi</p>}
+
+          {myLog.map((order) => (
+            <div key={order.order_number} style={{ ...s.pendCard, borderLeftColor: '#AAAAAA' }}>
+              <div style={s.pendTop}>
+                <span style={s.pendId}>#{order.order_number}</span>
+                <span style={{ ...s.statusBadge, color: STATUS_COLOR[order.status] || '#888888', backgroundColor: STATUS_BG[order.status] || '#F5F5F5' }}>
+                  {STATUS_LABEL[order.status] || order.status}
+                </span>
+              </div>
+              <div style={s.pendInfoRow}>
+                <span style={s.pendInfoText}>{order.customer_name || 'Customer'} · ₹{Number(order.final_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              </div>
+              {order.delivered_staff?.name && (
+                <p style={s.staffLine}>Delivery: {order.delivered_staff.name}</p>
+              )}
+              <p style={s.staffLine}>{new Date(order.updated_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -201,6 +241,7 @@ const s = {
   pendItems:    { display: 'flex', flexDirection: 'column', gap: '3px' },
   pendItem:     { fontSize: '13px', color: '#333333', margin: 0 },
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C', marginTop: '4px' },
+  staffLine:    { fontSize: '11px', color: '#888888', margin: 0 },
 
   acceptBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
   printBtn:  { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#FFFFFF', color: '#0C447C', border: '1.5px solid #0C447C', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },

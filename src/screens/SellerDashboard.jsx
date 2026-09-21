@@ -83,6 +83,8 @@ const mapOrderDisplay = (order) => {
     // new out_for_delivery middle step.
     isB2B:    isB2B,
     isDelayed: order.is_delayed || false,
+    acceptedByStaff:    order.accepted_staff?.name || null,
+    deliveredByPartner: order.delivered_staff?.name || null,
     _id:      order.id,
   };
 };
@@ -127,6 +129,14 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
       <div style={s.pendCustomer}>
         <div style={s.pendInfoRow}><User size={13} color="#888888" /><span style={s.pendInfoText}>{order.customer}</span></div>
         {order.phone ? <div style={s.pendInfoRow}><Phone size={13} color="#888888" /><span style={s.pendInfoText}>{order.phone}</span></div> : null}
+        {(order.acceptedByStaff || order.deliveredByPartner) && (
+          <p style={s.staffLine}>
+            {[
+              order.acceptedByStaff ? `Staff: ${order.acceptedByStaff}` : null,
+              order.deliveredByPartner ? `Delivery: ${order.deliveredByPartner}` : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
       </div>
 
       <div style={s.pendItems}>
@@ -606,7 +616,7 @@ export default function SellerDashboard() {
   const fetchPendingOrders = async (sellerId) => {
     const { data } = await supabase
       .from('orders')
-      .select('*, order_items(*), buyer:buyer_id ( store_name, phone )')
+      .select('*, order_items(*), buyer:buyer_id ( store_name, phone ), accepted_staff:accepted_by_staff_id(name, staff_code), delivered_staff:delivered_by_staff_id(name, staff_code)')
       .eq('seller_id', sellerId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
@@ -677,7 +687,7 @@ export default function SellerDashboard() {
   const fetchAllOrders = async (sellerId, filter) => {
     let query = supabase
       .from('orders')
-      .select('*, order_items(*), buyer:buyer_id ( store_name, phone )')
+      .select('*, order_items(*), buyer:buyer_id ( store_name, phone ), accepted_staff:accepted_by_staff_id(name, staff_code), delivered_staff:delivered_by_staff_id(name, staff_code)')
       .eq('seller_id', sellerId)
       .order('created_at', { ascending: false });
     if (filter !== 'sab') query = query.eq('status', filter);
@@ -1893,6 +1903,7 @@ const s = {
   pendCustomer: { display: 'flex', flexDirection: 'column', gap: '5px' },
   pendInfoRow:  { display: 'flex', alignItems: 'center', gap: '6px' },
   pendInfoText: { fontSize: '13px', color: '#444444' },
+  staffLine:    { fontSize: '11px', color: '#888888', margin: 0 },
   pendItems:    { display: 'flex', flexDirection: 'column', gap: '3px' },
   pendItem:     { fontSize: '13px', color: '#333333', margin: 0 },
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C', marginTop: '4px' },
