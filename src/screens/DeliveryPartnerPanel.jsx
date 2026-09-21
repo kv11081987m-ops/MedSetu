@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Phone, IndianRupee, CheckCircle,
-  ClipboardList, Wallet, LogOut, Package, Store, Bell,
+  ClipboardList, Wallet, LogOut, Package, Store, Bell, History,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -127,7 +127,7 @@ export default function DeliveryPartnerPanel() {
     // fetchCallQueue skips a bare sellers(...) embed).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, status, delivered_by_staff_id, sellers!seller_id(store_name, address), staff!accepted_by_staff_id(name)')
+      .select('id, order_number, status, delivered_by_staff_id, rider_reached_at, sellers!seller_id(store_name, address), staff!accepted_by_staff_id(name)')
       .in('status', ['confirmed', 'preparing'])
       .order('updated_at', { ascending: false });
     if (error) { console.error('fetchUpcomingOrders error:', error); return; }
@@ -350,8 +350,71 @@ export default function DeliveryPartnerPanel() {
         {/* ── Body ── */}
         <div style={s.body}>
           {activeTab === 'orders' && <>
-            {/* SECTION B — Pickup Ke Liye Ready (actionable, shown first) */}
-            <p style={s.tabTitle}>Pickup Ke Liye Ready</p>
+            {/* SECTION A — Aa Rahe Hain (read-only preview, confirmed/preparing) */}
+            <p style={s.tabTitle}>Aa Rahe Hain</p>
+
+            {upcoming.length === 0 && <p style={s.emptyText}>Abhi koi upcoming order nahi hai</p>}
+
+            {upcoming.map((order) => {
+              const claimedByMe = staff && order.delivered_by_staff_id === staff.id;
+              const busy = busyId === order.id;
+              // Claimed + still 'preparing' shows its own acceptedNote just
+              // below (assigned/reached wording) — the generic "Jald Ready
+              // Hoga" badge text next to it would clash (sounds like "not
+              // ready yet" right beside a note that says the rider may
+              // already be there waiting), so it's overridden only for
+              // that combination. Unclaimed and 'confirmed' badges are
+              // untouched.
+              const badgeLabel = (claimedByMe && order.status === 'preparing')
+                ? 'Packing Ho Rahi Hai — Wait Karein'
+                : (ORDER_STATUS_LABEL[order.status] || order.status);
+              return (
+                <div key={order.id} style={s.upcomingCard}>
+                  <div style={s.pendTop}>
+                    <span style={s.pendId}>#{order.order_number}</span>
+                    <span style={{ ...s.statusBadge, color: ORDER_STATUS_COLOR[order.status] || '#888888', backgroundColor: ORDER_STATUS_BG[order.status] || '#F5F5F5' }}>
+                      {badgeLabel}
+                    </span>
+                  </div>
+
+                  <div style={s.pendInfoRow}>
+                    <MapPin size={13} color="#888888" />
+                    <span style={s.pendInfoText}>{order.sellers?.store_name || 'Seller'}{order.sellers?.address ? ` — ${order.sellers.address}` : ''}</span>
+                  </div>
+                  {order.staff?.name && (
+                    <div style={s.pendInfoRow}>
+                      <Package size={13} color="#888888" />
+                      <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
+                    </div>
+                  )}
+
+                  {claimedByMe ? (
+                    <>
+                      <p style={s.acceptedNote}>
+                        {order.rider_reached_at
+                          ? '✅ Store Pahunch Gaye — Handover Ka Wait Karein'
+                          : '🛵 Aapne Claim Kiya — Rasta Mein Nikal Sakte Hain'}
+                      </p>
+                      {!order.rider_reached_at && (
+                        <button style={{ ...s.reachBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleReach(order)}>
+                          <MapPin size={15} color="#0C447C" /> {busy ? '...' : 'Store Reach Ho Gaya'}
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p style={s.pendStatusNote}>Jald Ready Hoga</p>
+                      <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleClaim(order)}>
+                        <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Claim Karo'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* SECTION B — Pickup Ke Liye Ready */}
+            <p style={s.sectionHeading}>Pickup Ke Liye Ready</p>
 
             {orders.length === 0 && <p style={s.emptyText}>Abhi koi order available nahi hai</p>}
 
@@ -483,74 +546,6 @@ export default function DeliveryPartnerPanel() {
               );
             })}
 
-            {/* Recent Completed — seller_action='return_received' rows.
-                072_deliveryPartnerReturnHistory.sql keeps these visible to
-                the partner who claimed them (previously RLS hid them the
-                moment the seller finalized receipt, so they just vanished
-                with no confirmation the pickup had actually completed). */}
-            {completedReturnPickups.length > 0 && (
-              <>
-                <p style={s.sectionHeading}>Recent Completed</p>
-                {completedReturnPickups.map((ret) => {
-                  const o = ret.orders || {};
-                  return (
-                    <div key={ret.id} style={{ ...s.pendCard, opacity: 0.75 }}>
-                      <div style={s.pendTop}>
-                        <span style={s.pendId}>#{o.order_number || ret.order_id}</span>
-                      </div>
-                      <div style={s.pendInfoRow}>
-                        <MapPin size={13} color="#888888" />
-                        <span style={s.pendInfoText}>{o.customer_name || 'Customer'} — {o.delivery_address || o.delivery_pincode}</span>
-                      </div>
-                      <p style={s.acceptedNote}>Received ✅</p>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-
-            {/* SECTION A — Aa Rahe Hain (read-only preview, confirmed/preparing) */}
-            <p style={s.sectionHeading}>Aa Rahe Hain</p>
-
-            {upcoming.length === 0 && <p style={s.emptyText}>Abhi koi upcoming order nahi hai</p>}
-
-            {upcoming.map((order) => {
-              const claimedByMe = staff && order.delivered_by_staff_id === staff.id;
-              const busy = busyId === order.id;
-              return (
-                <div key={order.id} style={s.upcomingCard}>
-                  <div style={s.pendTop}>
-                    <span style={s.pendId}>#{order.order_number}</span>
-                    <span style={{ ...s.statusBadge, color: ORDER_STATUS_COLOR[order.status] || '#888888', backgroundColor: ORDER_STATUS_BG[order.status] || '#F5F5F5' }}>
-                      {ORDER_STATUS_LABEL[order.status] || order.status}
-                    </span>
-                  </div>
-
-                  <div style={s.pendInfoRow}>
-                    <MapPin size={13} color="#888888" />
-                    <span style={s.pendInfoText}>{order.sellers?.store_name || 'Seller'}{order.sellers?.address ? ` — ${order.sellers.address}` : ''}</span>
-                  </div>
-                  {order.staff?.name && (
-                    <div style={s.pendInfoRow}>
-                      <Package size={13} color="#888888" />
-                      <span style={s.pendInfoText}>Staff: {order.staff.name}</span>
-                    </div>
-                  )}
-
-                  {claimedByMe ? (
-                    <p style={s.acceptedNote}>✅ Aapne Claim Kiya — Rasta Mein Nikal Sakte Hain</p>
-                  ) : (
-                    <>
-                      <p style={s.pendStatusNote}>Jald Ready Hoga</p>
-                      <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleClaim(order)}>
-                        <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Claim Karo'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-
             {/* SECTION C — Aaj Ki History (today's completed deliveries,
                 client-filtered from the earnings array already fetched for
                 the "Meri Kamai" tab — no separate DB call). */}
@@ -594,6 +589,35 @@ export default function DeliveryPartnerPanel() {
               </div>
             ))}
           </>}
+
+          {/* Recent Completed — seller_action='return_received' return
+              pickups. 072_deliveryPartnerReturnHistory.sql keeps these
+              visible to the partner who claimed them (previously RLS hid
+              them the moment the seller finalized receipt, so they just
+              vanished with no confirmation the pickup had actually
+              completed). Moved to its own tab — this was crowding the
+              main Orders page below three already-actionable sections. */}
+          {activeTab === 'recent' && <>
+            <p style={s.tabTitle}>Recent Completed</p>
+
+            {completedReturnPickups.length === 0 && <p style={s.emptyText}>Abhi koi completed return nahi hai</p>}
+
+            {completedReturnPickups.map((ret) => {
+              const o = ret.orders || {};
+              return (
+                <div key={ret.id} style={{ ...s.pendCard, opacity: 0.75 }}>
+                  <div style={s.pendTop}>
+                    <span style={s.pendId}>#{o.order_number || ret.order_id}</span>
+                  </div>
+                  <div style={s.pendInfoRow}>
+                    <MapPin size={13} color="#888888" />
+                    <span style={s.pendInfoText}>{o.customer_name || 'Customer'} — {o.delivery_address || o.delivery_pincode}</span>
+                  </div>
+                  <p style={s.acceptedNote}>Received ✅</p>
+                </div>
+              );
+            })}
+          </>}
         </div>
 
         {/* ── Bottom Nav ── */}
@@ -601,6 +625,10 @@ export default function DeliveryPartnerPanel() {
           <button style={s.navTab} onClick={() => setActiveTab('orders')}>
             <ClipboardList size={22} color={activeTab === 'orders' ? '#1A6B3C' : '#AAAAAA'} />
             <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'orders' ? '#1A6B3C' : '#AAAAAA' }}>Orders</span>
+          </button>
+          <button style={s.navTab} onClick={() => setActiveTab('recent')}>
+            <History size={22} color={activeTab === 'recent' ? '#1A6B3C' : '#AAAAAA'} />
+            <span style={{ fontSize: '11px', fontWeight: '600', color: activeTab === 'recent' ? '#1A6B3C' : '#AAAAAA' }}>Recent</span>
           </button>
           <button style={s.navTab} onClick={() => setActiveTab('earnings')}>
             <Wallet size={22} color={activeTab === 'earnings' ? '#1A6B3C' : '#AAAAAA'} />
