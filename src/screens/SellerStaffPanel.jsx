@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Package, LogOut, MapPin, Phone, FileText } from 'lucide-react';
+import { CheckCircle, Package, LogOut, MapPin, Phone, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { generateInvoicePDF } from '../lib/invoicePdf';
@@ -17,6 +17,13 @@ export default function SellerStaffPanel() {
   const [storeName,     setStoreName]     = useState('');
   const [orders,        setOrders]        = useState([]);
   const [myLog,         setMyLog]         = useState([]);
+  // Single-id expand tracker, same shape as SuperAdminPanel.jsx's own
+  // `expanded === id ? null : id` toggle (the established pattern in this
+  // codebase — there's no chevron-rotate precedent anywhere, the closest
+  // existing convention is a ▲/▼ label swap; this uses a swapped
+  // ChevronUp/ChevronDown icon instead since the card itself is the
+  // tap target here, not a separate labeled button).
+  const [expandedLogOrder, setExpandedLogOrder] = useState(null);
   const [loading,       setLoading]       = useState(true);
   const [busyId,        setBusyId]        = useState(null);
   const [billLoadingId, setBillLoadingId] = useState(null);
@@ -61,7 +68,7 @@ export default function SellerStaffPanel() {
   const fetchMyLog = async (staffId) => {
     const { data, error } = await supabase
       .from('orders')
-      .select('order_number, customer_name, final_amount, status, updated_at, delivered_staff:delivered_by_staff_id(name)')
+      .select('order_number, customer_name, customer_phone, final_amount, status, payment_method, payment_status, updated_at, order_items(name, quantity, unit_price, total_price), delivered_staff:delivered_by_staff_id(name)')
       .eq('accepted_by_staff_id', staffId)
       .order('updated_at', { ascending: false })
       .limit(30);
@@ -193,23 +200,44 @@ export default function SellerStaffPanel() {
 
           {myLog.length === 0 && <p style={s.hintText}>Abhi koi log nahi</p>}
 
-          {myLog.map((order) => (
-            <div key={order.order_number} style={{ ...s.pendCard, borderLeftColor: '#AAAAAA' }}>
-              <div style={s.pendTop}>
-                <span style={s.pendId}>#{order.order_number}</span>
-                <span style={{ ...s.statusBadge, color: STATUS_COLOR[order.status] || '#888888', backgroundColor: STATUS_BG[order.status] || '#F5F5F5' }}>
-                  {STATUS_LABEL[order.status] || order.status}
-                </span>
+          {myLog.map((order) => {
+            const isOpen = expandedLogOrder === order.order_number;
+            return (
+              <div
+                key={order.order_number}
+                style={{ ...s.pendCard, borderLeftColor: '#AAAAAA', cursor: 'pointer' }}
+                onClick={() => setExpandedLogOrder(isOpen ? null : order.order_number)}
+              >
+                <div style={s.pendTop}>
+                  <span style={s.pendId}>#{order.order_number}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ ...s.statusBadge, color: STATUS_COLOR[order.status] || '#888888', backgroundColor: STATUS_BG[order.status] || '#F5F5F5' }}>
+                      {STATUS_LABEL[order.status] || order.status}
+                    </span>
+                    {isOpen ? <ChevronUp size={16} color="#888888" /> : <ChevronDown size={16} color="#888888" />}
+                  </div>
+                </div>
+                <div style={s.pendInfoRow}>
+                  <span style={s.pendInfoText}>{order.customer_name || 'Customer'} · ₹{Number(order.final_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <p style={s.staffLine}>{new Date(order.updated_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+
+                {isOpen && (
+                  <div style={s.logExpanded}>
+                    {(order.order_items || []).map((it, i) => (
+                      <p key={i} style={s.pendItem}>
+                        • {it.name || 'Item'} x{it.quantity || 1} — ₹{Number(it.total_price ?? it.unit_price * (it.quantity || 1)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    ))}
+                    <p style={s.logExpandedAmount}>Total: ₹{Number(order.final_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                    <p style={s.staffLine}>Payment: {order.payment_method === 'cod' ? 'COD' : 'Prepaid'}</p>
+                    {order.delivered_staff?.name && <p style={s.staffLine}>Delivery Partner: {order.delivered_staff.name}</p>}
+                    {order.customer_phone && <p style={s.staffLine}>Phone: {order.customer_phone}</p>}
+                  </div>
+                )}
               </div>
-              <div style={s.pendInfoRow}>
-                <span style={s.pendInfoText}>{order.customer_name || 'Customer'} · ₹{Number(order.final_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-              </div>
-              {order.delivered_staff?.name && (
-                <p style={s.staffLine}>Delivery: {order.delivered_staff.name}</p>
-              )}
-              <p style={s.staffLine}>{new Date(order.updated_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -242,6 +270,8 @@ const s = {
   pendItem:     { fontSize: '13px', color: '#333333', margin: 0 },
   pendAmount:   { fontSize: '16px', fontWeight: '800', color: '#1A6B3C', marginTop: '4px' },
   staffLine:    { fontSize: '11px', color: '#888888', margin: 0 },
+  logExpanded:       { display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px', paddingTop: '10px', borderTop: '1px solid #F0F0F0' },
+  logExpandedAmount: { fontSize: '14px', fontWeight: '800', color: '#1A6B3C', margin: '2px 0' },
 
   acceptBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#1A6B3C', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
   printBtn:  { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#FFFFFF', color: '#0C447C', border: '1.5px solid #0C447C', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
