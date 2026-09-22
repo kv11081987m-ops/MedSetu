@@ -254,6 +254,11 @@ export default function Checkout() {
   // 069_delayedOrderSystem.sql — informational only, never blocks ordering;
   // separate from the get_routing_candidates serviceability gate below.
   const [isBatchZone,         setIsBatchZone]         = useState(false);
+  // Early, non-blocking warning — same data the Place Order gate itself
+  // re-checks (belt-and-braces, not a substitute for it): lets the
+  // customer see "this pincode isn't served" the moment they pick/save an
+  // address, instead of only after tapping Place Order.
+  const [isPincodeUnserviceable, setIsPincodeUnserviceable] = useState(false);
   const [selectedLatitude,    setSelectedLatitude]    = useState(null);
   const [selectedLongitude,   setSelectedLongitude]   = useState(null);
   // Captured on "Chuno" (A4a) — A4b now reads this for orderData.customerPhone.
@@ -374,23 +379,31 @@ export default function Checkout() {
     fetchDefaultAddress();
   }, []);
 
-  // ── Batch-zone banner (069_delayedOrderSystem.sql) — a lightweight,
-  // non-blocking lookup of the pincode's delivery_speed_tier, independent
-  // of the get_routing_candidates serviceability gate at order-placement
-  // time. Re-runs whenever the resolved pincode changes (default address
-  // load, picker selection, or a freshly-saved address).
+  // ── Batch-zone banner (069_delayedOrderSystem.sql) + early serviceability
+  // warning, same lookup — a lightweight, non-blocking read of the
+  // pincode's serviceable_pincodes row, independent of the
+  // get_routing_candidates/serviceable_pincodes gate at order-placement
+  // time (Checkout's actual block, unchanged). Re-runs whenever the
+  // resolved pincode changes (default address load, picker selection, or
+  // a freshly-saved address) — covers every trigger point asked for
+  // without a second query.
   useEffect(() => {
     if (delivery !== 'home' || !selectedPincode || selectedPincode.length !== 6) {
       setIsBatchZone(false);
+      setIsPincodeUnserviceable(false);
       return;
     }
     let cancelled = false;
     supabase
       .from('serviceable_pincodes')
-      .select('delivery_speed_tier')
+      .select('delivery_speed_tier, is_active')
       .eq('pincode', selectedPincode)
       .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setIsBatchZone(data?.delivery_speed_tier === 'batch'); });
+      .then(({ data }) => {
+        if (cancelled) return;
+        setIsBatchZone(data?.delivery_speed_tier === 'batch');
+        setIsPincodeUnserviceable(!data?.is_active);
+      });
     return () => { cancelled = true; };
   }, [selectedPincode, delivery]);
 
@@ -871,6 +884,12 @@ export default function Checkout() {
               <Plus size={14} color="#1A6B3C" />
               Naya Address Add Karo
             </button>
+
+            {delivery === 'home' && isPincodeUnserviceable && (
+              <div style={s.pincodeWarning}>
+                ⚠️ Abhi is pincode ({selectedPincode}) par home delivery available nahi hai. Kripya doosra address try karein.
+              </div>
+            )}
           </div>
 
           {/* Delivery Type */}
@@ -1527,6 +1546,16 @@ const s = {
     gap: '10px',
     fontSize: '13px',
     color: '#8A6D1D',
+  },
+  pincodeWarning: {
+    backgroundColor: '#FDEDED',
+    color: '#DC3545',
+    fontSize: '12.5px',
+    fontWeight: '600',
+    lineHeight: '1.4',
+    padding: '8px 10px',
+    borderRadius: '8px',
+    marginTop: '10px',
   },
 
   // Rx status
