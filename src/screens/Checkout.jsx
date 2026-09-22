@@ -634,6 +634,26 @@ export default function Checkout() {
           setOrdering(false);
           return;
         }
+
+        // Serviceability gate for EVERY home-delivery order, gated or not.
+        // Previously only the non-gated get_routing_candidates branch below
+        // checked this — a gated (Rx) order skips routing entirely (it's
+        // created as awaiting_pharmacist with seller_id null, routed later
+        // by approve_rx_order()) and so sailed through with zero pincode
+        // check, from any pincode. This runs first, before either path.
+        const { data: pincodeCheck } = await supabase
+          .from('serviceable_pincodes')
+          .select('is_active')
+          .eq('pincode', selectedPincode)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (!pincodeCheck) {
+          setOrderError(`Maaf kijiye, abhi is pincode (${selectedPincode}) par home delivery available nahi hai.`);
+          setOrdering(false);
+          return;
+        }
+
         // Non-gated only: resolve + reserve the routed seller now. Gated
         // orders skip this entirely (get_routing_candidates NOT called).
         if (!isGated) {

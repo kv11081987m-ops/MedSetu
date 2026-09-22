@@ -26,11 +26,6 @@ const NOTIF_COLORS = {
 };
 const getNotifColor = (type) => NOTIF_COLORS[type] || '#2563EB';
 
-// R3-CORE: hardcoded for now — 026_serviceablePincodes.sql already has a
-// serviceable_pincodes table with these same 2 rows, but nothing reads it
-// yet. Move this to a platform_settings/table read later instead of
-// duplicating the list.
-const SERVICEABLE_PINCODES = ['274001', '274201'];
 
 // Infinite-scroll page size for the Best-Selling Medicines feed —
 // get_customer_medicines RPC (040_customerMedicineFeed.sql) caps at 50/call.
@@ -147,8 +142,23 @@ export default function CustomerHome() {
   // doubles as the "Change" popup's live-preview value (R3-CORE, not
   // persisted — see modalPincode's onChange below) as well as the real
   // default address's pincode fetched on load.
-  const isPincodeServiceable = pincode ? SERVICEABLE_PINCODES.includes(pincode) : null;
-  const modalIsServiceable = modalPincode.length === 6 ? SERVICEABLE_PINCODES.includes(modalPincode) : null;
+  const [servicePincodes, setServicePincodes] = useState([]);
+  const isPincodeServiceable = pincode ? servicePincodes.includes(pincode) : null;
+  const modalIsServiceable = modalPincode.length === 6 ? servicePincodes.includes(modalPincode) : null;
+
+  // Was a hardcoded 2-pincode array (R3-CORE) that could silently drift
+  // from the real serviceable_pincodes table (e.g. SuperAdminPanel adding/
+  // removing a pincode would never be reflected here). RLS
+  // (serviceable_pincodes_select_authenticated) requires auth.uid() IS NOT
+  // NULL — safe here since /home is a customer-only ProtectedRoute, so
+  // every real visitor is already authenticated.
+  useEffect(() => {
+    supabase
+      .from('serviceable_pincodes')
+      .select('pincode')
+      .eq('is_active', true)
+      .then(({ data }) => setServicePincodes((data || []).map((r) => r.pincode)));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
