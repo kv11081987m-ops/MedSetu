@@ -7,9 +7,11 @@ import {
   Wallet, ChevronRight, PartyPopper, Gift, X,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { createOrder, createOrderItems } from '../lib/orders';
 import { saveAddress, setDefaultAddress } from '../lib/addresses';
 import { supabase } from '../lib/supabase';
+import { isAuthError, handleAuthExpiry } from '../lib/authGuard';
 import AddressForm from '../components/AddressForm';
 import AttachPhoneModal from '../components/AttachPhoneModal';
 
@@ -236,6 +238,7 @@ export default function Checkout() {
   const navigate  = useNavigate();
   const location  = useLocation();
   const { cartItems, cartSellerId, clearCart, updateQuantity, removeFromCart } = useCart();
+  const { handleLogout } = useAuth();
 
   const [items, setItems] = useState(() =>
     cartItems.map((i) => ({
@@ -479,6 +482,12 @@ export default function Checkout() {
         address: { ...newCheckoutAddress, is_default: false },
       });
       if (error || !data) {
+        // A dead/expired session (refresh_token failure) resolves auth.uid()
+        // to null server-side, so this RLS-guarded INSERT fails exactly
+        // like any other error — check for that specifically before the
+        // generic message, since "Unknown error"/a raw Postgres message
+        // gives the customer no way to know they need to log in again.
+        if (isAuthError(error)) { handleAuthExpiry(handleLogout); return; }
         alert('Address save nahi hua: ' + (error?.message || 'Unknown error'));
         return;
       }
@@ -500,7 +509,10 @@ export default function Checkout() {
       handleChooseAddress(data);
       setShowNewAddressForm(false);
       setNewCheckoutAddress({ label: 'Ghar', address_line: '', city: 'Deoria', district: 'Deoria', state: 'Uttar Pradesh', pincode: '', latitude: null, longitude: null, phone: '' });
-    } catch (err) { alert('Save nahi hua: ' + err.message); }
+    } catch (err) {
+      if (isAuthError(err)) { handleAuthExpiry(handleLogout); return; }
+      alert('Save nahi hua: ' + err.message);
+    }
   };
 
   // ── Calculations (must be before the Rx useEffect) ──
@@ -736,6 +748,9 @@ export default function Checkout() {
       const { data: orderRows, error: orderErr } = await createOrder(orderData);
 
       if (orderErr || !orderRows?.length) {
+        // Same dead-session check as handleSaveNewAddress — orders_insert_own
+        // RLS fails the exact same way once auth.uid() resolves to null.
+        if (isAuthError(orderErr)) { handleAuthExpiry(handleLogout); return; }
         setOrderError(orderFailMessage(orderErr?.message));
         setOrdering(false);
         return;
@@ -789,6 +804,7 @@ export default function Checkout() {
       clearCart();
       setSuccess(true);
     } catch (err) {
+      if (isAuthError(err)) { handleAuthExpiry(handleLogout); return; }
       setOrderError(orderFailMessage(err?.message));
     } finally {
       setOrdering(false);
