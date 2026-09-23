@@ -70,7 +70,7 @@ export default function DeliveryPartnerPanel() {
     // fetchUpcomingOrders below).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp, delivered_by_staff_id, rider_reached_at, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
+      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp_sent_at, delivered_by_staff_id, rider_reached_at, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
       .eq('status', 'out_for_delivery')
       .order('assigned_at', { ascending: true });
     if (error) { console.error('fetchAvailableOrders error:', error); return; }
@@ -80,7 +80,7 @@ export default function DeliveryPartnerPanel() {
     // OTP-entry state instead of showing "Pickup Karo" again.
     setOtpSentIds((prev) => {
       const next = new Set(prev);
-      (data || []).forEach((o) => { if (o.delivery_otp) next.add(o.id); });
+      (data || []).forEach((o) => { if (o.delivery_otp_sent_at) next.add(o.id); });
       return next;
     });
   };
@@ -248,7 +248,9 @@ export default function DeliveryPartnerPanel() {
 
   const handlePickup = async (order) => {
     setBusyId(order.id);
-    if (!order.delivery_otp) {
+    // generate_delivery_otp never returns the OTP (it goes only to the
+    // customer, 078) — the rider just needs to know one exists.
+    if (!order.delivery_otp_sent_at) {
       const { data, error } = await supabase.rpc('generate_delivery_otp', { p_order_id: order.id });
       if (error || !data?.success) {
         alert('OTP generate nahi hua: ' + (data?.message || error?.message || 'Unknown error'));

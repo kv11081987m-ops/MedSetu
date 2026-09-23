@@ -127,7 +127,7 @@ export default function SuperAdminPanel() {
   const loadStats = async () => {
     const [{ count: ps }, { count: as }, { count: pp }, { count: to }, { data: commData }] = await Promise.all([
       supabase.from('seller_registrations').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('sellers').select('*', { count: 'exact', head: true }),
+      supabase.from('sellers').select('id', { count: 'exact', head: true }),
       supabase.from('staff_whitelist').select('*', { count: 'exact', head: true }).eq('role', 'pharmacist').eq('is_approved', false),
       supabase.from('orders').select('*', { count: 'exact', head: true }),
       supabase.from('orders').select('commission_amount').eq('status', 'delivered').not('commission_amount', 'is', null),
@@ -343,7 +343,7 @@ export default function SuperAdminPanel() {
           is_verified:     true,
           is_open:         false,
         })
-        .select()
+        .select('id')
         .maybeSingle();
       if (sellerError) throw sellerError;
 

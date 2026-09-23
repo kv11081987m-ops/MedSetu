@@ -600,16 +600,15 @@ export function AuthProvider({ children }) {
               // seller's own users.id — approval (SuperAdminPanel) happens
               // before they've ever logged in, so this is the first reliable
               // point it can be done. Backfills existing pre-Phase-0 rows too.
+              // Server-side (link_my_seller_account, 078): authenticated can't
+              // filter sellers by email any more, and the old direct update
+              // never matched under RLS anyway (owner is identified via the
+              // very user_id being backfilled).
               if (staffRole === 'seller' && row?.email) {
                 try {
-                  const { data: sellerRow } = await supabase
-                    .from('sellers')
-                    .select('id')
-                    .eq('email', row.email)
-                    .is('user_id', null)
-                    .maybeSingle();
-                  if (sellerRow) {
-                    await supabase.from('sellers').update({ user_id: row.id }).eq('id', sellerRow.id);
+                  const { data: linkRes, error: linkErr } = await supabase.rpc('link_my_seller_account');
+                  if (linkErr || linkRes?.success === false) {
+                    console.error('[AuthContext] sellers.user_id backfill failed:', linkErr || linkRes);
                   }
                 } catch (e) {
                   console.error('[AuthContext] sellers.user_id backfill error:', e);

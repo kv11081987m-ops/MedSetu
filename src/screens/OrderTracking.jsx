@@ -157,6 +157,7 @@ export default function OrderTracking() {
   const [acknowledgingDelay, setAcknowledgingDelay] = useState(false);
   const [supportWhatsapp, setSupportWhatsapp] = useState('919196103234');
   const [billLoading, setBillLoading] = useState(false);
+  const [deliveryOtp, setDeliveryOtp] = useState(null);
 
   const handleDownloadBill = async () => {
     if (!order || billLoading) return;
@@ -243,6 +244,25 @@ export default function OrderTracking() {
       .subscribe((status, err) => { if (import.meta.env.DEV) console.log('[OrderTracking Realtime]', status, err ?? ''); });
     return () => { supabase.removeChannel(channel); };
   }, [order?.id]);
+
+  // OTP lives in order_delivery_otps (customer-only RLS, 078), not on the
+  // orders row the rider can also read. delivery_otp_sent_at changes on
+  // every (re)generate, and the realtime refetch above picks that up.
+  useEffect(() => {
+    if (order?.status !== 'out_for_delivery' || !order?.delivery_otp_sent_at) return;
+    let stale = false;
+    supabase
+      .from('order_delivery_otps')
+      .select('otp')
+      .eq('order_id', order.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (stale) return;
+        if (error) console.error('[OrderTracking] delivery OTP fetch error:', error);
+        setDeliveryOtp(data?.otp || null);
+      });
+    return () => { stale = true; };
+  }, [order?.id, order?.status, order?.delivery_otp_sent_at]);
 
   if (!loading && !orderId) {
     return (
@@ -352,13 +372,12 @@ export default function OrderTracking() {
 
           {/* Delivery OTP — coupon-code style, shown only once the order is
               actually out for delivery and generate_delivery_otp() has set
-              one. Pure display: the realtime subscription above already
-              re-fetches the full order on any UPDATE, so this just renders
-              from order.delivery_otp — no extra fetch/logic needed. */}
-          {order?.status === 'out_for_delivery' && order?.delivery_otp && (
+              one. The OTP itself comes from order_delivery_otps (effect
+              above), re-fetched whenever delivery_otp_sent_at changes. */}
+          {order?.status === 'out_for_delivery' && deliveryOtp && (
             <div style={s.otpCard}>
               <p style={s.otpLabel}>🔐 Delivery OTP</p>
-              <p style={s.otpValue}>{order.delivery_otp}</p>
+              <p style={s.otpValue}>{deliveryOtp}</p>
               <p style={s.otpHint}>Delivery partner ko yeh OTP batayein delivery confirm karne ke liye</p>
             </div>
           )}

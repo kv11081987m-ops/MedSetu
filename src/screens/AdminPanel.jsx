@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import { SELLER_COLUMNS } from '../lib/api';
 import {
   fetchCommissionDelegation,
   fetchPendingCommissionRequests,
@@ -376,7 +377,7 @@ export default function AdminPanel() {
       const { count: userCount } = await supabase
         .from('users').select('*', { count: 'exact', head: true });
 
-      const { data: sellers } = await supabase.from('sellers').select('*');
+      const { data: sellers } = await supabase.from('sellers').select(SELLER_COLUMNS);
       const active = sellers?.filter((s) => s.is_verified) || [];
       setAllDbSellers(sellers || []);
 

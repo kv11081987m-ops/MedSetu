@@ -1,5 +1,27 @@
 import { supabase } from './supabase';
 
+// Every sellers column except aadhar_number and email — 078 section 1B
+// revokes those two from authenticated, so select('*') on sellers fails
+// with 42501. A seller reads their own full row via my_seller_profile().
+export const SELLER_COLUMNS =
+  'id, user_id, store_name, owner_name, phone, address, district, drug_license, ' +
+  'pharmacist_name, pharmacist_cert, approval_status, is_open, rating, total_reviews, ' +
+  'latitude, longitude, created_at, updated_at, is_verified, seller_type, ' +
+  'commission_mode, commission_flat_rate, commission_status, commission_pending_mode, ' +
+  'commission_pending_rate, gst_number, routing_weight, invoice_prefix, is_aggregator';
+
+// Client mirror of inventory_expiry_ok() (078 section 4) — keep the two
+// in sync. Sellable if no expiry, or effective expiry is 30+ days away;
+// a 1st-of-month date is a label month ("2026-09") and runs to month end.
+export function isExpirySellable(expiryDate) {
+  if (!expiryDate) return true;
+  const [y, m, d] = String(expiryDate).slice(0, 10).split('-').map(Number);
+  const effective = d === 1 ? new Date(Date.UTC(y, m, 0)) : new Date(Date.UTC(y, m - 1, d));
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return effective.getTime() - 30 * 86400000 >= todayUtc;
+}
+
 // Map Supabase seller row → UI shape used across screens
 export function mapSeller(row, index = 0) {
   const words    = (row.store_name || '').split(' ');
@@ -92,7 +114,7 @@ export async function fetchMrpMode() {
 export async function fetchSellers(district = 'Deoria') {
   const { data, error } = await supabase
     .from('sellers')
-    .select('*')
+    .select(SELLER_COLUMNS)
     .eq('district', district)
     .eq('seller_type', 'retailer')
     .order('rating', { ascending: false });
@@ -104,7 +126,7 @@ export async function fetchSellers(district = 'Deoria') {
 export async function fetchWholesalers(district = 'Deoria') {
   const { data, error } = await supabase
     .from('sellers')
-    .select('*')
+    .select(SELLER_COLUMNS)
     .eq('district', district)
     .eq('seller_type', 'wholesaler')
     .order('rating', { ascending: false });
@@ -226,7 +248,7 @@ export async function fetchSellersForMedicine(medicineId, mrpMode = false, maste
   // me yahi fix laga tha. Do alag queries + client-side merge.
   let query = supabase
     .from('seller_inventory')
-    .select('seller_id, selling_price, mrp, seller_hidden, stock_quantity, reserved_quantity')
+    .select('seller_id, selling_price, mrp, seller_hidden, stock_quantity, reserved_quantity, expiry_date')
     .eq('medicine_id', medicineId);
   query = mrpMode ? query.eq('seller_hidden', false) : query.eq('is_available', true);
 
@@ -246,7 +268,7 @@ export async function fetchSellersForMedicine(medicineId, mrpMode = false, maste
 
   let rows = (data || [])
     .map((row) => ({ ...row, sellers: sellersById[row.seller_id] || null, available: (row.stock_quantity || 0) - (row.reserved_quantity || 0) }))
-    .filter((row) => row.sellers?.seller_type === 'retailer');
+    .filter((row) => row.sellers?.seller_type === 'retailer' && isExpirySellable(row.expiry_date));
   if (!mrpMode) {
     rows = rows.filter((row) => row.available > 0);
   }

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { intentionalSignOut } from '../context/AuthContext';
+import { SELLER_COLUMNS } from './api';
 
 export const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -94,31 +95,18 @@ export const onAuthStateChange = (callback) => {
 
 export const getCurrentSeller = async () => {
   try {
-    const user = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-
-    if (user?.phone) {
-      const { data } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('phone', user.phone)
-        .maybeSingle();
-      if (data) return data;
-    }
-
-    if (user?.email) {
-      const { data } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('email', user.email)
-        .maybeSingle();
-      if (data) return data;
-    }
+    // Own full row (incl. aadhar_number/email, which authenticated can't
+    // SELECT directly — 078 section 1B). Server resolves phone-then-email
+    // from the session, same order this used to try client-side.
+    const { data, error } = await supabase.rpc('my_seller_profile');
+    if (error) console.error('[getCurrentSeller] my_seller_profile error:', error);
+    if (data?.length) return data[0];
 
     // Dev fallback — only in dev mode, return null in production
     if (!import.meta.env.DEV) return null;
     const { data: fallback } = await supabase
       .from('sellers')
-      .select('*')
+      .select(SELLER_COLUMNS)
       .limit(1)
       .maybeSingle();
     return fallback || null;
