@@ -1073,15 +1073,19 @@ export default function SellerDashboard() {
   const markDelivered = (orderId) => withOrderBusy(orderId, () => markDeliveredImpl(orderId));
 
   const cancelConfirmedOrderImpl = async (orderId) => {
-    const { error } = await updateOrderStatus(orderId, 'cancelled');
-    if (error) { console.error('cancelConfirmedOrder failed:', error); return; }
-    const rawOrder = allOrders.find((o) => o.id === orderId);
-    if (rawOrder && sellerData?.id) {
-      const releaseResult = await releaseStock(sellerData.id, rawOrder.order_items || []);
-      if (!releaseResult.success) {
-        alert('Order cancel ho gaya, par in items ka reserved stock release nahi ho paya: ' + releaseResult.failures.join(', ') + '. Inventory manually check kar lein.');
-      }
+    // Status + reserve release in one server transaction (079). The client
+    // can't call release_stock itself since 064, which is how seller
+    // cancels used to leave reservations stuck.
+    const { data, error } = await supabase.rpc('seller_cancel_order', { p_order_id: orderId });
+    if (error || !data?.success) {
+      console.error('cancelConfirmedOrder failed:', error || data);
+      alert('Order cancel nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
+      return;
     }
+    if (data.failures?.length) {
+      alert('Order cancel ho gaya, par in items ka reserved stock release nahi ho paya: ' + data.failures.join(', ') + '. Inventory manually check kar lein.');
+    }
+    const rawOrder = allOrders.find((o) => o.id === orderId);
     if (rawOrder) {
       supabase.rpc('create_notification', {
         p_title: 'Order Cancel', p_body: 'Aapka order cancel ho gaya',
