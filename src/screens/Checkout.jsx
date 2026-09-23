@@ -12,6 +12,7 @@ import { createOrder, createOrderItems } from '../lib/orders';
 import { saveAddress, setDefaultAddress } from '../lib/addresses';
 import { supabase } from '../lib/supabase';
 import { isAuthError, handleAuthExpiry } from '../lib/authGuard';
+import { fetchMrpMode, fetchSellersForMedicine } from '../lib/api';
 import AddressForm from '../components/AddressForm';
 import AttachPhoneModal from '../components/AttachPhoneModal';
 
@@ -233,6 +234,24 @@ function AddressPickerModal({ addresses, loading, makingDefaultId, onChoose, onM
   );
 }
 
+// Cart prices are captured at add-to-cart and kept in localStorage, but
+// order_items are now checked server-side against the current cheapest
+// retailer price (080 validate_order_item_price). Re-resolve each item the
+// same way MedicineCard's quick-add did; returns only the prices that moved.
+async function fetchChangedPrices(items) {
+  const mrpMode = await fetchMrpMode();
+  const fresh = await Promise.all(items.map(async (it) => {
+    const sellers = await fetchSellersForMedicine(it.id, mrpMode, it.mrp);
+    return [it.id, sellers.length ? sellers[0].price : null];
+  }));
+  const changed = {};
+  fresh.forEach(([id, price]) => {
+    const current = items.find((it) => it.id === id);
+    if (price != null && current && Math.abs(price - current.price) > 0.005) changed[id] = price;
+  });
+  return changed;
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function Checkout() {
   const navigate  = useNavigate();
@@ -308,6 +327,17 @@ export default function Checkout() {
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
+
+  // ── Refresh stale cart prices once on open ────────────────
+  useEffect(() => {
+    let stale = false;
+    fetchChangedPrices(items).then((changed) => {
+      if (stale || !Object.keys(changed).length) return;
+      setItems((prev) => prev.map((it) => (changed[it.id] != null ? { ...it, price: changed[it.id] } : it)));
+      setOrderError('Kuch dawaiyon ka price update hua hai — naya total dekh lein.');
+    });
+    return () => { stale = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fetch platform delivery settings ──────────────────────
   useEffect(() => {
@@ -617,6 +647,16 @@ export default function Checkout() {
 
     setOrdering(true);
     setOrderError('');
+
+    // A price that moved since the page opened would be rejected by the
+    // server; show the new total and let the customer confirm it instead.
+    const changedPrices = await fetchChangedPrices(items);
+    if (Object.keys(changedPrices).length) {
+      setItems((prev) => prev.map((it) => (changedPrices[it.id] != null ? { ...it, price: changedPrices[it.id] } : it)));
+      setOrderError('Kuch dawaiyon ka price badal gaya hai — naya total dekh kar dobara Place Order dabayein.');
+      setOrdering(false);
+      return;
+    }
 
     const storedUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
     const customerId   = storedUser?.id || null;
