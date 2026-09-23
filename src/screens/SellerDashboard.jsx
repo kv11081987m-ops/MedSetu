@@ -489,10 +489,9 @@ function EditStoreModal({ seller, onSave, onClose }) {
 }
 
 // ─── Add Staff Modal (Profile tab — Mera Staff) ────────────────
-function AddStaffModal({ onSave, onClose, wholesalers }) {
+function AddStaffModal({ onSave, onClose }) {
   const [name,    setName]    = useState('');
   const [email,   setEmail]   = useState('');
-  const [deployedWholesalerId, setDeployedWholesalerId] = useState('');
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState('');
 
@@ -503,7 +502,7 @@ function AddStaffModal({ onSave, onClose, wholesalers }) {
 
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), email: email.trim().toLowerCase(), deployedWholesalerId: deployedWholesalerId || null });
+      await onSave({ name: name.trim(), email: email.trim().toLowerCase() });
     } catch (err) {
       setError(err?.message || 'Add nahi hua — dobara try karo');
     } finally {
@@ -530,25 +529,6 @@ function AddStaffModal({ onSave, onClose, wholesalers }) {
         <p style={{ fontSize: '11px', color: '#AAAAAA', margin: 0 }}>
           Staff isi email se Google login karega — Staff Login screen se "Seller Staff" role select karke.
         </p>
-
-        {wholesalers?.length > 0 && (
-          <div style={s.fieldWrap}>
-            <label style={s.label}>Wholesaler par deploy karein (optional)</label>
-            <select
-              style={s.commRateInput}
-              value={deployedWholesalerId}
-              onChange={(e) => setDeployedWholesalerId(e.target.value)}
-              disabled={saving}
-            >
-              <option value="">— Koi nahi (normal staff) —</option>
-              {wholesalers.map((w) => (
-                <option key={w.wholesaler_seller_id} value={w.wholesaler_seller_id}>
-                  {w.wholesaler?.store_name || 'Wholesaler'}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {error && <p style={{ fontSize: '12px', color: '#DC3545', margin: 0, fontWeight: '600' }}>{error}</p>}
 
@@ -631,9 +611,6 @@ export default function SellerDashboard() {
   const [myStaff,          setMyStaff]          = useState([]);
   const [loadingStaff,     setLoadingStaff]     = useState(false);
   const [showAddStaff,     setShowAddStaff]     = useState(false);
-  // ── Aggregator → wholesaler staff deployment (075_aggregatorWholesalerDeploy.sql) ──
-  const [myWholesalers,    setMyWholesalers]    = useState([]); // only populated for is_aggregator sellers
-  const [deployStaffFor,   setDeployStaffFor]   = useState(null); // assignment row being edited, or null
 
   // ── Fetch helpers ──────────────────────────────────────────
   const fetchPendingOrders = async (sellerId) => {
@@ -737,7 +714,6 @@ export default function SellerDashboard() {
         fetchMrpMode().then(setMrpMode),
         fetchReturnRequests(),
         fetchMyStaff(seller.id),
-        seller.is_aggregator ? fetchMyWholesalers(seller.id) : Promise.resolve(),
       ]);
     } catch (err) {
       console.error('Seller fetch:', err);
@@ -752,7 +728,7 @@ export default function SellerDashboard() {
     setLoadingStaff(true);
     const { data, error } = await supabase
       .from('staff_assignment')
-      .select('id, staff_id, is_active, started_at, deployed_wholesaler_id, staff:staff_id (name, staff_code, email), wholesaler:deployed_wholesaler_id (store_name)')
+      .select('id, staff_id, is_active, started_at, staff:staff_id (name, staff_code, email)')
       .eq('seller_id', sellerId)
       .eq('role_type', 'seller_staff')
       .eq('is_active', true)
@@ -762,22 +738,9 @@ export default function SellerDashboard() {
     setLoadingStaff(false);
   };
 
-  // aggregator_wholesalers rows already live for is_aggregator sellers
-  // (075_aggregatorWholesalerDeploy.sql) — join to sellers for the name
-  // shown in the deploy dropdown/staff list.
-  const fetchMyWholesalers = async (sellerId) => {
-    const { data, error } = await supabase
-      .from('aggregator_wholesalers')
-      .select('wholesaler_seller_id, wholesaler:wholesaler_seller_id (store_name)')
-      .eq('aggregator_seller_id', sellerId)
-      .eq('is_active', true);
-    if (error) console.error('fetchMyWholesalers error:', error);
-    setMyWholesalers(data || []);
-  };
-
-  const handleAddStaff = async ({ name, email, deployedWholesalerId }) => {
+  const handleAddStaff = async ({ name, email }) => {
     const { data, error } = await supabase.rpc('add_seller_staff', {
-      p_name: name, p_email: email, p_deployed_wholesaler_id: deployedWholesalerId || null,
+      p_name: name, p_email: email,
     });
     if (error || !data?.success) {
       throw new Error(data?.message || error?.message || 'Staff add nahi hua');
@@ -794,18 +757,6 @@ export default function SellerDashboard() {
       alert('Hatane mein dikkat: ' + (data?.message || error?.message || 'Unknown error'));
       return;
     }
-    await fetchMyStaff(sellerData.id);
-  };
-
-  const handleSetDeployment = async (assignment, deployedWholesalerId) => {
-    const { data, error } = await supabase.rpc('set_staff_deployment', {
-      p_staff_id: assignment.staff_id, p_deployed_wholesaler_id: deployedWholesalerId || null,
-    });
-    if (error || !data?.success) {
-      alert('Deployment update nahi hua: ' + (data?.message || error?.message || 'Unknown error'));
-      return;
-    }
-    setDeployStaffFor(null);
     await fetchMyStaff(sellerData.id);
   };
 
@@ -1728,21 +1679,8 @@ export default function SellerDashboard() {
                     <div>
                       <p style={{ ...s.infoValue, margin: 0 }}>{a.staff?.name || a.staff?.email}</p>
                       <p style={{ fontSize: '11px', color: '#AAAAAA', margin: '2px 0 0', fontFamily: 'monospace' }}>{a.staff?.staff_code}</p>
-                      {a.deployed_wholesaler_id && (
-                        <p style={{ fontSize: '11px', color: '#1A6B3C', margin: '2px 0 0', fontWeight: '600' }}>
-                          {a.wholesaler?.store_name || 'Wholesaler'} par deployed
-                        </p>
-                      )}
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      {sellerData?.is_aggregator && (
-                        <button
-                          style={{ background: 'none', border: '1.5px solid #1A6B3C', color: '#1A6B3C', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}
-                          onClick={() => setDeployStaffFor(deployStaffFor?.id === a.id ? null : a)}
-                        >
-                          Deploy
-                        </button>
-                      )}
                       <button
                         style={{ background: 'none', border: '1.5px solid #DC3545', color: '#DC3545', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}
                         onClick={() => handleRemoveStaff(a)}
@@ -1751,23 +1689,6 @@ export default function SellerDashboard() {
                       </button>
                     </div>
                   </div>
-
-                  {deployStaffFor?.id === a.id && (
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                      <select
-                        style={{ ...s.commRateInput, flex: 1 }}
-                        defaultValue={a.deployed_wholesaler_id || ''}
-                        onChange={(e) => handleSetDeployment(a, e.target.value)}
-                      >
-                        <option value="">— Koi nahi (normal staff) —</option>
-                        {myWholesalers.map((w) => (
-                          <option key={w.wholesaler_seller_id} value={w.wholesaler_seller_id}>
-                            {w.wholesaler?.store_name || 'Wholesaler'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
                 </div>
               ))}
 
@@ -1893,7 +1814,6 @@ export default function SellerDashboard() {
           <AddStaffModal
             onSave={handleAddStaff}
             onClose={() => setShowAddStaff(false)}
-            wholesalers={sellerData?.is_aggregator ? myWholesalers : []}
           />
         )}
       </div>
