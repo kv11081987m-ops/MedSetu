@@ -21,7 +21,7 @@
     "alias": "my-key-alias"
   },
   "appVersionName": "1.0.6",
-  "appVersionCode": 16,
+  "appVersionCode": 18,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://med-setu.vercel.app/manifest.json",
@@ -38,7 +38,7 @@
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://med-setu.vercel.app/",
-  "minSdkVersion": 21,
+  "minSdkVersion": 24,
   "orientation": "portrait",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
