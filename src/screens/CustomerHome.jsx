@@ -10,7 +10,7 @@ import AttachPhoneModal from '../components/AttachPhoneModal';
 import logo from '../assets/logo.png';
 import slogan from '../assets/slogan.png';
 import {
-  Bell, MapPin, Search, Camera, X,
+  Bell, MapPin, Search, Camera, X, Mic,
   Pill, ShoppingCart,
   Droplet, Leaf, Phone, Calendar,
 } from 'lucide-react';
@@ -94,6 +94,10 @@ export default function CustomerHome() {
   // id to update; stays null/unused for anyone who already has a phone.
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [phoneGateUser, setPhoneGateUser] = useState(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported] = useState(() => {
+    return typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  });
   const unreadCount = notifs.filter((n) => !n.is_read).length;
   const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
 
@@ -288,6 +292,32 @@ export default function CustomerHome() {
     return () => observer.disconnect();
   }, [activeServiceTab, popularError, popularMeds.length, mrpMode, loadPopular]);
 
+  const handleMicClick = () => {
+    if (!speechSupported) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'hi-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    setIsListening(true);
+    recognition.start();
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      navigate(`/medicine-search?q=${encodeURIComponent(transcript)}`);
+      setIsListening(false);
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+  };
+
   return (
     <div style={s.wrapper}>
       <div style={s.screen}>
@@ -328,30 +358,8 @@ export default function CustomerHome() {
         {/* ── Scrollable body ── */}
         <div style={s.scrollBody} ref={scrollBodyRef}>
 
-          {/* Service Tabs — colourful, horizontal, scrollable */}
-          <div style={s.serviceTabsRow}>
-            {SERVICE_TABS.map(({ id, label, Icon, color, bg }) => {
-              const isActive = activeServiceTab === id;
-              return (
-                <button key={id} style={s.serviceTab} onClick={() => setActiveServiceTab(id)}>
-                  <div style={{
-                    ...s.serviceTabIconBox,
-                    backgroundColor: bg,
-                    border: isActive ? `2px solid ${color}` : '2px solid transparent',
-                  }}>
-                    <Icon size={22} color={color} />
-                  </div>
-                  <span style={{ ...s.serviceTabLabel, color: isActive ? color : '#666666', fontWeight: isActive ? '700' : '500' }}>
-                    {label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Location block — gradient-bordered pincode/address + Change,
-              serviceability check (R3-CORE, no GPS auto-detect yet) shown
-              as a thin line just below. Tap on the row itself does nothing yet. */}
+          {/* Location block — pincode/address + Change,
+              serviceability check shown as a thin line just below. */}
           <div style={s.locationBlock}>
             <div style={s.addressRowWrap}>
               <div style={s.addressRowInner}>
@@ -384,13 +392,49 @@ export default function CustomerHome() {
 
           {/* Search Bar + Camera (prescription scan entry) */}
           <div style={s.searchRow}>
-            <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
-              <Search size={18} color="#AAAAAA" />
-              <span style={s.searchPlaceholder}>Kya dhundh rahe hain?</span>
-            </button>
+            <div style={s.searchContainer}>
+              <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
+                <Search size={18} color="#AAAAAA" />
+                <span style={s.searchPlaceholder}>Kya dhundh rahe hain?</span>
+              </button>
+              {speechSupported && (
+                <button
+                  style={{
+                    ...s.micBtn,
+                    backgroundColor: isListening ? '#F26C0A' : 'transparent',
+                  }}
+                  aria-label="Voice Search"
+                  onClick={handleMicClick}
+                  disabled={isListening}
+                >
+                  <Mic size={16} color={isListening ? '#FFFFFF' : '#7C3AED'} />
+                </button>
+              )}
+            </div>
             <button style={s.cameraBtn} aria-label="Prescription Upload" onClick={() => navigate('/prescription')}>
               <Camera size={20} color="#FFFFFF" />
             </button>
+          </div>
+
+          {/* Service Tabs — colourful, horizontal, scrollable (Category browse) */}
+          <div style={s.serviceTabsRow}>
+            {SERVICE_TABS.map(({ id, label, Icon, color, bg }) => {
+              const isActive = activeServiceTab === id;
+              return (
+                <button key={id} style={s.serviceTab} onClick={() => setActiveServiceTab(id)}>
+                  <div style={{
+                    ...s.serviceTabIconBox,
+                    backgroundColor: bg,
+                    border: isActive ? `2px solid ${color}` : '2px solid transparent',
+                  }}>
+                    <Icon size={22} color={color} />
+                  </div>
+                  <span style={{ ...s.serviceTabLabel, color: isActive ? color : '#666666', fontWeight: isActive ? '700' : '500' }}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Best-Selling Medicines (Allopath) / Coming Soon (other tabs) */}
@@ -815,29 +859,23 @@ const s = {
     lineHeight: '1.25',
   },
 
-  // Location block — gradient-bordered pincode/address row + Change,
-  // plus a thin serviceability line just below it. Edges match the
-  // search bar underneath (same width, no extra outer padding).
+  // Location block — slim row with no border/shadow, Flipkart-style
   locationBlock: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
+    gap: '4px',
   },
   addressRowWrap: {
     width: '100%',
     boxSizing: 'border-box',
-    padding: '1.5px',
-    borderRadius: '10px',
-    background: 'linear-gradient(90deg, #F26C0A 0%, #0C447C 50%, #E0A818 100%)',
   },
   addressRowInner: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '8px',
-    borderRadius: '8.5px',
-    padding: '8px 12px',
-    backgroundColor: '#FFFFFF',
+    padding: '3px 0',
+    backgroundColor: 'transparent',
   },
   addressInfoGroup: {
     display: 'flex',
@@ -848,29 +886,31 @@ const s = {
   },
   addressText: {
     fontSize: '11.5px',
-    color: '#666666',
+    color: '#0C447C',
     lineHeight: '1.4',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontWeight: '600',
   },
   changeBtn: {
     flexShrink: 0,
-    background: '#EAF2FB',
+    background: 'none',
     border: 'none',
-    borderRadius: '6px',
-    padding: '4px 10px',
+    borderRadius: 0,
+    padding: '0 8px',
     fontSize: '11.5px',
     fontWeight: '700',
     color: '#0C447C',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    textDecoration: 'underline',
   },
   serviceabilityLine: {
     fontSize: '11px',
     fontWeight: '600',
     margin: 0,
-    padding: '0 4px',
+    padding: '0 0',
     lineHeight: '1.4',
   },
 
@@ -951,6 +991,11 @@ const s = {
     gap: '10px',
     alignItems: 'center',
   },
+  searchContainer: {
+    position: 'relative',
+    flex: 1,
+    minWidth: 0,
+  },
   searchBar: {
     display: 'flex',
     alignItems: 'center',
@@ -959,15 +1004,31 @@ const s = {
     border: '1.5px solid rgba(12,68,124,0.25)',
     borderRadius: '12px',
     padding: '13px 16px',
-    flex: 1,
-    minWidth: 0,
+    paddingRight: '46px',
+    width: '100%',
     cursor: 'pointer',
     fontFamily: 'inherit',
     textAlign: 'left',
+    boxSizing: 'border-box',
   },
   searchPlaceholder: {
     fontSize: '14px',
     color: '#AAAAAA',
+  },
+  micBtn: {
+    position: 'absolute',
+    right: '2px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
   cameraBtn: {
     flexShrink: 0,
@@ -980,6 +1041,18 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
+  },
+  iconBtn: {
+    flexShrink: 0,
+    width: '46px',
+    height: '46px',
+    borderRadius: '12px',
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
 
   comingSoonBox: {

@@ -41,7 +41,8 @@ export default function MedicineCard({ medicine, type, mrpMode }) {
   const isInCart = cartItems.some((i) => i.id === med.id);
 
   const stripColor = DOSAGE_COLORS[medicine.dosage_form] || DOSAGE_COLOR_DEFAULT;
-  const tagLabel = type === 'janaushadhi' ? 'JAN AUSHADHI' : type === 'generic' ? 'GENERIC' : 'BRANDED';
+  const brandDisplay = med.brand && med.brand.trim() ? med.brand.trim().toUpperCase().substring(0, 40) : 'BRANDED';
+  const tagLabel = type === 'janaushadhi' ? 'JAN AUSHADHI' : type === 'generic' ? 'GENERIC' : brandDisplay;
   const packLabel = rateInfo.unit === 'tablet' && rateInfo.total > 0
     ? `${rateInfo.total} tablet${rateInfo.total > 1 ? 's' : ''}/strip`
     : (medicine.unit || 'Per unit');
