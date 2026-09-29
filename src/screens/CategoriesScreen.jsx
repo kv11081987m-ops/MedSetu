@@ -8,7 +8,7 @@ import BottomNav from '../components/BottomNav';
 import {
   ArrowLeft, ShoppingCart,
   Pill, PillBottle, Syringe, GlassWater, SprayCan,
-  Droplet, FlaskConical, Package, Wind,
+  Droplet, FlaskConical, Package, Wind, Sparkles,
 } from 'lucide-react';
 
 // R3-C2: dosage_form values, ordered by real frequency in master_medicines
@@ -21,6 +21,7 @@ const CATEGORY_TABS = [
   { id: 'Syrup',     label: 'Syrup',     Icon: GlassWater },
   { id: 'Capsule',   label: 'Capsule',   Icon: PillBottle },
   { id: 'Topical',   label: 'Topical',   Icon: SprayCan },
+  { id: 'Beauty',    label: 'Beauty',    Icon: Sparkles },
   { id: 'Drops',     label: 'Drops',     Icon: Droplet },
   { id: 'Solution',  label: 'Solution',  Icon: FlaskConical },
   { id: 'Powder',    label: 'Powder',    Icon: Package },
@@ -36,10 +37,19 @@ const DOSAGE_COLORS = {
   Syrup:     '#0D9488',
   Capsule:   '#F26C0A',
   Topical:   '#1A6B3C',
+  Beauty:    '#D946A6',
   Drops:     '#06B6D4',
   Solution:  '#7C3AED',
   Powder:    '#92400E',
   Inhaler:   '#0EA5E9',
+};
+
+const BEAUTY_KEYWORDS = ['cream', 'lotion', 'soap', 'shampoo', 'face wash', 'sunscreen', 'moisturizer', 'oil', 'serum'];
+const isBeautyProduct = (medicine) => {
+  if (!medicine) return false;
+  if (medicine.requires_prescription) return false;
+  const lowerName = (medicine.name || '').toLowerCase();
+  return BEAUTY_KEYWORDS.some((kw) => lowerName.includes(kw));
 };
 
 export default function CategoriesScreen() {
@@ -69,12 +79,17 @@ export default function CategoriesScreen() {
     if (!mrpModeReady) return;
     let cancelled = false;
     setLoading(true);
-    fetchMedicinesByCategory(activeCategory, mrpMode)
+    const fetchCategory = activeCategory === 'Beauty' ? 'Topical' : activeCategory;
+    fetchMedicinesByCategory(fetchCategory, mrpMode)
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) { setCategoryError(true); setLoading(false); return; }
         setCategoryError(false);
-        setMedicines(data || []);
+        let filtered = data || [];
+        if (activeCategory === 'Beauty') {
+          filtered = filtered.filter((med) => isBeautyProduct(med));
+        }
+        setMedicines(filtered);
         setLoading(false);
       })
       .catch(() => {

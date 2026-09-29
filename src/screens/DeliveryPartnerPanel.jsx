@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getCurrentStaff } from '../lib/auth';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
+import OrderAlertModal from '../components/OrderAlertModal';
 
 const STATUS_LABEL = { pending: 'Pending', settled: 'Settled' };
 const STATUS_COLOR = { pending: '#E65100', settled: '#1A6B3C' };
@@ -49,6 +50,10 @@ export default function DeliveryPartnerPanel() {
   const [showNotif,   setShowNotif]   = useState(false);
   const [notifs,      setNotifs]      = useState([]);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
+
+  // ── Order Alert ────────────────────────────────────────────
+  const [showOrderAlert, setShowOrderAlert]   = useState(false);
+  const [alertOrder,     setAlertOrder]       = useState(null);
 
   // Per-order UI state — which cards have an OTP already sent (input
   // shown) and what's currently typed into each one.
@@ -191,6 +196,19 @@ export default function DeliveryPartnerPanel() {
     if (!staff?.id) return;
     const channel = supabase
       .channel(`dp-orders-${staff.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders', filter: `status=eq.out_for_delivery` },
+        (payload) => {
+          try {
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          } catch {}
+          setAlertOrder(payload.new);
+          setShowOrderAlert(true);
+          fetchUpcomingOrders();
+          fetchAvailableOrders();
+        }
+      )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `delivered_by_staff_id=eq.${staff.id}` },
@@ -698,6 +716,13 @@ export default function DeliveryPartnerPanel() {
           </div>
         )}
 
+        {showOrderAlert && (
+          <OrderAlertModal
+            order={alertOrder}
+            onViewOrders={() => { setShowOrderAlert(false); setActiveTab('orders'); }}
+            onClose={() => setShowOrderAlert(false)}
+          />
+        )}
       </div>
     </div>
   );

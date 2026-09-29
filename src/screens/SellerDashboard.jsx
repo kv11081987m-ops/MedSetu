@@ -16,6 +16,7 @@ import { updateOrderStatus, fetchB2BOrders, markOrderReceived } from '../lib/ord
 import { getSignedRxUrl } from '../lib/prescriptions';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import { formatIST } from '../lib/formatTime';
+import OrderAlertModal from '../components/OrderAlertModal';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -612,6 +613,10 @@ export default function SellerDashboard() {
   const [loadingStaff,     setLoadingStaff]     = useState(false);
   const [showAddStaff,     setShowAddStaff]     = useState(false);
 
+  // ── Order Alert ────────────────────────────────────────────
+  const [showOrderAlert, setShowOrderAlert]   = useState(false);
+  const [alertOrder,     setAlertOrder]       = useState(null);
+
   // ── Fetch helpers ──────────────────────────────────────────
   const fetchPendingOrders = async (sellerId) => {
     const { data } = await supabase
@@ -817,7 +822,21 @@ export default function SellerDashboard() {
       .channel(`seller-orders-${sid}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders', filter: `seller_id=eq.${sid}` },
+        { event: 'INSERT', schema: 'public', table: 'orders', filter: `seller_id=eq.${sid}` },
+        (payload) => {
+          try {
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          } catch {}
+          setAlertOrder(payload.new);
+          setShowOrderAlert(true);
+          fetchPendingOrders(sid);
+          fetchAllOrders(sid, orderFilterRef.current);
+          fetchTodayStats(sid);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `seller_id=eq.${sid}` },
         () => {
           fetchPendingOrders(sid);
           fetchAllOrders(sid, orderFilterRef.current);
@@ -1818,6 +1837,14 @@ export default function SellerDashboard() {
           <AddStaffModal
             onSave={handleAddStaff}
             onClose={() => setShowAddStaff(false)}
+          />
+        )}
+
+        {showOrderAlert && (
+          <OrderAlertModal
+            order={alertOrder}
+            onViewOrders={() => { setShowOrderAlert(false); setActiveTab('orders'); }}
+            onClose={() => setShowOrderAlert(false)}
           />
         )}
       </div>
