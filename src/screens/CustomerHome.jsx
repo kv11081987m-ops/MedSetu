@@ -98,6 +98,7 @@ export default function CustomerHome() {
   const [speechSupported] = useState(() => {
     return typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
   });
+  const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
   const activeTabData = SERVICE_TABS.find((t) => t.id === activeServiceTab);
 
@@ -136,7 +137,11 @@ export default function CustomerHome() {
       setPopularError(false);
       setPopularMeds(rows);
     } else {
-      setPopularMeds((prev) => [...prev, ...rows]);
+      setPopularMeds((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const dedupedRows = rows.filter((r) => !existingIds.has(r.id));
+        return [...prev, ...dedupedRows];
+      });
     }
     popularLoadingMoreRef.current = false;
     setPopularLoadingMore(false);
@@ -275,22 +280,41 @@ export default function CustomerHome() {
 
   // Infinite scroll — sentinel only exists in the DOM while the allopath
   // tab shows a loaded, error-free popular list, so this effect re-attaches
-  // the observer whenever that list (re)mounts. root = scrollBody, since
-  // that div (not the window) is what actually scrolls here.
+  // the observer whenever that list (re)mounts. root = null (viewport) since
+  // the page scrolls at window level, not inside scrollBodyRef.
   useEffect(() => {
     const sentinel = popularSentinelRef.current;
-    const root = scrollBodyRef.current;
-    if (!sentinel || !root) return;
+    if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) loadPopular(false, mrpMode);
       },
-      { root, rootMargin: '200px' }
+      { rootMargin: '200px' }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [activeServiceTab, popularError, popularMeds.length, mrpMode, loadPopular]);
+
+  // Sticky header — scroll listener on window (not scrollBodyRef), since
+  // the page-level scrolling happens at document level with minHeight:100vh.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('[ScrollDebug] Attaching to window scroll (page-level scrolling)');
+    }
+
+    const handleScroll = () => {
+      const scrollTop = window.scrollY || 0;
+      const shouldBeSticky = scrollTop > 80;
+      if (import.meta.env.DEV) {
+        console.log('[Scroll] Y:', scrollTop, 'Sticky:', shouldBeSticky);
+      }
+      setIsHeaderSticky(shouldBeSticky);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleMicClick = () => {
     if (!speechSupported) return;
@@ -359,8 +383,13 @@ export default function CustomerHome() {
         <div style={s.scrollBody} ref={scrollBodyRef}>
 
           {/* Location block — pincode/address + Change,
-              serviceability check shown as a thin line just below. */}
-          <div style={s.locationBlock}>
+              serviceability check shown as a thin line just below. (Hidden when sticky) */}
+          <div style={{
+            ...s.locationBlock,
+            display: isHeaderSticky ? 'none' : 'flex',
+            transition: 'opacity 0.3s ease, display 0.3s ease',
+            opacity: isHeaderSticky ? 0 : 1,
+          }}>
             <div style={s.addressRowWrap}>
               <div style={s.addressRowInner}>
                 <div style={s.addressInfoGroup}>
@@ -390,55 +419,77 @@ export default function CustomerHome() {
             )}
           </div>
 
-          {/* Search Bar + Camera (prescription scan entry) */}
-          <div style={s.searchRow}>
-            <div style={s.searchContainer}>
-              <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
-                <Search size={18} color="#AAAAAA" />
-                <span style={s.searchPlaceholder}>Kya dhundh rahe hain?</span>
+          {/* Search Bar + Camera & Service Tabs — becomes fixed header on scroll (window-level).
+              Fixed positioning pinned to viewport top when sticky, normal flow when not. */}
+          <div style={{
+            ...s.stickyHeaderWrapper,
+            position: isHeaderSticky ? 'fixed' : 'relative',
+            top: isHeaderSticky ? 0 : 'auto',
+            left: isHeaderSticky ? 0 : 'auto',
+            right: isHeaderSticky ? 0 : 'auto',
+            width: isHeaderSticky ? '100%' : 'auto',
+            maxWidth: isHeaderSticky ? '480px' : 'auto',
+            marginLeft: isHeaderSticky ? 'auto' : 'auto',
+            marginRight: isHeaderSticky ? 'auto' : 'auto',
+            backgroundColor: isHeaderSticky ? '#FFFFFF' : 'transparent',
+            zIndex: isHeaderSticky ? 20 : 'auto',
+            paddingTop: isHeaderSticky ? '12px' : '0',
+            paddingBottom: isHeaderSticky ? '8px' : '0',
+            boxShadow: isHeaderSticky ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+            transition: 'all 0.3s ease',
+          }}>
+            <div style={s.searchRow}>
+              <div style={s.searchContainer}>
+                <button style={s.searchBar} onClick={() => navigate('/medicine-search')}>
+                  <Search size={18} color="#AAAAAA" />
+                  <span style={s.searchPlaceholder}>Kya dhundh rahe hain?</span>
+                </button>
+                {speechSupported && (
+                  <button
+                    style={{
+                      ...s.micBtn,
+                      backgroundColor: isListening ? '#F26C0A' : 'transparent',
+                    }}
+                    aria-label="Voice Search"
+                    onClick={handleMicClick}
+                    disabled={isListening}
+                  >
+                    <Mic size={16} color={isListening ? '#FFFFFF' : '#7C3AED'} />
+                  </button>
+                )}
+              </div>
+              <button style={s.cameraBtn} aria-label="Prescription Upload" onClick={() => navigate('/prescription')}>
+                <Camera size={20} color="#FFFFFF" />
               </button>
-              {speechSupported && (
-                <button
-                  style={{
-                    ...s.micBtn,
-                    backgroundColor: isListening ? '#F26C0A' : 'transparent',
-                  }}
-                  aria-label="Voice Search"
-                  onClick={handleMicClick}
-                  disabled={isListening}
-                >
-                  <Mic size={16} color={isListening ? '#FFFFFF' : '#7C3AED'} />
-                </button>
-              )}
             </div>
-            <button style={s.cameraBtn} aria-label="Prescription Upload" onClick={() => navigate('/prescription')}>
-              <Camera size={20} color="#FFFFFF" />
-            </button>
+
+            {/* Service Tabs — colourful, horizontal, scrollable (Category browse) */}
+            <div style={s.serviceTabsRow}>
+              {SERVICE_TABS.map(({ id, label, Icon, color, bg }) => {
+                const isActive = activeServiceTab === id;
+                return (
+                  <button key={id} style={s.serviceTab} onClick={() => setActiveServiceTab(id)}>
+                    <div style={{
+                      ...s.serviceTabIconBox,
+                      backgroundColor: bg,
+                      border: isActive ? `2px solid ${color}` : '2px solid transparent',
+                    }}>
+                      <Icon size={22} color={color} />
+                    </div>
+                    <span style={{ ...s.serviceTabLabel, color: isActive ? color : '#666666', fontWeight: isActive ? '700' : '500' }}>
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Service Tabs — colourful, horizontal, scrollable (Category browse) */}
-          <div style={s.serviceTabsRow}>
-            {SERVICE_TABS.map(({ id, label, Icon, color, bg }) => {
-              const isActive = activeServiceTab === id;
-              return (
-                <button key={id} style={s.serviceTab} onClick={() => setActiveServiceTab(id)}>
-                  <div style={{
-                    ...s.serviceTabIconBox,
-                    backgroundColor: bg,
-                    border: isActive ? `2px solid ${color}` : '2px solid transparent',
-                  }}>
-                    <Icon size={22} color={color} />
-                  </div>
-                  <span style={{ ...s.serviceTabLabel, color: isActive ? color : '#666666', fontWeight: isActive ? '700' : '500' }}>
-                    {label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Best-Selling Medicines (Allopath) / Coming Soon (other tabs) */}
-          <div style={s.section}>
+          {/* Best-Selling Medicines (Allopath) / Coming Soon (other tabs) — add margin-top when header is fixed */}
+          <div style={{
+            ...s.section,
+            marginTop: isHeaderSticky ? '120px' : '0px',
+          }}>
             <div style={s.sectionHeader}>
               <span style={s.sectionTitle}>
                 {activeServiceTab === 'allopath' ? 'Best-Selling Medicines' : activeTabData?.label}
@@ -983,6 +1034,13 @@ const s = {
     cursor: 'pointer',
     fontFamily: 'inherit',
     textAlign: 'left',
+  },
+
+  // Sticky header wrapper — sticky on scroll
+  stickyHeaderWrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px',
   },
 
   // Search + Camera
