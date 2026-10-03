@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchOrders, mapOrder } from '../lib/orders';
+import { formatNextOpen } from '../lib/serviceHours';
 import { supabase } from '../lib/supabase';
 import { generateInvoicePDF } from '../lib/invoicePdf';
 import BottomNav from '../components/BottomNav';
@@ -58,7 +59,11 @@ const FILTER_STATUS = {
 // ─── Order Card ───────────────────────────────────────────────
 function OrderCard({ order, onTrack, onReorder, onCancel, onDetail, onDownloadBill, downloadingId, onReturn }) {
   const [expanded, setExpanded] = useState(false);
-  const st = STATUS_MAP[order.status];
+  // 083: routing_status='scheduled' (next-day order, status still 'pending')
+  const isScheduled = order.status === 'pending' && order.raw?.routing_status === 'scheduled';
+  const st = isScheduled
+    ? { ...STATUS_MAP.pending, label: 'Scheduled', sub: order.raw?.scheduled_for ? `${formatNextOpen(order.raw.scheduled_for)} ke baad store ko bheja jayega` : 'Store khulne par bheja jayega', Icon: Clock }
+    : STATUS_MAP[order.status];
   const displayItems = order.items.slice(0, 2);
   const extra = order.items.length - 2;
 

@@ -4,6 +4,7 @@ import { fetchOrderById } from '../lib/orders';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
+import { formatNextOpen } from '../lib/serviceHours';
 import { generateInvoicePDF } from '../lib/invoicePdf';
 import BottomNav from '../components/BottomNav';
 import {
@@ -55,7 +56,14 @@ function getActiveStep(status) {
   return map[status] || 1;
 }
 
-function getEtaBanner(status) {
+function getEtaBanner(status, order) {
+  // 083: next-day order — status is still 'pending' until released to a store
+  if (order?.routing_status === 'scheduled' && status === 'pending') {
+    return {
+      text: `🕘 Scheduled${order.scheduled_for ? ' — ' + formatNextOpen(order.scheduled_for) + ' ke baad process hoga' : ''}`,
+      progress: 10,
+    };
+  }
   if (!status || status === 'pending')                   return { text: 'Store aapke order ko dekh raha hai...', progress: 25 };
   if (status === 'confirmed' || status === 'preparing')  return { text: '✅ Order accept ho gaya! Store taiyari kar raha hai.', progress: 50 };
   if (status === 'out_for_delivery')                     return { text: 'Aapka order raaste mein hai', progress: 75 };
@@ -362,9 +370,9 @@ export default function OrderTracking() {
                 ? <CheckCircle size={18} color="#FFFFFF" />
                 : <Clock size={18} color="#FFFFFF" />}
               <div style={{ flex: 1 }}>
-                <p style={s.etaText}>{getEtaBanner(order?.status).text}</p>
+                <p style={s.etaText}>{getEtaBanner(order?.status, order).text}</p>
                 <div style={s.progressBar}>
-                  <div style={{ ...s.progressFill, width: `${getEtaBanner(order?.status).progress}%` }} />
+                  <div style={{ ...s.progressFill, width: `${getEtaBanner(order?.status, order).progress}%` }} />
                 </div>
               </div>
             </div>

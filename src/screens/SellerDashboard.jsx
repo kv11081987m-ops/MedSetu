@@ -17,6 +17,7 @@ import { getSignedRxUrl } from '../lib/prescriptions';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import { formatIST } from '../lib/formatTime';
 import OrderAlertModal from '../components/OrderAlertModal';
+import StoreHoursCard from '../components/StoreHoursCard';
 
 // ─── Static helpers ───────────────────────────────────────────
 const QUICK_ACTIONS = [
@@ -1314,6 +1315,12 @@ export default function SellerDashboard() {
                 </button>
               </div>
             </div>
+
+            {/* Dukaan ke samay — per-seller weekly hours (083) */}
+            <StoreHoursCard
+              seller={sellerData}
+              onSaved={(weekly_hours) => setSellerData((prev) => (prev ? { ...prev, weekly_hours } : prev))}
+            />
 
             {/* Metrics */}
             <div style={s.metricsGrid}>

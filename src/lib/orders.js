@@ -37,6 +37,9 @@ export const createOrder = async (orderData) => {
       routing_attempt:    orderData.routingAttempt   ?? 0,
       assigned_by:        orderData.assignedBy       || 'auto',
       routing_history:    orderData.routingHistory   || [],
+      // 083: 'scheduled' = next-day order. scheduled_for is NOT sent — the
+      // BEFORE INSERT trigger normalize_scheduled_order() computes it.
+      ...(orderData.routingStatus ? { routing_status: orderData.routingStatus } : {}),
     })
     .select();
 

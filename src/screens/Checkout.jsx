@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, ShoppingCart, Store, MapPin, Pill,
@@ -9,6 +9,8 @@ import {
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { createOrder, createOrderItems } from '../lib/orders';
+import { useStoreAvailability, formatNextOpen } from '../lib/serviceHours';
+import StoreClosedBanner from '../components/StoreClosedBanner';
 import { saveAddress, setDefaultAddress } from '../lib/addresses';
 import { supabase } from '../lib/supabase';
 import { isAuthError, handleAuthExpiry } from '../lib/authGuard';
@@ -78,7 +80,7 @@ function CartItem({ item, onQtyChange, onRemove }) {
 }
 
 // ─── Success Overlay ──────────────────────────────────────────
-function SuccessOverlay({ onTrack, onHome, orderId, awaitingPharmacist }) {
+function SuccessOverlay({ onTrack, onHome, orderId, awaitingPharmacist, scheduledFor }) {
 
   return (
     <div style={s.overlay}>
@@ -113,10 +115,17 @@ function SuccessOverlay({ onTrack, onHome, orderId, awaitingPharmacist }) {
               Pharmacist aapki prescription verify kar raha hai — verify hote hi order confirm hoga
             </span>
           </div>
+        ) : scheduledFor ? (
+          <div style={s.etaBox}>
+            <Clock size={16} color="#EA6C00" />
+            <span style={s.etaText}>
+              Aapka order <strong>{formatNextOpen(scheduledFor)}</strong> ke baad process hoga
+            </span>
+          </div>
         ) : (
           <div style={s.etaBox}>
             <Truck size={16} color="#1A6B3C" />
-            <span style={s.etaText}>Estimated Delivery: <strong>45 min</strong></span>
+            <span style={s.etaText}>Store aapka order confirm karega — delivery store ke samay ke hisaab se</span>
           </div>
         )}
 
@@ -327,6 +336,13 @@ export default function Checkout() {
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [platformDelivery, setPlatformDelivery] = useState({ charge: 30, threshold: 0 });
   const [routingTimeoutMinutes, setRoutingTimeoutMinutes] = useState(15);
+  // 083: store availability + next-day order. noSellerFound flips on if
+  // get_routing_candidates comes back empty at order time (race / pincode
+  // with no open seller), so the schedule button replaces the old error.
+  const { anySellerOpen, nextOpenLabel } = useStoreAvailability();
+  const [noSellerFound,  setNoSellerFound]  = useState(false);
+  const [scheduledFor,   setScheduledFor]   = useState(null);
+  const lastScheduledRef = useRef(false); // phone-attach retry must keep the schedule intent
 
   // ── Refresh stale cart prices once on open ────────────────
   useEffect(() => {
@@ -619,8 +635,10 @@ export default function Checkout() {
   const rxVerified = !hasRxItems || prescriptionUploaded;
 
   // ── Place Order (real Supabase) ──
-  const placeOrder = async () => {
+  const placeOrder = async (scheduled = false) => {
     if (!items.length || ordering) return;
+    scheduled = scheduled === true; // onClick passes an event
+    lastScheduledRef.current = scheduled;
     if (hasRxItems && !rxVerified) {
       setOrderError('Prescription required items ke liye pehle Rx upload karo');
       return;
@@ -721,7 +739,11 @@ export default function Checkout() {
 
         // Non-gated only: resolve + reserve the routed seller now. Gated
         // orders skip this entirely (get_routing_candidates NOT called).
-        if (!isGated) {
+        if (!isGated && scheduled) {
+          // 083: next-day order — no routing now; seller_id stays null and
+          // the DB trigger stamps scheduled_for from service_start_time.
+          routingFields = { routingStatus: 'scheduled' };
+        } else if (!isGated) {
           const { data: routing, error: routingErr } = await supabase.rpc(
             'get_routing_candidates', { p_pincode: selectedPincode }
           );
@@ -736,7 +758,9 @@ export default function Checkout() {
             return;
           }
           if (!routing.candidates?.length) {
-            setOrderError('Abhi koi seller uplabdh nahi, thodi der baad koshish karein.');
+            // 083: replaces the old "koi seller uplabdh nahi" dead end —
+            // the bottom bar now offers "Kal subah ke liye order karein".
+            setNoSellerFound(true);
             setOrdering(false);
             return;
           }
@@ -832,7 +856,7 @@ export default function Checkout() {
       // no longer tries to.
       // Skipped for Rx-gated orders — there's no seller yet; approve_rx_order
       // notifies the routed seller itself once the pharmacist approves.
-      if (!isGated) {
+      if (!isGated && !scheduled) {
         supabase.rpc('create_notification', {
           p_title: 'Naya Order! 🛒',
           p_body: `Aapko naya order mila — ${newOrder.order_number}`,
@@ -840,6 +864,7 @@ export default function Checkout() {
         }).then(({ error }) => { if (error) console.warn('[notify seller]', error); });
       }
 
+      if (scheduled) setScheduledFor(newOrder.scheduled_for || null);
       setOrderId(newOrder.order_number || 'MED-' + Date.now());
       clearCart();
       setSuccess(true);
@@ -856,7 +881,7 @@ export default function Checkout() {
   //    do after its own (now-removed) no-OTP text-field save. ──────────
   const handlePhoneAttached = () => {
     setShowPhonePrompt(false);
-    placeOrder();
+    placeOrder(lastScheduledRef.current);
   };
 
   if (success) {
@@ -864,6 +889,7 @@ export default function Checkout() {
       <SuccessOverlay
         orderId={orderId}
         awaitingPharmacist={hasRxItems || prescriptionUploaded}
+        scheduledFor={scheduledFor}
         onTrack={() => navigate('/order-tracking', { state: { orderId: orderId || orderDbId } })}
         onHome={() => navigate('/home')}
       />
@@ -954,7 +980,7 @@ export default function Checkout() {
             <p style={s.cardTitle}>Delivery Type</p>
             <div style={s.deliveryGrid}>
               {[
-                { id: 'home',   Icon: Truck,  label: 'Home Delivery',   hint: '30–60 min mein', charge: isFreeDelivery ? 'FREE Delivery 🎉' : `₹${platformDelivery.charge} delivery charge` },
+                { id: 'home',   Icon: Truck,  label: 'Home Delivery',   hint: 'Store ke samay ke hisaab se', charge: isFreeDelivery ? 'FREE Delivery 🎉' : `₹${platformDelivery.charge} delivery charge` },
                 { id: 'pickup', Icon: Store,  label: 'Store Se Pickup', hint: 'Ready in 15 min', charge: 'Free', disabled: true },
               ].map(({ id, Icon, label, hint, charge, disabled }) => (
                 <button
@@ -1159,6 +1185,11 @@ export default function Checkout() {
           </div>
         )}
 
+        {/* ── 083: no seller open — banner (all orders, incl. Rx) ── */}
+        {items.length > 0 && anySellerOpen === false && (
+          <StoreClosedBanner nextOpenLabel={nextOpenLabel} style={{ margin: '0 12px 10px' }} />
+        )}
+
         {/* ── Order error ── */}
         {orderError ? (
           <div style={{ backgroundColor: '#FFEBEE', padding: '10px 16px', margin: '0 12px', borderRadius: '10px', fontSize: '13px', color: '#C62828' }}>
@@ -1173,14 +1204,25 @@ export default function Checkout() {
             <p style={s.bottomLabel}>Kul Amount</p>
             <p style={s.bottomPrice}>₹{grandTotal.toFixed(2)}</p>
           </div>
-          <button
-            style={{ ...s.placeBtn, opacity: (items.length && !ordering && !addressLoading) ? 1 : 0.45 }}
-            onClick={placeOrder}
-            disabled={!items.length || ordering || addressLoading}
-          >
-            <ShoppingCart size={17} color="#FFFFFF" />
-            {ordering ? 'Order Ho Raha Hai...' : 'Order Place Karo'}
-          </button>
+          {(anySellerOpen === false || noSellerFound) && delivery === 'home' && !(hasRxItems || prescriptionUploaded) ? (
+            <button
+              style={{ ...s.placeBtn, opacity: (items.length && !ordering && !addressLoading) ? 1 : 0.45 }}
+              onClick={() => placeOrder(true)}
+              disabled={!items.length || ordering || addressLoading}
+            >
+              <Clock size={17} color="#FFFFFF" />
+              {ordering ? 'Order Ho Raha Hai...' : (nextOpenLabel ? `${nextOpenLabel} ke liye order karein` : 'Agle samay ke liye order karein')}
+            </button>
+          ) : (
+            <button
+              style={{ ...s.placeBtn, opacity: (items.length && !ordering && !addressLoading) ? 1 : 0.45 }}
+              onClick={() => placeOrder()}
+              disabled={!items.length || ordering || addressLoading}
+            >
+              <ShoppingCart size={17} color="#FFFFFF" />
+              {ordering ? 'Order Ho Raha Hai...' : 'Order Place Karo'}
+            </button>
+          )}
         </div>
         )}
 

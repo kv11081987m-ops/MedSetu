@@ -7,6 +7,8 @@ import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead,
 import MedicineCard from '../components/MedicineCard';
 import BottomNav from '../components/BottomNav';
 import AttachPhoneModal from '../components/AttachPhoneModal';
+import StoreClosedBanner from '../components/StoreClosedBanner';
+import { useStoreAvailability } from '../lib/serviceHours';
 import logo from '../assets/logo.png';
 import slogan from '../assets/slogan.png';
 import {
@@ -66,6 +68,7 @@ function OfferCard({ bg, title, sub, code, btnLabel, onPress }) {
 export default function CustomerHome() {
   const navigate = useNavigate();
   const { cartCount } = useCart();
+  const { anySellerOpen, nextOpenLabel } = useStoreAvailability();
   const [activeServiceTab, setActiveServiceTab] = useState('allopath');
   const [showNotif, setShowNotif]     = useState(false);
   const [notifs, setNotifs]           = useState([]);
@@ -406,6 +409,10 @@ export default function CustomerHome() {
                 </button>
               </div>
             </div>
+
+            {anySellerOpen === false && (
+              <StoreClosedBanner nextOpenLabel={nextOpenLabel} style={{ margin: '8px 12px 0' }} />
+            )}
 
             {isPincodeServiceable !== null && (
               <p style={{
