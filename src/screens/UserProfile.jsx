@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { formatIST } from '../lib/formatTime';
 import { fetchSupportWhatsapp } from '../lib/api';
 import { isDuplicatePhoneError } from '../lib/auth';
+import { isValidIndianMobile } from '../lib/phone';
 import { saveAddress, updateAddress } from '../lib/addresses';
 import BottomNav from '../components/BottomNav';
 import AddressForm from '../components/AddressForm';
@@ -172,16 +173,22 @@ export default function UserProfile() {
   // could ever set one, and the field was read-only until this change.
   const updateProfile = async () => {
     if (!userData) return;
-    if (!userData.phone || !/^\d{10}$/.test(userData.phone)) {
-      setPhoneError('Mobile number zaroori hai');
+    // Profile phone is optional (Google/NRI users order with the recipient's
+    // address phone); if given it must still be a valid Indian mobile.
+    if (userData.phone && !isValidIndianMobile(userData.phone)) {
+      setPhoneError('Sahi 10-digit Indian mobile number daalein');
       return;
     }
-    const { error } = await supabase
+    // .select() returns the saved row, so phone_verified reflects what the
+    // DB trigger decided (086: a typed/changed phone is never verified).
+    const { data: saved, error } = await supabase
       .from('users')
-      .update({ name: userData.name, phone: userData.phone, email: userData.email, blood_group: userData.blood_group })
-      .eq('id', userData.id);
+      .update({ name: userData.name, phone: userData.phone || null, email: userData.email, blood_group: userData.blood_group })
+      .eq('id', userData.id)
+      .select()
+      .maybeSingle();
     if (!error) {
-      localStorage.setItem('medsetu_user', JSON.stringify(userData));
+      localStorage.setItem('medsetu_user', JSON.stringify(saved || { ...userData, phone_verified: false }));
       setEditMode(false);
       alert('Profile update ho gaya!');
     } else {
@@ -222,8 +229,8 @@ export default function UserProfile() {
     // unlike users.phone, addresses.phone has no UNIQUE constraint, and
     // the same number legitimately repeating across a customer's own
     // addresses is expected, not an error.
-    if (!/^\d{10}$/.test(newAddress.phone || '')) {
-      setAddressPhoneError('Sahi 10-digit mobile number daalein');
+    if (!isValidIndianMobile(newAddress.phone)) {
+      setAddressPhoneError('Sahi 10-digit Indian mobile number daalein');
       return;
     }
     setAddressPhoneError('');

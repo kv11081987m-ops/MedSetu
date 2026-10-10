@@ -190,7 +190,9 @@ export default function CustomerHome() {
 
         // Fix 1 — Google/magic-link customer with no phone on file yet.
         // devSession/no-id sessions have nothing to update, so skip them.
-        if (!cancelled && storedUser?.id && !storedUser?.phone) {
+        // Optional now (NRI users order with the recipient's address phone):
+        // dismissing it once silences it for the rest of the session.
+        if (!cancelled && storedUser?.id && !storedUser?.phone && !sessionStorage.getItem('phone_gate_dismissed')) {
           setPhoneGateUser(storedUser);
           setShowPhoneModal(true);
         }
@@ -701,7 +703,10 @@ export default function CustomerHome() {
               setPhoneGateUser((p) => ({ ...p, phone }));
               setShowPhoneModal(false);
             }}
-            onClose={() => setShowPhoneModal(false)}
+            onClose={() => {
+              try { sessionStorage.setItem('phone_gate_dismissed', '1'); } catch {}
+              setShowPhoneModal(false);
+            }}
           />
         )}
       </div>

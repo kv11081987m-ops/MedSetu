@@ -272,6 +272,16 @@ export default function OrderTracking() {
     return () => { stale = true; };
   }, [order?.id, order?.status, order?.delivery_otp_sent_at]);
 
+  // Recipient (address phone, saved as orders.customer_phone) differs from
+  // the ordering user's own phone, or the user has none: the person at the
+  // door can't see this screen, so offer to send them the OTP on WhatsApp.
+  let showWhatsappOtp = false;
+  try {
+    const own = JSON.parse(localStorage.getItem('medsetu_user') || '{}')?.phone || '';
+    const rcpt = order?.customer_phone || '';
+    showWhatsappOtp = /^\d{10}$/.test(rcpt) && rcpt !== own;
+  } catch {}
+
   if (!loading && !orderId) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px 32px 100px', backgroundColor: '#F5F5F5' }}>
@@ -387,6 +397,22 @@ export default function OrderTracking() {
               <p style={s.otpLabel}>🔐 Delivery OTP</p>
               <p style={s.otpValue}>{deliveryOtp}</p>
               <p style={s.otpHint}>Delivery partner ko yeh OTP batayein delivery confirm karne ke liye</p>
+              {showWhatsappOtp && (
+                <a
+                  href={`https://wa.me/91${order.customer_phone}?text=${encodeURIComponent(
+                    `आपकी MedSetu दवा आ रही है। डिलीवरी के समय यह OTP बताएं: ${deliveryOtp}. ऑर्डर: ${order.order_number || ''}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'block', marginTop: '10px', padding: '10px', textAlign: 'center',
+                    background: '#25D366', color: '#FFFFFF', borderRadius: '10px',
+                    fontSize: '14px', fontWeight: '700', textDecoration: 'none',
+                  }}
+                >
+                  WhatsApp par OTP bhejein
+                </a>
+              )}
             </div>
           )}
 

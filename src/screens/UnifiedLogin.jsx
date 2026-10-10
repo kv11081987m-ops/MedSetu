@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sendFirebaseOTP } from '../lib/firebaseOTP';
 import { supabase } from '../lib/supabase';
+import { isValidIndianMobile } from '../lib/phone';
 
 // L3 — phone-OTP live: Firebase verifies the OTP, then OTPScreen.jsx bridges
 // to a real Supabase session via the firebase-bridge Edge Function.
@@ -39,7 +40,10 @@ export default function UnifiedLogin() {
   };
 
   const handleSendOTP = async () => {
-    if (phone.length !== 10) return;
+    if (!isValidIndianMobile(phone)) {
+      setError('यह नंबर भारत का नहीं है। विदेश के नंबर के लिए कृपया Google से लॉगिन करें।');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -111,6 +115,7 @@ export default function UnifiedLogin() {
                   style={s.phoneInput}
                 />
               </div>
+              <p style={s.nriHint}>विदेश में हैं? ऊपर Google से लॉगिन करें</p>
 
               <button
                 onClick={handleSendOTP}
@@ -198,7 +203,8 @@ const s = {
   divider:    { display: 'flex', alignItems: 'center', gap: '12px', marginTop: '20px', marginBottom: '16px' },
   dividerLine:{ flex: 1, height: '1px', background: '#eee' },
   dividerText:{ color: '#999', fontSize: '13px' },
-  phoneRow:   { display: 'flex', border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px' },
+  phoneRow:   { display: 'flex', border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', marginBottom: '6px' },
+  nriHint:    { fontSize: '12px', color: '#666', margin: '0 0 12px' },
   prefix:     { padding: '12px', background: '#f5f5f5', color: '#333', fontWeight: '500', borderRight: '1px solid #ddd', flexShrink: 0 },
   phoneInput: { flex: 1, padding: '12px', border: 'none', outline: 'none', fontSize: '16px', fontFamily: 'inherit' },
   otpBtn:     { width: '100%', padding: '13px', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '500', fontFamily: 'inherit' },

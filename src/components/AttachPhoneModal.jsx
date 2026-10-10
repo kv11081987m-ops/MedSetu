@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { sendFirebaseOTP, verifyFirebaseOTP } from '../lib/firebaseOTP';
-import { updateUserPhone, isDuplicatePhoneError } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 
 const OTP_LENGTH = 6;
 
@@ -55,23 +55,37 @@ export default function AttachPhoneModal({ user, onSaved, onClose }) {
       return;
     }
 
-    // End the stray Firebase phone session immediately — before writing
-    // anything else — so nothing downstream (re-bridge timer, next app
-    // start) ever finds a lingering phone-verified auth.currentUser.
+    // Grab the Firebase ID token BEFORE ending the stray phone session: the
+    // server verifies it, so phone_verified can only be set for a number
+    // Firebase really OTP-verified (the client can't claim it).
+    let idToken = null;
+    try { idToken = await res.firebaseUser?.getIdToken(); } catch {}
+
+    // End the stray Firebase phone session immediately so nothing downstream
+    // (re-bridge timer, next app start) finds a lingering phone-verified
+    // auth.currentUser.
     await signOut(auth).catch(() => {});
 
-    // `phone` is the same 10-digit value sendFirebaseOTP() sent the OTP to
-    // and Firebase just confirmed — it's locked/disabled on step 2 (below),
-    // so this is guaranteed to be the verified number, not something typed
-    // afterward.
-    const { error: err } = await updateUserPhone(user?.id, phone);
+    if (!idToken) {
+      setVerifying(false);
+      setError('Verify nahi ho paya, dobara try karein');
+      return;
+    }
+
+    // `phone` is the same 10-digit value the OTP was sent to (locked on
+    // step 2). The Edge Function re-derives it from the verified token.
+    const { data, error: fnErr } = await supabase.functions.invoke('attach-verified-phone', {
+      body: { idToken },
+    });
     setVerifying(false);
-    if (err) {
-      if (isDuplicatePhoneError(err)) {
-        setError('Yeh number kisi aur account se juda hai. Doosra number daalein.');
-      } else {
-        setError('Save nahi hua, dobara try karein');
+    if (fnErr || !data?.success) {
+      let code = data?.code;
+      if (!code) {
+        try { code = (await fnErr?.context?.json?.())?.code; } catch {}
       }
+      setError(code === 'duplicate'
+        ? 'Yeh number kisi aur account se juda hai. Doosra number daalein.'
+        : 'Save nahi hua, dobara try karein');
       return;
     }
 

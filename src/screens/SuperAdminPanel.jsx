@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -1616,6 +1617,7 @@ function TabRouting() {
                     <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
                       {order.users?.name || 'Customer'} · Pincode: {order.delivery_pincode || '—'}
                     </p>
+                    <UnverifiedCustomerBadge show={order.customer_unverified === true} />
                     <p style={{ fontSize: '11px', color: '#999', margin: '2px 0 0' }}>
                       🕐 {formatIST(order.created_at, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>

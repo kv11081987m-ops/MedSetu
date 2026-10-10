@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -41,6 +42,7 @@ const mapCallCard = (order) => ({
   rxStatus:order.prescription_url ? 'uploaded' : 'none',
   urgent:  false,
   status:  'pending',
+  unverified: order.customer_unverified === true,
 });
 
 // reject_rx_order() ke fixed kaaran (dropdown). "Anya" chune to optional
@@ -135,6 +137,7 @@ function CallCard({ call, onCall, onReject, busy }) {
             <span style={s.callDot}>·</span>
             <span style={s.callPhone}>#{call.orderId}</span>
           </div>
+          <UnverifiedCustomerBadge show={call.unverified} />
         </div>
         <div style={s.callTopRight}>
           <span style={{

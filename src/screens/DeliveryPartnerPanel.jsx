@@ -454,9 +454,17 @@ export default function DeliveryPartnerPanel() {
                     <span style={s.pendInfoText}>{order.customer_name || 'Customer'} — {order.delivery_address || order.delivery_pincode}</span>
                   </div>
                   {order.customer_phone && (
-                    <div style={s.pendInfoRow}>
-                      <Phone size={13} color="#888888" />
-                      <span style={s.pendInfoText}>{order.customer_phone}</span>
+                    <div style={{ ...s.pendInfoRow, background: '#EEF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', padding: '8px 10px', gap: '8px', alignItems: 'center' }}>
+                      <Phone size={15} color="#0C447C" />
+                      <span style={{ ...s.pendInfoText, fontWeight: '700', color: '#0C447C', flex: 1 }}>
+                        Receiver: {order.customer_phone} (Order by: {order.customer_name || 'Customer'})
+                      </span>
+                      <a
+                        href={`tel:+91${order.customer_phone}`}
+                        style={{ background: '#1A6B3C', color: '#FFFFFF', padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', textDecoration: 'none' }}
+                      >
+                        📞 Call
+                      </a>
                     </div>
                   )}
                   <div style={s.pendInfoRow}>

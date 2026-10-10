@@ -17,6 +17,7 @@ import { isAuthError, handleAuthExpiry } from '../lib/authGuard';
 import { fetchMrpMode, fetchSellersForMedicine } from '../lib/api';
 import AddressForm from '../components/AddressForm';
 import AttachPhoneModal from '../components/AttachPhoneModal';
+import { isValidIndianMobile } from '../lib/phone';
 
 
 // B15 Part B: launch is COD-only — no payment gateway wired up yet.
@@ -509,8 +510,8 @@ export default function Checkout() {
   // it's already there if they reopen the picker later this session.
   const handleSaveNewAddress = async () => {
     if (!newCheckoutAddress.address_line.trim()) { alert('Address daalo'); return; }
-    if (!/^\d{10}$/.test(newCheckoutAddress.phone || '')) {
-      setNewAddressPhoneError('Sahi 10-digit mobile number daalein');
+    if (!isValidIndianMobile(newCheckoutAddress.phone)) {
+      setNewAddressPhoneError('Sahi 10-digit Indian mobile number daalein');
       return;
     }
     setNewAddressPhoneError('');
@@ -656,9 +657,18 @@ export default function Checkout() {
     // valid phone is never blocked just because their profile's
     // users.phone happens to be null. Store-pickup has no selected
     // address to prefer, so it's unchanged — still users.phone only.
-    const preCheckUser   = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
-    const effectivePhone = delivery === 'home' ? (selectedPhone || preCheckUser?.phone) : preCheckUser?.phone;
-    if (!/^\d{10}$/.test(effectivePhone || '')) {
+    // NRI support: for home delivery the ONLY mandatory number is the
+    // recipient's (the address phone, valid +91 mobile). A Google user with
+    // no profile phone must never be pushed into the Indian-OTP prompt, so
+    // there is no users.phone fallback for the gate here. Store pickup has
+    // no recipient address, so it still needs the profile phone.
+    const preCheckUser = JSON.parse(localStorage.getItem('medsetu_user') || '{}');
+    if (delivery === 'home') {
+      if (!isValidIndianMobile(selectedPhone)) {
+        setOrderError('Delivery address mein receiver ka sahi 10-digit Indian mobile number daalein (address badal kar ya naya address jodein)');
+        return;
+      }
+    } else if (!isValidIndianMobile(preCheckUser?.phone)) {
       setShowPhonePrompt(true);
       return;
     }
@@ -785,7 +795,7 @@ export default function Checkout() {
         // particular address predates the phone column and hasn't been
         // edited since (migration 037/038). Store-pickup has no selected
         // address to speak of, so it's untouched — still users.phone.
-        customerPhone:  delivery === 'home' ? (selectedPhone || storedUser?.phone || null) : (storedUser?.phone || null),
+        customerPhone:  delivery === 'home' ? selectedPhone : (storedUser?.phone || null),
         sellerId:       routedSellerId,
         // Rx-gated → pharmacist review first (seller_id stays null until
         // approve_rx_order routes it); everything else → 'pending' as before.

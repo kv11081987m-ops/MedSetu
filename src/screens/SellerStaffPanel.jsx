@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, Package, LogOut, MapPin, Phone, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -166,6 +167,7 @@ export default function SellerStaffPanel() {
                     <span style={s.pendInfoText}>{order.customer_phone}</span>
                   </div>
                 )}
+                <UnverifiedCustomerBadge show={order.customer_unverified === true} />
 
                 {/* 074_staffPhoneAndReach.sql — rider-visibility card, only
                     when a delivery partner has actually claimed this order

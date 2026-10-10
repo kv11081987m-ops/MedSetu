@@ -378,6 +378,13 @@ export function AuthProvider({ children }) {
                 if (patched) row = patched;
               }
 
+              // 086: this session's JWT carries the Firebase-verified phone,
+              // so the server (not the client) marks phone_verified.
+              if (row && !row.phone_verified) {
+                const { data: ok } = await supabase.rpc('mark_phone_verified_from_session');
+                if (ok) row = { ...row, phone_verified: true };
+              }
+
               if (row) localStorage.setItem('medsetu_user', JSON.stringify(row));
             } catch {}
 

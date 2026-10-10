@@ -1,4 +1,10 @@
 
+[functions.attach-verified-phone]
+enabled = true
+verify_jwt = true
+import_map = "./functions/attach-verified-phone/deno.json"
+entrypoint = "./functions/attach-verified-phone/index.ts"
+
 [functions.firebase-bridge]
 enabled = true
 verify_jwt = false

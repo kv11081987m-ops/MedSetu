@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Bell, Store, ShoppingBag, Clock, IndianRupee,
@@ -85,6 +86,7 @@ const mapOrderDisplay = (order) => {
     // new out_for_delivery middle step.
     isB2B:    isB2B,
     isDelayed: order.is_delayed || false,
+    unverified: !isB2B && order.customer_unverified === true,
     acceptedByStaff:    order.accepted_staff?.name || null,
     deliveredByPartner: order.delivered_staff?.name || null,
     _id:      order.id,
@@ -131,6 +133,7 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
       <div style={s.pendCustomer}>
         <div style={s.pendInfoRow}><User size={13} color="#888888" /><span style={s.pendInfoText}>{order.customer}</span></div>
         {order.phone ? <div style={s.pendInfoRow}><Phone size={13} color="#888888" /><span style={s.pendInfoText}>{order.phone}</span></div> : null}
+        <UnverifiedCustomerBadge show={order.unverified} />
         {(order.acceptedByStaff || order.deliveredByPartner) && (
           <p style={s.staffLine}>
             {[
@@ -1079,12 +1082,13 @@ export default function SellerDashboard() {
     const rawOrder = allOrders.find((o) => o.id === orderId);
     // Also check pendingOrders (home tab may not have allOrders loaded)
     const orderForComm = rawOrder || pendingOrders.find((o) => o.id === orderId);
-    if (orderForComm) {
-      const isB2B = orderForComm.buyer_type === 'retailer';
+    // B2C "delivered" notification now comes from the DB trigger (085) for
+    // every delivery path; only the B2B wholesaler→retailer one stays here.
+    if (orderForComm && orderForComm.buyer_type === 'retailer') {
       supabase.rpc('create_notification', {
         p_title: 'Order Deliver! 🎉',
-        p_body: isB2B ? 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein' : 'Aapka order deliver ho gaya',
-        p_type: isB2B ? 'b2b_update' : 'order_delivered', p_ref_id: orderId,
+        p_body: 'Aapka B2B order deliver ho gaya — Maal Mila confirm karein',
+        p_type: 'b2b_update', p_ref_id: orderId,
       }).then(({ error }) => { if (error) console.warn('[notify delivered]', error); });
     }
     await fetchAllOrders(sellerData.id, orderFilter);
