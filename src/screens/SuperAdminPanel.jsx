@@ -1553,6 +1553,9 @@ function TabOrders() {
                   💵 Cash: {o.cash_collected ? `₹${Number(o.cash_collected_amount || 0).toLocaleString('en-IN')} mila` : 'nahi mila'}
                 </p>
               )}
+              {o.delivered_without_otp && o.no_otp_reason_code && !o.handover_photo_path && (
+                <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>📷 Photo nahi di gayi</p>
+              )}
               {o.handover_photo_path && (
                 <button
                   onClick={async () => {
