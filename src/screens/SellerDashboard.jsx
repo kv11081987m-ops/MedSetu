@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
+import NoOtpDeliveredBadge from '../components/NoOtpDeliveredBadge';
+import DeliveredWithoutOtpModal from '../components/DeliveredWithoutOtpModal';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Bell, Store, ShoppingBag, Clock, IndianRupee,
@@ -87,6 +89,11 @@ const mapOrderDisplay = (order) => {
     isB2B:    isB2B,
     isDelayed: order.is_delayed || false,
     unverified: !isB2B && order.customer_unverified === true,
+    // 088: COD home orders can be closed with "OTP nahi mila"
+    canNoOtp:  !isB2B && order.payment_method === 'cod' && !['pickup', 'store_pickup'].includes(order.delivery_type),
+    noOtp:     { show: order.delivered_without_otp === true, code: order.no_otp_reason_code, text: order.no_otp_reason_text, override: order.delivery_override_reason },
+    orderNumber: order.order_number,
+    finalAmount: order.final_amount,
     acceptedByStaff:    order.accepted_staff?.name || null,
     deliveredByPartner: order.delivered_staff?.name || null,
     _id:      order.id,
@@ -108,7 +115,7 @@ const mapB2BPurchase = (order) => ({
 });
 
 // ─── Sub-components ───────────────────────────────────────────
-function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, onCancelConfirmed, onMarkDelayed, busy }) {
+function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, onNoOtp, onCancelConfirmed, onMarkDelayed, busy }) {
   const statusColor = STATUS_COLOR[order.status] || '#888888';
   const statusBg    = STATUS_BG[order.status]    || '#F5F5F5';
   const statusLabel = STATUS_LABEL[order.status] || order.status;
@@ -134,6 +141,7 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
         <div style={s.pendInfoRow}><User size={13} color="#888888" /><span style={s.pendInfoText}>{order.customer}</span></div>
         {order.phone ? <div style={s.pendInfoRow}><Phone size={13} color="#888888" /><span style={s.pendInfoText}>{order.phone}</span></div> : null}
         <UnverifiedCustomerBadge show={order.unverified} />
+        <NoOtpDeliveredBadge show={order.noOtp?.show} reasonCode={order.noOtp?.code} reasonText={order.noOtp?.text} overrideReason={order.noOtp?.override} />
         {(order.acceptedByStaff || order.deliveredByPartner) && (
           <p style={s.staffLine}>
             {[
@@ -211,6 +219,11 @@ function OrderCard({ order, onAccept, onDecline, onOutForDelivery, onDeliver, on
           <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onDeliver(order._id)}>
             <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Mark Delivered'}
           </button>
+          {order.canNoOtp && (
+            <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onNoOtp(order)}>
+              OTP nahi mila
+            </button>
+          )}
           <button style={{ ...s.declineBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => onCancelConfirmed(order._id)}>
             <X size={15} color="#DC3545" /> {busy ? '...' : 'Cancel'}
           </button>
@@ -570,6 +583,8 @@ export default function SellerDashboard() {
     setSearchParams({ tab }, { replace: true });
   };
   const [orderFilter, setOrderFilter] = useState('sab');
+  const [noOtpOrder, setNoOtpOrder] = useState(null); // 088 COD "OTP nahi mila" modal
+  const openNoOtp = (o) => setNoOtpOrder({ id: o._id, order_number: o.orderNumber || o.id, final_amount: o.finalAmount });
   const [showNotif,   setShowNotif]   = useState(false);
   const [notifs,      setNotifs]      = useState([]);
   const unreadCount = notifs.filter((n) => !n.is_read).length;
@@ -1068,13 +1083,29 @@ export default function SellerDashboard() {
     // Commission math now happens server-side (mark_order_delivered RPC,
     // SECURITY DEFINER) — a seller can no longer influence
     // commission_amount/seller_earning by tampering with client state.
-    const { data, error } = await supabase.rpc('mark_order_delivered', { p_order_id: orderId });
+    // 087: a B2C home-delivery order needs the customer's delivery OTP
+    // (shown in their app, or sent to the recipient on WhatsApp). B2B and
+    // store-pickup orders are unchanged — no OTP asked.
+    const target = allOrders.find((o) => o.id === orderId) || pendingOrders.find((o) => o.id === orderId);
+    const needsOtp = target
+      && target.buyer_type !== 'retailer'
+      && !['pickup', 'store_pickup'].includes(target.delivery_type);
+    let otp = null;
+    if (needsOtp) {
+      otp = (window.prompt('Customer se 4-digit delivery OTP lekar daalein:') || '').trim();
+      if (!otp) return;
+    }
+    const { data, error } = await supabase.rpc('mark_order_delivered', { p_order_id: orderId, p_otp: otp });
     if (error) {
       console.error('markDelivered failed:', error);
       alert('Order deliver nahi hua: ' + (error.message || 'Unknown error'));
       return;
     }
     const result = data?.[0];
+    if (result && result.success === false) {
+      alert(result.message || 'Order deliver nahi hua');
+      return;
+    }
     if (result?.stock_deduct_failures?.length) {
       alert('Order deliver ho gaya, par in items ka stock count update nahi ho paya: ' + result.stock_deduct_failures.join(', ') + '. Inventory manually check kar lein.');
     }
@@ -1362,7 +1393,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {pendingDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onNoOtp={openNoOtp} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1533,7 +1564,7 @@ export default function SellerDashboard() {
               ) : (
                 <div style={s.pendingList}>
                   {allDisplayOrders.map((o) => (
-                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
+                    <OrderCard key={o._id} order={o} onAccept={acceptOrder} onDecline={declineOrder} onOutForDelivery={markOutForDelivery} onDeliver={markDelivered} onNoOtp={openNoOtp} onCancelConfirmed={cancelConfirmedOrder} onMarkDelayed={markOrderDelayed} busy={isOrderBusy(o._id)} />
                   ))}
                 </div>
               )}
@@ -1848,6 +1879,17 @@ export default function SellerDashboard() {
           <AddStaffModal
             onSave={handleAddStaff}
             onClose={() => setShowAddStaff(false)}
+          />
+        )}
+
+        {noOtpOrder && (
+          <DeliveredWithoutOtpModal
+            order={noOtpOrder}
+            onClose={() => setNoOtpOrder(null)}
+            onDone={async () => {
+              setNoOtpOrder(null);
+              await fetchAllOrders(sellerData.id, orderFilter);
+            }}
           />
         )}
 

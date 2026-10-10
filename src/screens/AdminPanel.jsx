@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
+import NoOtpDeliveredBadge from '../components/NoOtpDeliveredBadge';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -220,6 +221,7 @@ function OrderCard({ order }) {
       </div>
       <p style={{ fontSize: '12px', color: '#888888', margin: 0 }}>{order.time}</p>
       <UnverifiedCustomerBadge show={order.unverified} />
+      <NoOtpDeliveredBadge show={order.noOtp?.show} reasonCode={order.noOtp?.code} reasonText={order.noOtp?.text} overrideReason={order.noOtp?.override} />
     </div>
   );
 }
@@ -307,6 +309,7 @@ const mapOrderCard = (order) => ({
   status:   order.status,
   time:     formatIST(order.created_at, { hour: '2-digit', minute: '2-digit' }),
   unverified: order.customer_unverified === true,
+  noOtp:    { show: order.delivered_without_otp === true, code: order.no_otp_reason_code, text: order.no_otp_reason_text, override: order.delivery_override_reason },
 });
 
 const mapSellerList = (s) => ({

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { getCurrentStaff } from '../lib/auth';
 import { fetchUserNotifications, markNotificationRead, markAllNotificationsRead, formatNotifTime } from '../lib/notifications';
 import OrderAlertModal from '../components/OrderAlertModal';
+import DeliveredWithoutOtpModal from '../components/DeliveredWithoutOtpModal';
 
 const STATUS_LABEL = { pending: 'Pending', settled: 'Settled' };
 const STATUS_COLOR = { pending: '#E65100', settled: '#1A6B3C' };
@@ -60,6 +61,7 @@ export default function DeliveryPartnerPanel() {
   const [otpSentIds, setOtpSentIds] = useState(() => new Set());
   const [otpInputs,  setOtpInputs]  = useState({});
   const [busyId,     setBusyId]     = useState(null);
+  const [noOtpOrder, setNoOtpOrder]  = useState(null); // COD "OTP nahi mila" modal (088)
 
   const fetchAvailableOrders = async () => {
     // delivery_pincode / delivery_enabled scoping is enforced server-side
@@ -75,7 +77,7 @@ export default function DeliveryPartnerPanel() {
     // fetchUpcomingOrders below).
     const { data, error } = await supabase
       .from('orders')
-      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp_sent_at, delivered_by_staff_id, rider_reached_at, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
+      .select('id, order_number, customer_name, customer_phone, delivery_address, delivery_pincode, final_amount, delivery_otp_sent_at, delivered_by_staff_id, rider_reached_at, payment_method, buyer_type, delivery_type, sellers!seller_id(store_name), staff!accepted_by_staff_id(name)')
       .eq('status', 'out_for_delivery')
       .order('assigned_at', { ascending: true });
     if (error) { console.error('fetchAvailableOrders error:', error); return; }
@@ -489,14 +491,19 @@ export default function DeliveryPartnerPanel() {
                     </button>
                   )}
 
+                  {/* 087: the OTP now exists from the moment the order goes
+                      out for delivery, so the entry box shows right away;
+                      "Store Reach" stays available as a plain note, and
+                      "Pickup Karo" is only for old orders with no OTP yet. */}
+                  {claimedByMe && !order.rider_reached_at && (
+                    <button style={{ ...s.reachBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleReach(order)}>
+                      <MapPin size={15} color="#0C447C" /> {busy ? '...' : 'Store Reach Ho Gaya'}
+                    </button>
+                  )}
+
                   {claimedByMe && !otpStage && (
                     <>
                       <p style={s.acceptedNote}>✅ Accepted — Ab Pickup Karo</p>
-                      {!order.rider_reached_at && (
-                        <button style={{ ...s.reachBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleReach(order)}>
-                          <MapPin size={15} color="#0C447C" /> {busy ? '...' : 'Store Reach Ho Gaya'}
-                        </button>
-                      )}
                       <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handlePickup(order)}>
                         <Package size={15} color="#FFFFFF" /> {busy ? '...' : 'Pickup Karo'}
                       </button>
@@ -505,7 +512,7 @@ export default function DeliveryPartnerPanel() {
 
                   {claimedByMe && otpStage && (
                     <>
-                      <p style={s.otpHint}>OTP bhej diya, customer ko batao ki delivery partner ko OTP bataye</p>
+                      <p style={s.otpHint}>Customer ke paas OTP hai (unke app mein / WhatsApp par) — unse OTP lekar daalo</p>
                       <input
                         style={s.otpInput}
                         type="tel"
@@ -519,6 +526,16 @@ export default function DeliveryPartnerPanel() {
                       <button style={{ ...s.acceptBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleConfirm(order)}>
                         <CheckCircle size={15} color="#FFFFFF" /> {busy ? '...' : 'Confirm Delivery'}
                       </button>
+                      {order.payment_method === 'cod' && order.buyer_type !== 'retailer'
+                        && !['pickup', 'store_pickup'].includes(order.delivery_type) && (
+                        <button
+                          style={{ marginTop: '8px', width: '100%', padding: '10px', borderRadius: '10px', border: '1.5px solid #DC2626', background: '#FFFFFF', color: '#DC2626', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}
+                          disabled={busy}
+                          onClick={() => setNoOtpOrder(order)}
+                        >
+                          OTP nahi mila
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -722,6 +739,20 @@ export default function DeliveryPartnerPanel() {
               )}
             </div>
           </div>
+        )}
+
+        {noOtpOrder && (
+          <DeliveredWithoutOtpModal
+            order={noOtpOrder}
+            onClose={() => setNoOtpOrder(null)}
+            onDone={async (res) => {
+              const done = noOtpOrder;
+              setNoOtpOrder(null);
+              setOrders((prev) => prev.filter((o) => o.id !== done.id));
+              alert(`✅ Delivered (bina OTP)! ₹${res?.amount ?? 25} kamaye`);
+              await fetchEarnings(staff.id);
+            }}
+          />
         )}
 
         {showOrderAlert && (

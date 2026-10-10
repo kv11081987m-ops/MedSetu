@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import UnverifiedCustomerBadge from '../components/UnverifiedCustomerBadge';
+import NoOtpDeliveredBadge from '../components/NoOtpDeliveredBadge';
+import { getSignedHandoverUrl } from '../lib/handoverProof';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -1391,8 +1393,9 @@ function TabReturns({ returns, loadReturns }) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// TAB: Orders — read-only list of ALL orders, newest first, paged.
-// Filters: status, date range (IST days), "Unverified only". No edits.
+// TAB: Orders — list of ALL orders, newest first, paged.
+// Filters: status, date range (IST days), "Unverified only". The only
+// action is the typed-reason delivery-OTP override (087).
 // ══════════════════════════════════════════════════════════════
 const ORDERS_PAGE = 25;
 const ORDER_STATUS_OPTS = [
@@ -1415,6 +1418,7 @@ function TabOrders() {
   const [fromDate,  setFromDate]  = useState('');
   const [toDate,    setToDate]    = useState('');
   const [unverifiedOnly, setUnverifiedOnly] = useState(false);
+  const [noOtpOnly, setNoOtpOnly] = useState(false);
 
   // append=false → fresh query from offset 0 (also refreshes the count);
   // append=true → next page. `offset` is passed in, never read from state,
@@ -1422,7 +1426,7 @@ function TabOrders() {
   const fetchPage = async (offset, append) => {
     let q = supabase
       .from('orders')
-      .select('id, order_number, created_at, status, final_amount, customer_name, customer_unverified, users(name), sellers!seller_id(store_name)',
+      .select('id, order_number, created_at, status, final_amount, customer_name, customer_unverified, buyer_type, delivery_type, delivery_override_reason, delivered_without_otp, no_otp_reason_code, no_otp_reason_text, cash_collected, cash_collected_amount, handover_photo_path, users(name), sellers!seller_id(store_name)',
         append ? undefined : { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + ORDERS_PAGE - 1);
@@ -1435,6 +1439,7 @@ function TabOrders() {
       q = q.lt('created_at', next.toISOString());
     }
     if (unverifiedOnly) q = q.eq('customer_unverified', true);
+    if (noOtpOnly) q = q.eq('delivered_without_otp', true);
     return q;
   };
 
@@ -1449,7 +1454,7 @@ function TabOrders() {
       setLoading(false);
     });
     return () => { stale = true; };
-  }, [status, fromDate, toDate, unverifiedOnly]);
+  }, [status, fromDate, toDate, unverifiedOnly, noOtpOnly]);
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -1459,9 +1464,24 @@ function TabOrders() {
     setLoadingMore(false);
   };
 
+  // 087: the ONLY way to deliver a B2C home order without the customer's
+  // OTP — super admin, with a typed reason that is saved on the order.
+  const [overridingId, setOverridingId] = useState(null);
+  const forceDeliver = async (o) => {
+    const reason = (window.prompt(`Order #${o.order_number} ko bina OTP deliver mark karne ka kaaran likhein (zaroori):`) || '').trim();
+    if (!reason) return;
+    if (reason.length < 5) { alert('Kaaran kam se kam 5 akshar ka likhein'); return; }
+    setOverridingId(o.id);
+    const { data, error: err } = await supabase.rpc('mark_order_delivered', { p_order_id: o.id, p_override_reason: reason });
+    setOverridingId(null);
+    const r = data?.[0];
+    if (err || !r?.success) { alert('Override nahi hua: ' + (r?.message || err?.message || 'Unknown error')); return; }
+    setOrders((prev) => prev.map((x) => x.id === o.id ? { ...x, status: 'delivered', delivery_override_reason: reason } : x));
+  };
+
   const hasMore = total != null ? orders.length < total : orders.length > 0 && orders.length % ORDERS_PAGE === 0;
-  const clearFilters = () => { setStatus('all'); setFromDate(''); setToDate(''); setUnverifiedOnly(false); };
-  const filtersOn = status !== 'all' || fromDate || toDate || unverifiedOnly;
+  const clearFilters = () => { setStatus('all'); setFromDate(''); setToDate(''); setUnverifiedOnly(false); setNoOtpOnly(false); };
+  const filtersOn = status !== 'all' || fromDate || toDate || unverifiedOnly || noOtpOnly;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1482,6 +1502,10 @@ function TabOrders() {
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#444' }}>
           <input type="checkbox" checked={unverifiedOnly} onChange={(e) => setUnverifiedOnly(e.target.checked)} />
           Unverified only
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#444' }}>
+          <input type="checkbox" checked={noOtpOnly} onChange={(e) => setNoOtpOnly(e.target.checked)} />
+          OTP ke bina delivered
         </label>
         {filtersOn && (
           <button onClick={clearFilters} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#1A6B3C', fontSize: '12px', fontWeight: '700', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
@@ -1518,6 +1542,38 @@ function TabOrders() {
                 ₹{(o.final_amount || 0).toLocaleString('en-IN')}
               </p>
               <UnverifiedCustomerBadge show={o.customer_unverified === true} />
+              <NoOtpDeliveredBadge
+                show={o.delivered_without_otp === true}
+                reasonCode={o.no_otp_reason_code}
+                reasonText={o.no_otp_reason_text}
+                overrideReason={o.delivery_override_reason}
+              />
+              {o.delivered_without_otp && o.cash_collected != null && (
+                <p style={{ fontSize: '12px', color: '#555', margin: '2px 0 0' }}>
+                  💵 Cash: {o.cash_collected ? `₹${Number(o.cash_collected_amount || 0).toLocaleString('en-IN')} mila` : 'nahi mila'}
+                </p>
+              )}
+              {o.handover_photo_path && (
+                <button
+                  onClick={async () => {
+                    const url = await getSignedHandoverUrl(o.handover_photo_path);
+                    if (url) window.open(url, '_blank', 'noopener'); else alert('Photo nahi khuli');
+                  }}
+                  style={{ marginTop: '4px', background: 'none', border: 'none', padding: 0, color: '#1A6B3C', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}
+                >
+                  📷 Handover photo dekho
+                </button>
+              )}
+              {['confirmed', 'out_for_delivery'].includes(o.status) && o.buyer_type !== 'retailer'
+                && !['pickup', 'store_pickup'].includes(o.delivery_type) && (
+                <button
+                  onClick={() => forceDeliver(o)}
+                  disabled={overridingId === o.id}
+                  style={{ marginTop: '8px', padding: '6px 12px', borderRadius: '8px', border: '1px solid #DC2626', background: '#FFFFFF', color: '#DC2626', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', opacity: overridingId === o.id ? 0.6 : 1 }}
+                >
+                  Bina OTP deliver (override)
+                </button>
+              )}
             </div>
           ))}
           {hasMore && (
