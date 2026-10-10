@@ -17,6 +17,7 @@ const TABS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: '🏠' },
   { id: 'sellers',      label: 'Sellers',       icon: '🏪' },
   { id: 'delivery_partners', label: 'Delivery Partners', icon: '🛵' },
+  { id: 'orders',       label: 'Orders',        icon: '🛍️' },
   { id: 'routing',      label: 'Routing',       icon: '🎯' },
   { id: 'pharmacists',  label: 'Pharmacists',   icon: '💊' },
   { id: 'admins',       label: 'Admins',        icon: '👤' },
@@ -562,6 +563,7 @@ export default function SuperAdminPanel() {
             loading={loadingDeliveryPartners} onApprove={approveDeliveryPartner} onReject={rejectDeliveryPartner}
           />
         )}
+        {activeTab === 'orders'      && <TabOrders />}
         {activeTab === 'routing'     && <TabRouting />}
         {activeTab === 'pharmacists' && (
           <TabPharmacists
@@ -1383,6 +1385,151 @@ function TabReturns({ returns, loadReturns }) {
             </div>
           );
         })
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// TAB: Orders — read-only list of ALL orders, newest first, paged.
+// Filters: status, date range (IST days), "Unverified only". No edits.
+// ══════════════════════════════════════════════════════════════
+const ORDERS_PAGE = 25;
+const ORDER_STATUS_OPTS = [
+  ['all', 'Sab'], ['awaiting_pharmacist', 'Awaiting Pharmacist'], ['pending', 'Pending'],
+  ['confirmed', 'Confirmed'], ['preparing', 'Preparing'], ['out_for_delivery', 'Delivery Pe Hai'],
+  ['delivered', 'Delivered'], ['cancelled', 'Cancelled'],
+];
+const ORDER_STATUS_COLOR = {
+  pending: '#E65100', awaiting_pharmacist: '#E65100', confirmed: '#2563EB', preparing: '#2563EB',
+  out_for_delivery: '#7C3AED', delivered: '#1A6B3C', cancelled: '#888888',
+};
+
+function TabOrders() {
+  const [orders,    setOrders]    = useState([]);
+  const [total,     setTotal]     = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error,     setError]     = useState('');
+  const [status,    setStatus]    = useState('all');
+  const [fromDate,  setFromDate]  = useState('');
+  const [toDate,    setToDate]    = useState('');
+  const [unverifiedOnly, setUnverifiedOnly] = useState(false);
+
+  // append=false → fresh query from offset 0 (also refreshes the count);
+  // append=true → next page. `offset` is passed in, never read from state,
+  // so a slow earlier request can't skew a later one.
+  const fetchPage = async (offset, append) => {
+    let q = supabase
+      .from('orders')
+      .select('id, order_number, created_at, status, final_amount, customer_name, customer_unverified, users(name), sellers!seller_id(store_name)',
+        append ? undefined : { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + ORDERS_PAGE - 1);
+    if (status !== 'all') q = q.eq('status', status);
+    // Date inputs are IST calendar days; the DB stores UTC instants.
+    if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00+05:30`);
+    if (toDate) {
+      const next = new Date(`${toDate}T00:00:00+05:30`);
+      next.setDate(next.getDate() + 1);
+      q = q.lt('created_at', next.toISOString());
+    }
+    if (unverifiedOnly) q = q.eq('customer_unverified', true);
+    return q;
+  };
+
+  useEffect(() => {
+    let stale = false;
+    setLoading(true);
+    setError('');
+    fetchPage(0, false).then(({ data, error: err, count }) => {
+      if (stale) return;
+      if (err) { console.error('TabOrders load error:', err); setError('Orders load nahi hue'); setOrders([]); setTotal(null); }
+      else { setOrders(data || []); setTotal(count ?? null); }
+      setLoading(false);
+    });
+    return () => { stale = true; };
+  }, [status, fromDate, toDate, unverifiedOnly]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    const { data, error: err } = await fetchPage(orders.length, true);
+    if (err) { console.error('TabOrders load-more error:', err); setError('Aur orders load nahi hue'); }
+    else setOrders((prev) => [...prev, ...(data || [])]);
+    setLoadingMore(false);
+  };
+
+  const hasMore = total != null ? orders.length < total : orders.length > 0 && orders.length % ORDERS_PAGE === 0;
+  const clearFilters = () => { setStatus('all'); setFromDate(''); setToDate(''); setUnverifiedOnly(false); };
+  const filtersOn = status !== 'all' || fromDate || toDate || unverifiedOnly;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <p style={s.sectionTitle}>Saare Orders {total != null && <span style={{ fontSize: '12px', color: '#888', fontWeight: '500' }}>({total})</span>}</p>
+
+      <div style={{ ...s.formCard, padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <select style={s.inputSm} value={status} onChange={(e) => setStatus(e.target.value)}>
+          {ORDER_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <label style={{ flex: 1, fontSize: '11px', color: '#888' }}>Se
+            <input type="date" style={s.inputSm} value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} />
+          </label>
+          <label style={{ flex: 1, fontSize: '11px', color: '#888' }}>Tak
+            <input type="date" style={s.inputSm} value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#444' }}>
+          <input type="checkbox" checked={unverifiedOnly} onChange={(e) => setUnverifiedOnly(e.target.checked)} />
+          Unverified only
+        </label>
+        {filtersOn && (
+          <button onClick={clearFilters} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#1A6B3C', fontSize: '12px', fontWeight: '700', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
+            Filters hatao
+          </button>
+        )}
+      </div>
+
+      {error && <p style={{ ...s.emptyText, color: '#DC2626', padding: '4px 0' }}>{error}</p>}
+
+      {loading ? (
+        <p style={s.emptyText}>Loading...</p>
+      ) : orders.length === 0 ? (
+        <p style={s.emptyText}>Koi order nahi mila</p>
+      ) : (
+        <>
+          {orders.map((o) => (
+            <div key={o.id} style={{ ...s.formCard, padding: '14px', borderLeft: `3px solid ${ORDER_STATUS_COLOR[o.status] || '#CCCCCC'}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '700', color: '#1A1A1A' }}>
+                  #{o.order_number || String(o.id).slice(0, 8).toUpperCase()}
+                </span>
+                <span style={{ fontSize: '11px', fontWeight: '700', color: ORDER_STATUS_COLOR[o.status] || '#888', textTransform: 'capitalize' }}>
+                  {String(o.status || '').replace(/_/g, ' ')}
+                </span>
+              </div>
+              <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>
+                🕐 {formatIST(o.created_at, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+              <p style={{ fontSize: '13px', color: '#333', margin: '4px 0 0' }}>
+                👤 {o.users?.name || o.customer_name || 'Customer'} · 🏪 {o.sellers?.store_name || 'Seller assign nahi'}
+              </p>
+              <p style={{ fontSize: '13px', color: '#1A6B3C', fontWeight: '700', margin: '4px 0 0' }}>
+                ₹{(o.final_amount || 0).toLocaleString('en-IN')}
+              </p>
+              <UnverifiedCustomerBadge show={o.customer_unverified === true} />
+            </div>
+          ))}
+          {hasMore && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{ padding: '12px', borderRadius: '10px', border: '1.5px solid #1A6B3C', background: '#FFFFFF', color: '#1A6B3C', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', opacity: loadingMore ? 0.6 : 1 }}
+            >
+              {loadingMore ? 'Load ho raha hai...' : 'Aur dikhao'}
+            </button>
+          )}
+        </>
       )}
     </div>
   );
